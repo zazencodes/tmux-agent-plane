@@ -171,7 +171,9 @@ All kinds except agy can be spawned without a task. `spawn agy` requires a task 
 | `follow-sidebar <window>` | Add the sidebar to a window while it is open. The plugin runs it when a window comes on screen |
 | `sidebar` | The sidebar's agent list, run in the sidebar pane |
 | `ui` | The agent list popup |
-| `daemon` | The watcher, started by the plugin |
+| `daemon start` | Start the detached watcher; the plugin runs this automatically |
+| `daemon restart` | Gracefully restart the watcher using the current binary |
+| `daemon stop` | Gracefully stop the watcher |
 
 `<agent>` is an agent's name, tmux pane id, or `self` when the caller can be identified. An agent is `<kind>-<pane number>` (`claude-154`) until it is named with `spawn --name`, `rename`, or `r` in the sidebar. The name is stored on the agent's tmux pane. `read` and `keys` also take any pane id, so an agent stuck on a prompt before it starts can still be answered.
 
@@ -183,7 +185,7 @@ All kinds except agy can be spawned without a task. `spawn agy` requires a task 
 - **Pi** publishes PID, pane, native session, live activity, UI prompts, and completed-turn counts through the opt-in extension in `extensions/pi/`.
 - **OpenCode** publishes its active TUI session and native status, permission and question snapshots through the opt-in TUI publisher plugin in `extensions/opencode/`. Its default TUI has no external HTTP listener.
 - **Grok Build** uses the official leader roster's `working`, `needs_input` and `idle` states. Native active-session records tie each local resident session to its live TUI process. The blinking terminal title is not used for state.
-- **The daemon** scans all enabled kinds once a second for every pane on the tmux server. It marks a turn that ends off screen as `done` until the pane is on screen, writes the index to `~/.local/state/tmux-agent-plane/agents.json`, sets the `@agent_plane_status` tmux option, and sends notifications. It exits with the tmux server, and a second copy exits at once.
+- **The daemon** scans all enabled kinds once a second for every pane on the tmux server. It marks a turn that ends off screen as `done` until the pane is on screen, writes the index to `~/.local/state/tmux-agent-plane/agents.json`, sets the `@agent_plane_status` tmux option, and sends notifications. It runs detached from tmux jobs, exits with the tmux server, and starting it again keeps the existing watcher. Lifecycle and daemon errors are appended to `daemon.log` alongside the index (`$XDG_STATE_HOME/tmux-agent-plane/daemon.log` when set).
 - **The CLI and the agent list** read the index. They fail with a clear error when the daemon is not running.
 - **`send`** pastes with bracketed paste, then presses Enter, so a multi-line prompt arrives as one message.
 
@@ -196,7 +198,7 @@ All kinds except agy can be spawned without a task. `spawn agy` requires a task 
 - A Claude Code session is detected once it writes its session file, after the folder trust prompt. When `spawn` reports that an agent did not start, read its pane and answer the prompt with `keys`.
 - Codex detection relies on its default terminal title. A `tui.terminal_title` setting that drops the activity spinner hides the `working` state.
 - Claude Code's session file is internal to Claude Code and can change between releases. The daemon stops with an error on a status it does not know.
-- After upgrading, restart the daemon: `pkill -f 'tmux-agent-plane daemon'`, then reload your tmux config.
+- After upgrading, run `tmux-agent-plane daemon restart`. This stops the managed watcher through its private control socket, waits for its index lock to release, then starts the current binary. `daemon stop` stops it without a replacement. Startup failures and SIGTERM exits are recorded in `~/.local/state/tmux-agent-plane/daemon.log` (under `$XDG_STATE_HOME` when set).
 - Only the default tmux server is watched.
 
 ## Changelog
