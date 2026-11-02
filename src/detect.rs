@@ -16,6 +16,8 @@ pub struct Detected {
     pub preserve_title: bool,
     /// Durable completed turns in the published session, when available.
     pub completed_turns: Option<u64>,
+    /// Stable publisher lifetime for the monotonic completion counter.
+    pub completion_epoch: Option<String>,
 }
 
 pub fn detect(panes: &[Pane]) -> Result<Vec<Detected>> {
@@ -47,6 +49,7 @@ pub fn detect(panes: &[Pane]) -> Result<Vec<Detected>> {
                 session_id: observation.session_id,
                 preserve_title: observation.preserve_title,
                 completed_turns: observation.completed_turns,
+                completion_epoch: observation.completion_epoch,
             });
         }
     }

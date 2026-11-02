@@ -28,6 +28,7 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
             session_id: None,
             preserve_title: state == RawState::Blocked,
             completed_turns: None,
+            completion_epoch: None,
         });
     }
     Ok(found)

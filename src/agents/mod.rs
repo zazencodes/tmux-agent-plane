@@ -33,6 +33,8 @@ pub struct Observation {
     pub preserve_title: bool,
     /// Durable completed turns in the published session, when available.
     pub completed_turns: Option<u64>,
+    /// Stable publisher lifetime for the monotonic completion counter.
+    pub completion_epoch: Option<String>,
 }
 
 pub struct Launch {

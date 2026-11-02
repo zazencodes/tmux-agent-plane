@@ -81,17 +81,18 @@ pub fn run() -> Result<()> {
 /// pane is on screen.
 fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Result<Agent> {
     let was_working = before.is_some_and(|a| a.state == State::Working);
-    let completed = match d.completed_turns {
-        Some(current) => match before
-            .filter(|a| a.session_id == d.session_id)
+    let completed = match (d.completed_turns, d.completion_epoch.as_deref()) {
+        (Some(current), Some(epoch)) if !epoch.is_empty() => match before
+            .filter(|a| a.completion_epoch == d.completion_epoch)
             .and_then(|a| a.reported_completions)
         {
             Some(previous) => current
                 .checked_sub(previous)
-                .context("agent completion counter regressed within a session")?,
+                .context("agent completion counter regressed within a publisher lifetime")?,
             None => current,
         },
-        None => u64::from(was_working && d.state == RawState::Idle),
+        (None, None) => u64::from(was_working && d.state == RawState::Idle),
+        _ => bail!("agent completion counter requires a nonempty publisher epoch"),
     };
     let completions = before.map_or(0, |a| a.completions) + completed;
     let unseen = before.is_some_and(|a| a.state == State::Done) || completed > 0;
@@ -128,6 +129,7 @@ fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Result<Agent> {
         },
         completions,
         reported_completions: d.completed_turns,
+        completion_epoch: d.completion_epoch,
         visible: d.pane.visible,
     })
 }
@@ -238,6 +240,7 @@ mod tests {
             session_id: None,
             preserve_title: false,
             completed_turns: None,
+            completion_epoch: None,
         }
     }
 
@@ -305,6 +308,7 @@ mod tests {
             session_id: None,
             preserve_title: true,
             completed_turns: None,
+            completion_epoch: None,
         };
         assert_eq!(
             advance(Some(&before), observation(), 1).unwrap().title,
@@ -318,26 +322,32 @@ mod tests {
     #[test]
     fn durable_completion_counts_fast_first_turn_without_working_tick() {
         let mut d = observation(RawState::Idle, false);
-        d.session_id = Some("launch/session".into());
+        d.session_id = Some("session".into());
+        d.completion_epoch = Some("launch".into());
         d.completed_turns = Some(1);
         let a = advance(None, d, 0).unwrap();
         assert_eq!((a.state, a.completions), (State::Done, 1));
         let mut d = observation(RawState::Idle, false);
         d.session_id = a.session_id.clone();
+        d.completion_epoch = a.completion_epoch.clone();
         d.completed_turns = Some(1);
+        d.completion_epoch = Some("launch".into());
         let a = advance(Some(&a), d, 1).unwrap();
         assert_eq!(a.completions, 1);
         let mut d = observation(RawState::Idle, false);
         d.session_id = a.session_id.clone();
+        d.completion_epoch = a.completion_epoch.clone();
         d.completed_turns = Some(3);
         let a = advance(Some(&a), d, 2).unwrap();
         assert_eq!(a.completions, 3);
         let mut d = observation(RawState::Idle, false);
         d.session_id = a.session_id.clone();
+        d.completion_epoch = a.completion_epoch.clone();
         d.completed_turns = Some(2);
         assert!(advance(Some(&a), d, 3).is_err());
         let mut d = observation(RawState::Idle, false);
         d.session_id = Some("new/session".into());
+        d.completion_epoch = Some("new-launch".into());
         d.completed_turns = Some(0);
         assert_eq!(advance(Some(&a), d, 4).unwrap().completions, 3);
     }
@@ -346,10 +356,31 @@ mod tests {
     fn durable_counter_does_not_double_count_observed_working_to_idle() {
         let mut d = observation(RawState::Working, false);
         d.completed_turns = Some(0);
+        d.completion_epoch = Some("launch".into());
         let a = advance(None, d, 0).unwrap();
         let mut d = observation(RawState::Idle, false);
         d.completed_turns = Some(1);
+        d.completion_epoch = Some("launch".into());
         let a = advance(Some(&a), d, 1).unwrap();
         assert_eq!((a.state, a.completions), (State::Done, 1));
+    }
+    #[test]
+    fn native_session_navigation_does_not_replay_completions() {
+        let mut d = observation(RawState::Idle, false);
+        d.session_id = Some("first".into());
+        d.completion_epoch = Some("launch".into());
+        d.completed_turns = Some(2);
+        let a = advance(None, d, 0).unwrap();
+        for session in ["home", "second", "first"] {
+            let mut d = observation(RawState::Idle, false);
+            d.session_id = Some(session.into());
+            d.completion_epoch = a.completion_epoch.clone();
+            d.completed_turns = Some(2);
+            let next = advance(Some(&a), d, 1).unwrap();
+            assert_eq!(next.completions, 2);
+        }
+        let mut d = observation(RawState::Idle, false);
+        d.completed_turns = Some(2);
+        assert!(advance(None, d, 0).is_err());
     }
 }

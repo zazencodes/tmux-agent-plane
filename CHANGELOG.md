@@ -7,7 +7,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
-- Use published completion counters when available so wait commands observe turns that finish between daemon polls
+- Use published completion counters when available so wait commands observe turns that finish between daemon polls, without recounting turns when navigating between sessions
 
 ### Changed
 
