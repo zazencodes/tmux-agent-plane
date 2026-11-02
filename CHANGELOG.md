@@ -11,6 +11,12 @@ before 1.0, a breaking change bumps the minor version.
 - Order agents within session groups by attention and time in state; keep rows latched during navigation, with `S` to re-sort explicitly
 - Add sidebar `x` confirmation pinned to the agent’s name, state and native identity; Enter or `y` confirms, other keys cancel, remote session endings are named, and ending your attached session is refused
 
+### Fixed
+
+- Keep agents in linked windows tracked once under the first session by name, with visibility through any link; validate sidebar session-ending warnings against every linked session
+- Adopt incoming sidebar navigation before consuming buffered keys on a return visit, preserving rapid movement across sidebars
+- Cancel sidebar kill confirmation when its originating client's session or window changes
+
 ## 0.2.0 - 2026-11-02
 
 ### Added

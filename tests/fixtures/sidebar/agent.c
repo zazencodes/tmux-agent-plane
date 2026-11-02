@@ -31,10 +31,10 @@ int main(void) {
             fclose(log);
         }
         char state[32] = "working";
-        unsigned long count = 0;
+        unsigned long count = 0, identity = 0;
         FILE *input = fopen(command, "r");
         if (input) {
-            if (fscanf(input, "%31s %lu", state, &count) != 2) return 5;
+            if (fscanf(input, "%31s %lu %lu", state, &count, &identity) < 2) return 5;
             fclose(input);
         }
         struct timeval now;
@@ -42,7 +42,7 @@ int main(void) {
         unsigned long long ms = (unsigned long long)now.tv_sec * 1000 + now.tv_usec / 1000;
         FILE *output = fopen(temporary, "w");
         if (!output) return 6;
-        fprintf(output, "{\"version\":1,\"pid\":%d,\"pane_id\":\"%s\",\"session_id\":\"nav-%d\",\"completion_epoch\":\"nav-%d\",\"state\":\"%s\",\"detail\":\"Review fixture permission\",\"title\":\"Native payment review %s\",\"completed_turns\":%lu,\"updated_at\":%llu}", getpid(), pane, getpid(), getpid(), state, pane, count, ms);
+        fprintf(output, "{\"version\":1,\"pid\":%d,\"pane_id\":\"%s\",\"session_id\":\"nav-%d-%lu\",\"completion_epoch\":\"nav-%d\",\"state\":\"%s\",\"detail\":\"Review fixture permission\",\"title\":\"Native payment review %s\",\"completed_turns\":%lu,\"updated_at\":%llu}", getpid(), pane, getpid(), identity, getpid(), state, pane, count, ms);
         fclose(output);
         if (rename(temporary, path)) return 7;
         usleep(50000);

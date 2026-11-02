@@ -143,6 +143,8 @@ Run your agents as usual. Then ask any of them things like:
 | `r` | Rename the agent (sidebar), starting from its current name. `Ctrl-W` deletes a word, `Ctrl-U` clears, `Enter` saves, `Esc` cancels |
 | `q` | Close: the sidebar everywhere, or the popup (also `Esc`) |
 
+An agent in a linked window has one index row, displayed under the first session by name. It counts as visible when its pane is visible through any link.
+
 While the sidebar is open, every window has one, including windows and sessions you create later; each keeps its own selection. A window's sidebar closes with the window: when its other panes are gone, it goes too. The sidebar and popup start on the first blocked agent, or else the first done one. The agent you are looking at is shown in bold in the sidebar.
 
 View mode starts off. With `V` on, moving with arrows or `j`/`k` previews the selected agent's window/session and keeps keyboard input in its sidebar. Previews carry selection, view mode, filter and search into the destination sidebar. `V` again returns to selecting without preview. Preview keeps the sidebar active, so a done agent remains unseen; `Enter` focuses it and makes it seen. Navigation requires a unique client in the input sidebar and refuses a destination session/window used by another client.

@@ -208,6 +208,8 @@ struct KillConfirmation {
     codex_pid: Option<i32>,
     client: String,
     client_pid: String,
+    client_session: String,
+    client_window: String,
     ends_sessions: Vec<String>,
 }
 
@@ -676,6 +678,8 @@ impl Sidebar {
                 codex_pid: kill_identity(current)?,
                 client: client.name.clone(),
                 client_pid: client.pid.clone(),
+                client_session: client.session.clone(),
+                client_window: client.window.clone(),
                 ends_sessions,
             }))
         })();
@@ -692,7 +696,11 @@ impl Sidebar {
         }
         let clients = clients()?;
         let client = input_client(&clients, own)?;
-        if client.name != confirmation.client || client.pid != confirmation.client_pid {
+        if client.name != confirmation.client
+            || client.pid != confirmation.client_pid
+            || client.session != confirmation.client_session
+            || client.window != confirmation.client_window
+        {
             bail!("confirmation client changed; press x again");
         }
         let index = index::read()?;
@@ -701,13 +709,16 @@ impl Sidebar {
             .iter()
             .find(|a| a.pane == confirmation.agent.pane)
             .context("agent exited; kill cancelled")?;
-        if !same_kill_target(&confirmation.agent, current)
-            || kill_identity(current)? != confirmation.codex_pid
-        {
+        if !same_kill_target(&confirmation.agent, current) {
             bail!("agent changed; press x again");
         }
         if ending_sessions(current, client)? != confirmation.ends_sessions {
             bail!("session/window changed; press x again");
+        }
+        // Read the native signal last, after the topology queries. Pane IDs are
+        // server-lifetime identities, so an exited target cannot resolve to its neighbour.
+        if kill_identity(current)? != confirmation.codex_pid {
+            bail!("agent changed; press x again");
         }
         commands::kill_pane(&current.pane)
     }
@@ -971,6 +982,9 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
                 if let Event::Key(key) = event::read()?
                     && key.kind == KeyEventKind::Press
                 {
+                    // Arrival can race the outer poll's handoff check. Adopt immediately
+                    // before consuming a key, including when revisiting an earlier sidebar.
+                    receive_handoff(&mut sidebar, &own)?;
                     if let Some(origin) = &relay {
                         match relay_key(key, &own, origin) {
                             Ok(true) => {
@@ -979,7 +993,10 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
                                 }
                                 continue;
                             }
-                            Ok(false) => relay = None,
+                            Ok(false) => {
+                                relay = None;
+                                receive_handoff(&mut sidebar, &own)?;
+                            }
                             Err(error) => {
                                 sidebar.notice = Some(error.to_string());
                                 break;
@@ -1670,6 +1687,8 @@ mod tests {
             codex_pid: None,
             client: "client".into(),
             client_pid: "123".into(),
+            client_session: "$1".into(),
+            client_window: "@1".into(),
             ends_sessions: Vec::new(),
         }
     }

@@ -32,3 +32,13 @@ Remaining before merge/user trial:
 
 No sorting decisions remain pending: user chose option A and a visible re-sort key;
 this implementation uses S. Live proof and integration are the outstanding work.
+
+## Integration follow-up (2026-11-02)
+
+Merged into `fix-sidebar-navigation` together with confirmed x and current main.
+The expanded `tests/sidebar_navigation_live.py` now validates focused latching,
+live badges/ages, oldest-state ranking, arrivals/removals, explicit S preserving
+selection, unfocused refresh/re-entry, search/F composition and V order handoff.
+See `sidebar-navigation-findings.md` for integrated fixes, evidence and limits.
+The UI assertions parse full bordered agent rows and require separate state/age
+fields, excluding footer notifications and handling resized detached windows.

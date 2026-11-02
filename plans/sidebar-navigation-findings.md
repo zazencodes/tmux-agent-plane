@@ -167,3 +167,64 @@ There are no remaining user decisions about x: default yes is Enter/lowercase y;
 remote final-session endings are allowed with a named warning, while ending the
 originating attached session is refused. Root owns main `.agents/TODO.md` and
 receives these follow-ups; this worker does not edit it.
+
+## Integrated sidebar validation (2026-11-02)
+
+This section supersedes the WIP validation restrictions above. The handover
+explicitly authorizes private destructive fixture tests and integration on the
+worker branch. `sidebar-sort` and main through v0.2.0/Linux process detection
+are merged into `fix-sidebar-navigation`; shipped release notes remain unchanged.
+
+Review fixes:
+
+- A returning sidebar could consume a rapid movement key before adopting its
+  pending handoff. Recheck immediately before consuming keys and after relay
+  ownership returns. The original exact seven-key assertion remains in the harness.
+- Pin the confirmation client's session and window as well as its tty/PID.
+  Validate the native agent signal after the topology queries, immediately before
+  the shared `commands::kill_pane` operation.
+- `list-panes -a` repeats linked physical panes. Deduplicate by pane ID before
+  adapter scans, choose the first session by name as the canonical index location,
+  and OR visibility through every link. Sidebar kill topology still enumerates
+  every linked session. README and Unreleased describe this user-facing behavior.
+
+The expanded existing native PTY harness checks latched badges and ages, oldest
+state ordering, arrivals/removals, explicit S, unfocused refresh/re-entry, search/F
+and V handoffs; cancellation for every command class without replay; native state,
+identity, rename, exit, originating client-session and topology invalidation;
+`x Enter x Enter` with next visible selection; remote y, linked remote endings,
+visibility through a noncanonical link, attached linked final-session refusal,
+and narrow confirmation. Its command audit prohibits kill-session and its per-pane
+input audit checks every fixture, including ones already closed. Full physical
+bordered rows with separate name/state/age fields identify agents, excluding
+notifications and accounting for tmux resizing detached windows on attach.
+
+The native fixtures use a private HOME/config/state and explicit private tmux
+socket. They call no real agent CLI or model. The assigned worker pane and user
+windows/settings/daemon are untouched. No installation, restart, push or release.
+
+Validation:
+
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`
+  (84 passing), and `node --test extensions/opencode/plugin.test.mjs` (8 passing).
+- Final expanded native PTY proof: `/tmp/tap-nav-qvzkdl8x/results.json`.
+  Nine native fixtures, zero models, zero unintended input bytes and zero
+  kill-session commands. Raw PTYs, decoded snapshots and `tmux.calls` are retained.
+- Fresh footer regression: `/tmp/tap-footer-wbydidlx/results.json`.
+- Fresh blocked-send regression: `/tmp/bs-hk5liazh` and
+  `/tmp/plane-sidebar-final-blocked-send.log`.
+- User settings matched the lead's settings hash baseline after fixture tests;
+  `/tmp/plane-sidebar-settings-check.json` records the comparison.
+
+The final run also passes explicit V/search/F composition and waits for a newly
+spawned fixture to be selected before issuing its kill confirmation. Earlier
+complete product-source proof is retained at `/tmp/tap-nav-rdpokc1q/results.json`.
+
+Remaining limits: native signal, client and topology validation followed by
+kill-pane consists of fresh snapshots, not an atomic transaction across agent
+processes and tmux. Pane IDs do not retarget to replacement neighbours, but an
+external change after the last check can race the close. No claim of atomic
+state/topology isolation is made. Arbitrary command-mode mixtures overlapping
+cross-PTY preview switches also retain the previously documented ordering limit;
+search editing remains in one PTY. Live evidence is macOS/tmux 3.7c with native
+publishers, not real providers or Linux PTYs.

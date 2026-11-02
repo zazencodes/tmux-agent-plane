@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import shlex
 import shutil
@@ -70,21 +71,31 @@ def tmux(*args, check=True):
 def plane(*args):
     result = subprocess.run([str(BINARY), *args], env=ENV, check=True, text=True,
                             capture_output=True, timeout=20)
-    return result.stdout.strip()
+    output = result.stdout.strip()
+    if args[0] == 'spawn':
+        name, pane, _ = output.split()
+        FIXTURES[name] = pane
+    return output
 
 
 def index():
     return json.loads((STATE / "agents.json").read_text())
 
 
+def ranked_names():
+    priority = {"blocked": 0, "done": 1, "working": 2, "idle": 3}
+    return [a["name"] for a in sorted(index()["agents"], key=lambda a: (
+        a["session"], priority[a["state"]], a["state_since"], a["location"], a["pane"]))]
+
+
 def agent(name):
     return next(a for a in index()["agents"] if a["name"] == name)
 
 
-def change(name, state, count):
+def change(name, state, count, identity=0):
     path = ROOT / (agent(name)["pane"] + ".command")
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(f"{state} {count}")
+    temporary.write_text(f"{state} {count} {identity}")
     temporary.replace(path)
 
 
@@ -202,7 +213,282 @@ def settle(seconds=1.2):
         time.sleep(0.03)
 
 
+def shown_names(client):
+    # Decode full physical rows: tmux can scale a detached window's sidebar on attach.
+    # Borders + icon + separate state/age fields exclude headings, controls and notices.
+    client.drain()
+    return [match.group(1) for line in client.screen.display
+            if (match := re.match(
+                r'^│[ ▌][◆✓●○] (nav-[a-z]+)\s+(blocked|done|working|idle)\s+\S+\s*│', line))]
+
+
+def extra_checks(client):
+    # Begin from a stable command mode; accepted searches deliberately re-rank.
+    base_window = tmux('display-message', '-p', '-t', '=scratch:0', '#{window_id}')
+    base_sidebar = sidebar_pane(base_window)
+    tmux('switch-client', '-c', client.context()[0], '-t', base_sidebar)
+    wait('stable base sidebar', lambda: client.context()[1] == base_sidebar and 'V off' in client.text())
+    query(client, '')
+    client.key(b'S')
+    wait('initial attention ranking', lambda: shown_names(client) == ranked_names())
+    initial = shown_names(client)
+    # New blocked priority must update its badge while leaving its original row in place.
+    change('nav-idle', 'blocked', 0)
+    wait('live blocked badge latched', lambda: agent('nav-idle')['state'] == 'blocked' and
+         any('nav-idle' in line and 'blocked' in line for line in client.text().splitlines()))
+    assert shown_names(client) == initial
+    def idle_badge():
+        client.drain()
+        return next(line for line in client.screen.display
+                    if re.match(r'^│[ ▌]◆ nav-idle\s+blocked\s+', line))
+    before_age = idle_badge()
+    settle(1.1)
+    assert shown_names(client) == initial and idle_badge() != before_age
+    client.snapshot('sort-latched-live-badges')
+    # Oldest blocked in this session ranks first, independent of tmux location.
+    change('nav-done', 'blocked', 3)
+    wait('second blocked', lambda: agent('nav-done')['state'] == 'blocked')
+    assert shown_names(client) == initial
+    selection = client.selected()
+    client.key(b'S')
+    wait('explicit S ranks oldest blocked', lambda: shown_names(client) == ranked_names())
+    assert client.selected() == selection
+    expected = shown_names(client)
+    assert expected.index('nav-idle') < expected.index('nav-done')
+    change('nav-work', 'working', 0)
+    wait('working badge stays latched', lambda: agent('nav-work')['state'] == 'working' and
+         any('nav-work' in line and 'working' in line for line in client.text().splitlines()))
+    assert shown_names(client) == expected
+    # Leave for the nonagent base shell. Unfocused refresh and re-entry use live rank.
+    tmux('select-pane', '-t', '=scratch:0.1')
+    wait('unfocused sidebar ranks again', lambda: shown_names(client) == ranked_names())
+    tmux('switch-client', '-c', client.context()[0], '-t', base_sidebar)
+    wait('fresh keyboard visit', lambda: client.context()[1] == base_sidebar and shown_names(client) == ranked_names())
+    expected = shown_names(client)
+    client.snapshot('sort-unfocused-and-reentry')
+    plane('spawn', 'pi', '--in', 'window', '--cwd', str(ROOT), '--name', 'nav-new')
+    SPAWNED.append('nav-new')
+    plane('follow-sidebar', agent('nav-new')['window'])
+    change('nav-new', 'blocked', 0)
+    wait('arrival appended within session', lambda: agent('nav-new')['state'] == 'blocked' and
+         shown_names(client) == expected + ['nav-new'])
+    plane('kill', 'nav-new')
+    SPAWNED.remove('nav-new')
+    wait('removed row disappears', lambda: shown_names(client) == expected)
+    # Search acceptance ranks fresh state, while V handoff preserves that order.
+    query(client, 'nav-')
+    expected = ranked_names()
+    wait('search acceptance ranks', lambda: shown_names(client) == expected)
+    client.key(b'V')
+    previewed(client, selection)
+    wait('handoff draws complete ranking', lambda: shown_names(client) == expected)
+    client.key(b'F')
+    blocked = [name for name in ranked_names() if agent(name)['state'] == 'blocked']
+    wait('V search and blocked filter compose', lambda: 'F blocked' in client.text() and
+         shown_names(client) == blocked and '\\ nav-' in client.text())
+    previewed(client, selection)
+    client.key(b'F')
+    previewed(client, 'nav-work')
+    wait('filtered preview carries query and working order', lambda: 'F working' in client.text() and
+         '\\ nav-' in client.text() and shown_names(client) == ['nav-work'])
+    client.key(b'F')  # Idle is empty; deliberate F skips it and returns to All.
+    wait('filtered preview returns to all ranking', lambda: 'F all' in client.text() and
+         shown_names(client) == ranked_names())
+    client.key(b'V')
+    wait('preview off before kill', lambda: 'V off' in client.text())
+    client.snapshot('sort-handoff-order')
+    tmux('switch-client', '-c', client.context()[0], '-t', base_sidebar)
+    wait('base retains its view setting', lambda: client.context()[1] == base_sidebar and 'V on' in client.text())
+    client.key(b'V')
+    wait('base view off', lambda: 'V off' in client.text())
+    # Existing filter/navigation proof covers F/search composition in detail.
+    query(client, '')
+    baseline = shown_names(client)
+    selection = client.selected()
+    context = client.context()
+    # Every command class cancels and consumes its key. No movement, mode/filter/query,
+    # rename or close action may be replayed after the confirmation disappears.
+    for cancel in [b'n', b'\x1b', b'j', b'\x1b[B', b'V', b'F', b'S', b'r', b'q', b'x', b'Y', b'\\', b'\x19']:
+        client.key(b'x')
+        wait('kill prompt', lambda: '? Y/n' in client.text())
+        client.key(cancel)
+        wait('cancel consumes key', lambda: '? Y/n' not in client.text())
+        assert client.selected() == selection and client.context() == context
+        assert shown_names(client) == baseline and 'V off' in client.text() and 'F all' in client.text()
+        assert '\\ nav-' not in client.text() and 'save' not in client.footer()
+    client.snapshot('kill-cancel-no-replay')
+    # Native state and identity are validated independently of daemon refresh.
+    query(client, 'nav-idle')
+    client.key(b'x')
+    wait('state pin prompt', lambda: '? Y/n' in client.text())
+    change('nav-idle', 'working', 0)
+    settle(0.15)
+    client.key(b'y')
+    wait('state pin refused', lambda: 'changed' in client.footer())
+    assert agent('nav-idle')
+    wait('new state indexed', lambda: agent('nav-idle')['state'] == 'working')
+    settle(0.7)
+    client.key(b'x')
+    wait('identity pin prompt', lambda: '? Y/n' in client.text())
+    change('nav-idle', 'working', 0, identity=1)
+    settle(0.15)
+    client.key(b'y')
+    wait('native identity refused', lambda: 'changed' in client.footer())
+    wait('new identity indexed', lambda: agent('nav-idle')['session_id'].endswith('-1'))
+    settle(0.7)
+    client.key(b'x')
+    wait('rename pin prompt', lambda: '? Y/n' in client.text())
+    plane('rename', 'nav-idle', 'nav-renamed')
+    SPAWNED[SPAWNED.index('nav-idle')] = 'nav-renamed'
+    client.key(b'y')
+    wait('rename pin refused', lambda: 'changed' in client.footer() or 'renamed' in client.footer())
+    wait('rename indexed', lambda: agent('nav-renamed'))
+    plane('rename', 'nav-renamed', 'nav-idle')
+    SPAWNED[SPAWNED.index('nav-renamed')] = 'nav-idle'
+    wait('rename restored', lambda: agent('nav-idle'))
+    settle(0.7)
+    client.snapshot('kill-state-identity-rename-refused')
+    # A tty/PID may stay identical while its session changes through a linked window.
+    # The confirmation belongs to its original client context, even on the same pane.
+    query(client, 'nav-idle')
+    client.key(b'x')
+    wait('client context pin prompt', lambda: '? Y/n' in client.text())
+    pinned_context = client.context()
+    tmux('new-session', '-d', '-s', 'zzz-context', '-t', 'scratch')
+    tmux('switch-client', '-c', pinned_context[0], '-t',
+         f'=zzz-context:{pinned_context[2]}.{pinned_context[1]}')
+    client.key(b'y')
+    wait('client session change refused', lambda: 'client changed' in client.footer())
+    assert agent('nav-idle')
+    client.snapshot('kill-client-session-refused')
+    tmux('switch-client', '-c', client.context()[0], '-t',
+         f'=scratch:{pinned_context[2]}.{pinned_context[1]}')
+    # No query: kill successive rows in one PTY burst; selection advances immediately,
+    # even while the daemon still contains a just-closed pane.
+    query(client, '')
+    client.key(b'S')
+    settle(0.25)
+    names = shown_names(client)
+    # Keep nav-idle for the original rename-exit proof. Select an adjacent pair that
+    # does not include it or the remote target (remote warning gets its own test).
+    while client.selected() not in ['nav-work', 'nav-done']:
+        client.key(b'j')
+        settle(0.1)
+    first = client.selected()
+    names = shown_names(client)
+    position = names.index(first)
+    second = names[position + 1] if position + 1 < len(names) else names[position - 1]
+    # Only assert/destructively exercise if both are the intended local pair.
+    assert {first, second} == {'nav-work', 'nav-done'}, (names, first, second)
+    panes = {name: agent(name)['pane'] for name in (first, second)}
+    client.key(b'x\rx\r')
+    wait('x Enter x Enter closes exactly both targets', lambda: all(
+        not any(a['pane'] == pane for a in index()['agents']) for pane in panes.values()))
+    for name in (first, second):
+        SPAWNED.remove(name)
+    assert client.selected() == 'nav-idle'
+    client.snapshot('kill-enter-next-visible')
+    # Remote final session warning plus lowercase y confirmation.
+    query(client, 'nav-away')
+    client.key(b'x')
+    wait('named remote last-session warning', lambda: 'ends session nav-away? Y/n' in client.text())
+    client.snapshot('kill-remote-session-warning')
+    extra_pane = tmux('new-window', '-d', '-t', '=nav-away:', '-P', '-F', '#{pane_id}', '/bin/sh')
+    client.key(b'y')
+    wait('changed session ending invalidates confirmation', lambda: 'session/window changed' in client.footer())
+    assert agent('nav-away')
+    tmux('kill-pane', '-t', extra_pane)  # Private nonagent fixture infrastructure only.
+    client.key(b'x')
+    wait('remote warning after topology restored', lambda: 'ends session nav-away? Y/n' in client.text())
+    client.key(b'y')
+    wait('remote y close', lambda: not any(a['name'] == 'nav-away' for a in index()['agents']))
+    SPAWNED.remove('nav-away')
+    wait('remote final session disappears', lambda: 'nav-away' not in tmux('list-sessions', '-F', '#{session_name}').splitlines())
+    # A disappearing target cannot redirect y to the remaining agent.
+    plane('spawn', 'pi', '--in', 'window', '--cwd', str(ROOT), '--name', 'nav-exit')
+    SPAWNED.append('nav-exit')
+    plane('follow-sidebar', agent('nav-exit')['window'])
+    query(client, 'nav-exit')
+    selected(client, 'nav-exit')
+    exiting_window = agent('nav-exit')['window']
+    client.key(b'x')
+    wait('exit pin prompt', lambda: '? Y/n' in client.text())
+    plane('kill', 'nav-exit')
+    SPAWNED.remove('nav-exit')
+    calls_before_exit_confirmation = len((ROOT / 'tmux.calls').read_text().splitlines())
+    client.key(b'y')
+    wait('exited pin refused', lambda: '? Y/n' not in client.text() and
+         ('exited' in client.footer() or 'changed' in client.footer() or
+          ('tmux list-panes -t ' + exiting_window) in client.footer()))
+    exit_confirmation_calls = [json.loads(line) for line in
+        (ROOT / 'tmux.calls').read_text().splitlines()[calls_before_exit_confirmation:]]
+    assert not any(call[0] == 'kill-pane' for call in exit_confirmation_calls)
+    assert agent('nav-idle')
+    # Linked final sessions: same physical pane appears in both session topologies.
+    plane('spawn', 'pi', '--in', 'session', '--cwd', str(ROOT), '--name', 'nav-linked')
+    SPAWNED.append('nav-linked')
+    linked = agent('nav-linked').copy()
+    plane('follow-sidebar', linked['window'])
+    tmux('new-session', '-d', '-s', 'linked-copy', '-t', 'nav-linked')
+    wait('linked pane tracked once at canonical location', lambda:
+         agent('nav-linked')['session'] == 'linked-copy' and
+         sum(a['pane'] == linked['pane'] for a in index()['agents']) == 1)
+    linked_client = Client('nav-linked')
+    CLIENTS.append(linked_client)
+    wait('visible through noncanonical session link', lambda: agent('nav-linked')['visible'])
+    linked_client.snapshot('linked-visible-through-other-session')
+    assert agent('nav-linked')['session'] == 'linked-copy'
+    linked_client.close()
+    CLIENTS.remove(linked_client)
+    settle(0.7)
+    query(client, 'nav-linked')
+    selected(client, 'nav-linked')
+    client.key(b'x')
+    wait('linked remote warning', lambda: 'ends session' in client.text() and '? Y/n' in client.text())
+    client.snapshot('kill-linked-remote-warning')
+    client.key(b'y')
+    wait('linked remote close', lambda: not any(a['pane'] == linked['pane'] for a in index()['agents']))
+    SPAWNED.remove('nav-linked')
+    wait('both linked final sessions disappear', lambda: not {'nav-linked', 'linked-copy'}.intersection(
+        tmux('list-sessions', '-F', '#{session_name}').splitlines()))
+    # Refuse the attached final session, including the sidebar-alone consequence.
+    plane('spawn', 'pi', '--in', 'session', '--cwd', str(ROOT), '--name', 'nav-final')
+    SPAWNED.append('nav-final')
+    final = agent('nav-final').copy()
+    plane('follow-sidebar', final['window'])
+    tmux('switch-client', '-c', client.context()[0], '-t', sidebar_pane(final['window']))
+    tmux('new-session', '-d', '-s', 'zzz-final-link', '-t', 'nav-final')
+    query(client, 'nav-final')
+    selected(client, 'nav-final')
+    client.key(b'x')
+    wait('attached final session refused', lambda: 'attached session' in client.footer())
+    client.snapshot('kill-attached-final-refused')
+    assert agent('nav-final')
+    tmux('switch-client', '-c', client.context()[0], '-t', context[1])
+    plane('kill', 'nav-final')
+    SPAWNED.remove('nav-final')
+    # Restore the remaining target and normal sidebar width for the original final tests.
+    plane('spawn', 'pi', '--in', 'window', '--cwd', str(ROOT), '--name', 'nav-survivor')
+    SPAWNED.append('nav-survivor')
+    plane('follow-sidebar', agent('nav-survivor')['window'])
+    query(client, 'nav-idle')
+    tmux('resize-pane', '-t', client.context()[1], '-x', '20')
+    client.key(b'x')
+    wait('narrow confirmation readable', lambda: '(working)? Y/n' in client.text())
+    client.snapshot('kill-narrow-confirmation')
+    client.key(b'n')
+    wait('narrow cancelled', lambda: '? Y/n' not in client.text())
+    tmux('resize-pane', '-t', client.context()[1], '-x', '38')
+    assert not any(json.loads(line)[0] == 'kill-session' for line in (ROOT / 'tmux.calls').read_text().splitlines())
+    return {'latched_sort_live_badges': True, 'oldest_state_first': True,
+            'arrivals_removals': True, 'unfocused_and_reentry_rank': True, 'S_preserves_selection': True, 'search_V_sort_handoff': True, 'V_search_F_combination': True,
+            'kill_cancel_without_replay': True, 'kill_native_state_identity_rename_exit_pin': True,
+            'kill_x_Enter_x_Enter_next_visible': True, 'kill_remote_y': True, 'kill_topology_change_pin': True,
+            'kill_linked_sessions': True, 'kill_client_session_change_pin': True, 'kill_attached_final_refusal': True, 'kill_session_commands': 0}
+
+
 SPAWNED = []
+FIXTURES = {}
 RESULTS = {}
 try:
     tmux("-f", "/dev/null", "new-session", "-d", "-s", "scratch", "-x", "100", "-y", "28", "/bin/sh")
@@ -247,7 +533,7 @@ try:
     client.key(b"\x1b")
     wait("query cleared before burst", lambda: "\\ search" in client.text())
     selected(client, "nav-work")
-    ordered = [a["name"] for a in index()["agents"]]
+    ordered = ranked_names()
     expected = ordered[(ordered.index("nav-work") + 3) % len(ordered)]
     client.key(b"jjj")
     previewed(client, expected)
@@ -415,8 +701,8 @@ try:
     assert client.context() == source_context
     client.snapshot("failed-switch-clears-handoff")
     (ROOT / "switch.fail").unlink()
+    extended_results = extra_checks(client)
     # Rename cancellation when its original target leaves: never rename the next row.
-    client.key(b"V")
     query(client, "nav-idle")
     client.key(b"r")
     wait("rename active", lambda: "save" in client.footer())
@@ -432,8 +718,10 @@ try:
     client.snapshot("narrow-empty")
     assert "V off" in client.text() and "F all" in client.text()
     wait("event expired", lambda: index().get("recent_event") is None and "jump" in client.footer())
-    for name in SPAWNED:
-        assert input_bytes(name) == (b"x" if name == "nav-done" else b""), (name, input_bytes(name))
+    for name, pane in FIXTURES.items():
+        path = ROOT / (pane + '.input')
+        value = path.read_bytes() if path.exists() else b''
+        assert value == (b'x' if name == 'nav-done' else b''), (name, value)
     calls = [json.loads(line) for line in (ROOT / "tmux.calls").read_text().splitlines()]
     first_preview = next(i for i, call in enumerate(calls) if call[0] == "switch-client" and "-c" in call)
     switches = [call for call in calls[first_preview:] if call[0] == "switch-client"]
@@ -445,9 +733,12 @@ try:
     first_sidebar = next(i for i, call in enumerate(calls)
                          if call[0] == "set-option" and "@agent-plane-sidebar" in call)
     relays = [call for call in calls[first_sidebar:] if call[0] == "send-keys"]
-    assert relays and all(call[call.index("-t") + 1] in marked for call in relays), relays
+    assert relays and all(call[call.index("-t") + 1] in marked or
+                          (call[call.index("-t") + 1] in FIXTURES.values() and call[-1] in ('pi', 'Enter'))
+                          for call in relays), relays
+    assert not any(call[0] == 'kill-session' for call in calls)
     assert not any(call[0] in ("copy-mode", "clock-mode") for call in calls)
-    RESULTS = {"passed": True, "native_fixtures": 4, "models_used": 0,
+    RESULTS = {**extended_results, "passed": True, "native_fixtures": len(FIXTURES), "models_used": 0,
         "same_window": True, "cross_window_and_session": True, "view_off_selects_only": True,
         "burst_jjj_exact_net_movement": True, "timed_stream_seven_j_exact_net_movement": True,
         "arrow_handoff_identity": True, "timed_mixed_text_arrows_backspace_order": True,
@@ -458,6 +749,10 @@ try:
         "independent_clients_unchanged": True, "shared_target_and_ambiguous_origin_refused": True,
         "failed_switch_clears_handoff": True, "rename_exit_cannot_retarget": True,
         "narrow_empty": True, "unintended_agent_input": 0}
+except Exception:
+    for client in CLIENTS:
+        client.snapshot('failure')
+    raise
 finally:
     for name in SPAWNED:
         plane("kill", name)
