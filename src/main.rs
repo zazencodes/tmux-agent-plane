@@ -2,6 +2,7 @@ mod agents;
 mod commands;
 mod daemon;
 mod detect;
+mod diagnostics;
 mod index;
 mod sidebar;
 mod tmux;
