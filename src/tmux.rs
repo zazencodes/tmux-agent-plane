@@ -20,6 +20,20 @@ pub fn run(args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// Match the session's configured shell, including a session-local override.
+pub fn default_shell(pane: Option<&str>) -> Result<String> {
+    let mut args = vec!["display-message", "-p"];
+    if let Some(pane) = pane {
+        args.extend(["-t", pane]);
+    }
+    args.push("#{default-shell}");
+    let shell = run(&args)?.trim().to_owned();
+    if shell.is_empty() {
+        bail!("tmux default-shell is empty; cannot launch an interactive shell");
+    }
+    Ok(shell)
+}
+
 pub fn run_with_stdin(args: &[&str], input: &str) -> Result<()> {
     let mut child = Command::new("tmux")
         .args(args)

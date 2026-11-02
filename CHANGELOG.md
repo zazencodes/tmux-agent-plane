@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Fixed
+
+- Deliver long and multi-line spawn tasks intact by passing the launch command directly to the configured interactive login shell; startup files and aliases load before the agent runs, and a shell stays open after it exits
+
 ## 0.2.0 - 2026-11-02
 
 ### Added

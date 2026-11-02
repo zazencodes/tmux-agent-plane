@@ -58,7 +58,7 @@ tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|w
 
 ## Starting an agent
 
-- `spawn` types the agent command into a fresh shell, so the user's aliases and flags apply, and the shell stays when the agent exits.
+- `spawn` passes the agent command directly to tmux’s `default-shell` as an interactive login shell command, after startup files load. Aliases and flags apply, long and multi-line tasks arrive intact, and a fresh interactive login shell stays when the agent exits. It supplies its own command rather than tmux’s `default-command`.
 - `--in pane` (default) splits a known caller's pane. Codex callers must use `--in window` or `--in session`. Use a window for independent work or a session for a separate project; follow the requested placement when caller identity permits it.
 - Give the full task as the prompt: the new agent has none of your context. Say which files, what done looks like, and what to report back.
 - Always name agents you spawn (`--name reviewer`), following the naming rule above.

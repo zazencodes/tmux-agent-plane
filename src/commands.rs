@@ -2,13 +2,13 @@
 
 use crate::index::{self, Agent, Index, Kind, State};
 use crate::tmux;
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use std::borrow::Cow;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 const POLL: Duration = Duration::from_millis(300);
-/// How long a new agent gets to show up in the index after its command is typed.
+/// How long a new agent gets to show up in the index after its shell is launched.
 const SPAWN_DETECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -353,6 +353,11 @@ pub fn spawn(s: Spawn) -> Result<()> {
         self_pane()?
     };
 
+    // Pass the command as argv to an interactive login shell. Shell startup finishes
+    // before -c is evaluated; no terminal input can race startup or hit its line limit.
+    let shell = tmux::default_shell(me.as_deref())?;
+    let command = shell_launch(&shell, launch.command, &launch.args);
+    let shell_args = [shell.as_str(), "-ilc", command.as_str()];
     let pane = match (s.placement, &me) {
         (Placement::Pane, None) => {
             bail!("--in pane splits the caller's pane, so it must run inside tmux")
@@ -368,6 +373,9 @@ pub fn spawn(s: Spawn) -> Result<()> {
             cwd,
             "-t",
             me,
+            shell_args[0],
+            shell_args[1],
+            shell_args[2],
         ])?,
         (Placement::Window, _) => {
             // `session_id:` puts the window at the next free index of the caller's session.
@@ -385,6 +393,7 @@ pub fn spawn(s: Spawn) -> Result<()> {
             if let Some(name) = &s.name {
                 args.extend(["-n", name]);
             }
+            args.extend(shell_args);
             tmux::run(&args)?
         }
         (Placement::Session, _) => {
@@ -392,6 +401,7 @@ pub fn spawn(s: Spawn) -> Result<()> {
             if let Some(name) = &s.name {
                 args.extend(["-s", name]);
             }
+            args.extend(shell_args);
             tmux::run(&args)?
         }
     };
@@ -405,20 +415,25 @@ pub fn spawn(s: Spawn) -> Result<()> {
         tmux::run(&["set-option", "-p", "-t", &pane, "@agent-plane-parent", me])?;
     }
 
-    // Typed into the pane's shell, so the user's aliases and wrappers apply and the shell
-    // stays when the agent exits.
-    let mut command = launch.command.to_string();
-    for arg in &launch.args {
-        command.push(' ');
-        command.push_str(&shell_quote(arg));
-    }
-    tmux::run(&["send-keys", "-t", &pane, "-l", &command])?;
-    tmux::run(&["send-keys", "-t", &pane, "Enter"])?;
-
     let started = Instant::now();
     let agent = loop {
-        if let Some(agent) = index::read()?.agents.into_iter().find(|a| a.pane == pane) {
+        // The shell can launch before pane metadata is set. Wait for the daemon
+        // to publish the assigned identity, not its earlier default-name snapshot.
+        if let Some(agent) = index::read()?.agents.into_iter().find(|a| {
+            a.pane == pane
+                && a.name == name
+                && me
+                    .as_ref()
+                    .is_none_or(|parent| a.parent.as_ref() == Some(parent))
+        }) {
             break agent;
+        }
+        let dead = tmux::run(&["display-message", "-p", "-t", &pane, "#{pane_dead}"])
+            .with_context(|| {
+                format!("spawn shell or agent exited in pane {pane} before detection")
+            })?;
+        if dead.trim() == "1" {
+            bail!("spawn shell or agent exited in pane {pane} before detection");
         }
         if started.elapsed() > SPAWN_DETECT_TIMEOUT {
             bail!(
@@ -447,6 +462,20 @@ pub fn spawn(s: Spawn) -> Result<()> {
     Ok(())
 }
 
+/// Keep the command name literal so interactive aliases/functions apply. Arguments
+/// are shell data, and after the agent returns a fresh login shell owns the terminal.
+fn shell_launch(shell: &str, command: &str, args: &[String]) -> String {
+    let mut script = command.to_owned();
+    for arg in args {
+        script.push(' ');
+        script.push_str(&shell_quote(arg));
+    }
+    script.push_str("\nexec ");
+    script.push_str(&shell_quote(shell));
+    script.push_str(" -il");
+    script
+}
+
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
@@ -454,6 +483,29 @@ fn shell_quote(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn launch_arguments_round_trip_through_shell() {
+        // Exercise the generated shell program, including newlines, command
+        // substitution syntax, empty arguments and a task beyond terminal line limits.
+        let args = vec![
+            String::new(),
+            "quotes '\" $HOME $(exit 37) `exit 38`; | & <> \\ \t\nnext line\n".into(),
+            "é漢🙂".repeat(3000),
+        ];
+        let script = shell_launch("/usr/bin/true", "printf '%s\\0'", &args);
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &script])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let expected: Vec<u8> = args
+            .iter()
+            .flat_map(|arg| arg.bytes().chain(std::iter::once(0)))
+            .collect();
+        assert_eq!(output.stdout, expected);
+    }
+
     #[test]
     fn codex_never_uses_inherited_tmux_pane() {
         assert!(resolve_caller(true, Some("%14".into())).is_err());

@@ -149,7 +149,7 @@ Desktop notifications keep the task or blocked detail and work with the sidebar 
 
 ### Agent launch syntax
 
-`spawn` starts a persistent interactive session. It types the literal command name into your shell so aliases apply, and quotes each argument separately.
+`spawn` starts a persistent interactive session in tmux’s configured `default-shell`. It passes the launch command directly to an interactive login shell, which loads your startup files before running the agent, so aliases and flags apply even with long or multi-line tasks. Each argument is quoted separately. When the agent exits, a fresh interactive login shell stays open. `spawn` supplies its own launch command, so tmux’s `default-command` is not used.
 
 | Kind | Command sent to the shell with a task |
 | --- | --- |
