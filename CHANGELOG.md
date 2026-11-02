@@ -9,6 +9,7 @@ before 1.0, a breaking change bumps the minor version.
 
 - A daemon that finds Claude Code and Codex agents in every tmux pane and tracks whether each is working, blocked, done or idle, without hooks
 - The `@agent_plane_status` status bar segment, and tmux and desktop notifications when an agent finishes or blocks off screen
-- The agent list (`prefix + A`), with a live preview of the selected agent and `Enter` to jump to it
+- The agent sidebar (`prefix + S`): a live list of every agent down the left of the window, with `Enter` to jump to one
+- The agent list popup (`prefix + A`), with a live preview of the selected agent and `Enter` to jump to it
 - The `list`, `read`, `send`, `keys`, `wait`, `focus`, `kill` and `spawn` commands, so agents can see and steer each other
 - The `tmux-agent-plane` agent skill

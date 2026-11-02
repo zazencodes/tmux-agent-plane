@@ -2,6 +2,7 @@ mod commands;
 mod daemon;
 mod detect;
 mod index;
+mod sidebar;
 mod tmux;
 mod ui;
 
@@ -22,6 +23,13 @@ enum Cmd {
     Daemon,
     /// Open the agent list with a live preview; Enter jumps to the agent
     Ui,
+    /// Run the always-on agent list (shown in the sidebar pane)
+    Sidebar,
+    /// Open the sidebar on the left of a window, or close it
+    ToggleSidebar {
+        /// tmux window id or target, e.g. `@104` or `work:2`
+        window: String,
+    },
     /// List running agents (`*` marks the caller)
     List {
         #[arg(long)]
@@ -98,6 +106,8 @@ fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Cmd::Daemon => daemon::run(),
         Cmd::Ui => ui::run(),
+        Cmd::Sidebar => sidebar::run(),
+        Cmd::ToggleSidebar { window } => sidebar::toggle(&window),
         Cmd::List { json } => commands::list(json),
         Cmd::Read { target, lines } => commands::read(&target, lines),
         Cmd::Send {

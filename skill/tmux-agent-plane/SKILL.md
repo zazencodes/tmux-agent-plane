@@ -28,6 +28,7 @@ tmux-agent-plane send <agent> "<prompt>" [--wait] [--timeout S]
 tmux-agent-plane keys <agent> <key>...    # tmux key names: Enter Escape Up Down Tab 1 2 y n
 tmux-agent-plane wait <agent> [--timeout S]
 tmux-agent-plane focus <agent>            # bring it on screen for the user
+tmux-agent-plane toggle-sidebar "$TMUX_PANE"  # open/close the user's agent sidebar beside you
 tmux-agent-plane kill <agent>             # close its pane, ending it
 tmux-agent-plane spawn claude|codex ["<task>"] [--in pane|window|session] [--cwd DIR] [--name NAME] [--wait] [--timeout S]
 ```

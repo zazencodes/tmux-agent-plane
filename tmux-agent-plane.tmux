@@ -8,7 +8,9 @@ if ! command -v tmux-agent-plane >/dev/null; then
   exit 1
 fi
 
-# prefix + A: the agent list.
+# prefix + S: the agent sidebar on the left of the current window, toggled.
+tmux bind-key S run-shell "tmux-agent-plane toggle-sidebar '#{window_id}'"
+# prefix + A: the agent list with a large preview, in a popup.
 tmux bind-key A display-popup -E -w 90% -h 85% -T " agents " "tmux-agent-plane ui"
 
 # The daemon exits when the tmux server does; a second copy exits at once.

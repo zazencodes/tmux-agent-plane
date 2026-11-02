@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 const REFRESH: Duration = Duration::from_millis(500);
 
-fn colour(state: State) -> Color {
+pub(crate) fn colour(state: State) -> Color {
     match state {
         State::Blocked => Color::Rgb(0xf3, 0x8b, 0xa8),
         State::Done => Color::Rgb(0xa6, 0xe3, 0xa1),
@@ -23,7 +23,7 @@ fn colour(state: State) -> Color {
     }
 }
 
-fn icon(state: State) -> &'static str {
+pub(crate) fn icon(state: State) -> &'static str {
     match state {
         State::Blocked => "◆",
         State::Done => "✓",
@@ -32,7 +32,7 @@ fn icon(state: State) -> &'static str {
     }
 }
 
-fn age(since_ms: u64) -> String {
+pub(crate) fn age(since_ms: u64) -> String {
     let secs = index::now_ms().saturating_sub(since_ms) / 1000;
     match secs {
         0..60 => format!("{secs}s"),
