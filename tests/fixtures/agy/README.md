@@ -13,4 +13,4 @@ Reproduce folder trust and official session overrides without changing user trus
 python3 scripts/test-agy.py --binary target/debug/tmux-agent-plane --folder-trust --session-trust-overrides
 ```
 
-Both harness modes use a private HOME for the agent and daemon and assert the real settings SHA-256 is unchanged, even after failure. The trust mode proves acceptance from native saved trust and presence/DB artifacts. Terminal snapshots are human-review evidence only. See `plans/agy-trust-fix-findings.md` for accepted advanced-mode limits and the recorded early isolation mistake.
+Both harness modes use a private HOME for the agent and daemon and assert the real settings SHA-256 is unchanged, even after failure. The trust mode proves acceptance from native saved trust and presence/DB artifacts. Terminal snapshots are human-review evidence only.

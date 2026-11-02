@@ -65,6 +65,7 @@ fn run_inner() -> Result<()> {
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         let error = std::io::Error::last_os_error();
         if error.kind() == std::io::ErrorKind::WouldBlock {
+            diagnostics::record("daemon", "watcher skipped: daemon.lock is already owned")?;
             return Ok(());
         }
         return Err(error).context("locking daemon index");
@@ -84,11 +85,7 @@ fn run_inner() -> Result<()> {
         if SHUTDOWN.load(Ordering::Relaxed) {
             return Ok(());
         }
-        let panes = match tmux::list_panes() {
-            Ok(panes) => panes,
-            Err(_) if !tmux::server_running() => return Ok(()),
-            Err(e) => return Err(e),
-        };
+        let panes = tmux::list_panes().context("listing tmux panes")?;
         let now = index::now_ms();
         let before = prev.clone();
         let batch = fold(&mut prev, detect::detect(&panes)?, &panes, now);

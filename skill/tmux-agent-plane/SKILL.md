@@ -67,7 +67,9 @@ tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|w
 
 ## Launch requirements
 
-`spawn` chooses each kind's interactive syntax: positional tasks for Claude/Codex, `grok -- <task>`, `pi -- <task>`, `opencode --prompt <task>`, and `agy --prompt-interactive <task>`. Install the Pi/OpenCode publishers or enable Grok leader mode before spawning those kinds. `spawn agy` requires a task and fails immediately without one. An agy started by hand appears after its first message; before then, address its pane ID with `read` or `keys`. A spawn timeout can mean an optional integration is missing; read the pane and check the documented opt-in setup.
+`spawn` chooses each kind's interactive syntax: positional tasks for Claude/Codex, `grok -- <task>`, `pi -- <task>`, `opencode --prompt <task>`, and `agy --prompt-interactive <task>`. Install the Pi/OpenCode publishers or enable Grok leader mode before spawning those kinds. `spawn agy` requires a task and fails immediately without one. An agy started by hand appears after its first message and native folder trust acceptance; before then, address its pane ID with `read` or `keys`. A spawn timeout can mean an optional integration is missing; read the pane and check the documented opt-in setup.
+
+Antigravity named projects (including resumed/forked projects) and `--settings` overlays excluding the cwd from `trustedWorkspaces` stay untracked because live trust cannot be proven.
 
 Pi/OpenCode publish durable completion counters. Other kinds are sampled once per second, so `send --wait` and task-bearing `spawn --wait` can time out if an entire turn finishes between polls. Do not report such a timeout as a successful test.
 
@@ -79,6 +81,10 @@ Pi/OpenCode publish durable completion counters. Other kinds are sampled once pe
 - `wait <agent>` returns as soon as the agent is not `working`, so it returns at once for an idle agent. Use it to wait for work already running; use `send --wait` for work you start.
 - A turn wait returns when the turn ends or blocks; plain `wait` also returns immediately for an already idle/done agent. Sampled kinds have the fast-turn limitation above. Pass `--timeout` shorter than your shell tool limit, or run the wait in the background, then `read` the result.
 - A command fails loudly on a timeout, when the agent exits, or when the daemon is not running.
+
+## Daemon diagnostics
+
+A failed kind or observation is withdrawn while healthy agents keep tracking. The status bar shows active faults. Read `${XDG_STATE_HOME:-$HOME/.local/state}/tmux-agent-plane/daemon.log` for the full cause and recovery. Process/pane snapshot, index and log failures stop the watcher. `tmux-agent-plane daemon start` starts it when stopped; `tmux-agent-plane daemon restart` gracefully restarts the managed watcher on the current binary. Never guess a daemon PID or stop one with broad process matching.
 
 ## Blocked agents
 

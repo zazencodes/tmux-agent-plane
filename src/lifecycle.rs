@@ -234,6 +234,11 @@ fn serve() -> Result<()> {
     // Keep ownership through socket cleanup, beyond daemon::run's index lock.
     let control_lock = open_lock("daemon-control.lock").map_err(fatal_error)?;
     if !flock(&control_lock, libc::LOCK_EX | libc::LOCK_NB).map_err(fatal_error)? {
+        diagnostics::record(
+            "lifecycle",
+            "worker skipped: daemon-control.lock is already owned",
+        )
+        .map_err(log_error)?;
         return Ok(());
     }
     let (path, listener) = (|| -> Result<_> {

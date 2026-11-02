@@ -17,7 +17,7 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE = Path(tempfile.mkdtemp(prefix="pi-live-", dir=ROOT / "target"))
+BASE = Path(tempfile.mkdtemp(prefix="pi-live-", dir="/tmp"))
 CLI = ROOT / "target/debug/tmux-agent-plane"
 PI = shutil.which("pi")
 TMUX = shutil.which("tmux")
@@ -26,7 +26,7 @@ ENV = os.environ.copy()
 ENV.pop("TMUX_PANE", None)
 SOCKET = BASE / "tmux.sock"
 ENV.update(PI_CODING_AGENT_DIR=str(BASE / "config"), XDG_STATE_HOME=str(BASE / "state"),
-           PI_OFFLINE="1", TMUX=str(SOCKET) + ",0,0")
+           HOME=str(BASE / "home"), PI_OFFLINE="1", TMUX=str(SOCKET) + ",0,0")
 DAEMON = None
 AGENTS = set()
 RESULTS = []
@@ -70,7 +70,7 @@ def eventually(predicate):
 def start_daemon():
     global DAEMON
     with (BASE / "daemon.log").open("a") as log:
-        DAEMON = subprocess.Popen([str(CLI), "daemon"], env=ENV, stdout=log, stderr=log)
+        DAEMON = subprocess.Popen([str(CLI), "daemon", "serve"], env=ENV, stdout=log, stderr=log)
     eventually(lambda: (BASE / "state/tmux-agent-plane/agents.json").exists())
     time.sleep(1.1)
     assert DAEMON.poll() is None, (BASE / "daemon.log").read_text()
@@ -85,7 +85,7 @@ def spawn(name, task=None):
 
 
 try:
-    for directory in ["config/extensions", "state", "scratch", "bin"]:
+    for directory in ["config/extensions", "state", "scratch", "bin", "home"]:
         (BASE / directory).mkdir(parents=True)
     (BASE / "config/extensions/tmux-agent-plane").symlink_to(ROOT / "extensions/pi")
     (BASE / "config/extensions/local-provider.ts").symlink_to(ROOT / "tests/fixtures/pi/live-provider.ts")
@@ -165,11 +165,15 @@ try:
     eventually(lambda: all(a["name"] != "pi-fast" for a in agents()))
     AGENTS.remove("pi-fast")
     plane("send", "pi-one", "/plane-freeze")
-    eventually(lambda: DAEMON.poll() is not None)
-    assert "stale or future live Pi status" in (BASE / "daemon.log").read_text()
-    time.sleep(2)  # Test recovery only; expiry never supplies an agent state.
-    start_daemon()
-    print("PASS: identity, working/blocked/idle/done, same cwd, waits, fast turns, reload/new/resume, visibility, exit, stale rejection")
+    # Stale publishers are withdrawn, while the daemon/index survive and recover.
+    eventually(lambda: not agents())
+    assert DAEMON.poll() is None
+    diagnostic_log = BASE / "state/tmux-agent-plane/daemon.log"
+    assert "stale or future live Pi status" in diagnostic_log.read_text()
+    eventually(lambda: len(agents()) == len(AGENTS))
+    assert DAEMON.poll() is None
+    assert "[scan:pi] recovered" in diagnostic_log.read_text()
+    print("PASS: identity, working/blocked/idle/done, same cwd, waits, fast turns, reload/new/resume, visibility, exit, stale withdrawal/recovery")
 finally:
     if DAEMON and DAEMON.poll() is not None:
         time.sleep(2)

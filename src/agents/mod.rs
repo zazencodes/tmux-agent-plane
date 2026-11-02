@@ -10,6 +10,7 @@ use crate::index::State;
 use crate::tmux::Pane;
 use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,8 +59,9 @@ pub struct ScanContext<'a> {
 pub struct Process {
     pub pid: i32,
     pub parent: i32,
+    /// BSD executable path on macOS; kernel comm name on Linux.
     pub executable: String,
-    /// The complete argument string published by ps; it is not shell-parsed.
+    /// Published command line, flattened without shell parsing.
     pub argv: String,
 }
 pub struct ProcessTable {
@@ -67,7 +69,21 @@ pub struct ProcessTable {
 }
 impl ProcessTable {
     pub fn load() -> Result<Self> {
-        // A wide fixed executable column preserves paths containing spaces on BSD and GNU ps.
+        #[cfg(target_os = "linux")]
+        {
+            Self::load_proc(std::path::Path::new("/proc"))
+        }
+        #[cfg(target_os = "macos")]
+        {
+            Self::load_bsd_ps()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        bail!("process snapshots require macOS or Linux")
+    }
+    #[cfg(target_os = "macos")]
+    fn load_bsd_ps() -> Result<Self> {
+        // BSD ps pads comm to this header's width, preserving paths containing spaces.
+        // procps does not: Linux reads /proc and never uses this layout.
         let exe_header = "E".repeat(1024);
         let format = format!("pid=PID,ppid=PPID,comm={exe_header},args=ARGV");
         let out = Command::new("ps")
@@ -77,9 +93,10 @@ impl ProcessTable {
         if !out.status.success() {
             bail!("ps failed: {}", String::from_utf8_lossy(&out.stderr).trim());
         }
-        Self::parse(&String::from_utf8(out.stdout).context("ps output is not UTF-8")?)
+        Self::parse_bsd_ps(&String::from_utf8(out.stdout).context("ps output is not UTF-8")?)
     }
-    fn parse(output: &str) -> Result<Self> {
+    #[cfg(any(target_os = "macos", test))]
+    fn parse_bsd_ps(output: &str) -> Result<Self> {
         let mut lines = output.lines();
         let header = lines.next().context("ps output has no header")?;
         let exe = header.find("EEE").context("ps executable header missing")?;
@@ -112,6 +129,36 @@ impl ProcessTable {
         }
         Ok(Self { processes })
     }
+    #[cfg(any(target_os = "linux", test))]
+    fn load_proc(root: &std::path::Path) -> Result<Self> {
+        let mut processes = HashMap::new();
+        for entry in std::fs::read_dir(root).context("listing proc process records")? {
+            let entry = entry.context("reading proc process entry")?;
+            let Some(pid) = entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse::<i32>().ok())
+                .filter(|pid| *pid > 0)
+            else {
+                continue;
+            };
+            match read_proc_process(&entry.path(), pid) {
+                Ok(Some(process)) => {
+                    processes.insert(pid, process);
+                }
+                Ok(None) => {} // The process changed identity while its files were read.
+                Err(error)
+                    if error.downcast_ref::<std::io::Error>().is_some_and(|e| {
+                        e.kind() == std::io::ErrorKind::NotFound
+                            || e.raw_os_error() == Some(libc::ESRCH)
+                    }) => {}
+                Err(error) => {
+                    return Err(error).with_context(|| format!("reading proc process {pid}"));
+                }
+            }
+        }
+        Ok(Self { processes })
+    }
     pub fn descendants_named(&self, root: i32, name: &str) -> Vec<&Process> {
         self.processes
             .values()
@@ -140,6 +187,63 @@ impl ProcessTable {
     }
 }
 
+/// Field 2 is parenthesized and may itself contain spaces, newlines and parentheses.
+/// Fields after its final ')' are numeric except the single-character process state.
+#[cfg(any(target_os = "linux", test))]
+#[derive(PartialEq, Eq)]
+struct ProcIdentity {
+    pid: i32,
+    parent: i32,
+    name: String,
+    started: u64,
+}
+#[cfg(any(target_os = "linux", test))]
+fn parse_proc_stat(stat: &str, expected_pid: i32) -> Result<ProcIdentity> {
+    let (pid, rest) = stat.split_once(" (").context("proc stat command missing")?;
+    let (name, tail) = rest
+        .rsplit_once(')')
+        .context("proc stat command unterminated")?;
+    let fields: Vec<_> = tail.split_whitespace().collect();
+    let pid: i32 = pid.parse().context("invalid proc stat pid")?;
+    if pid != expected_pid || fields.len() < 20 || fields[0].len() != 1 {
+        bail!("invalid proc stat identity");
+    }
+    Ok(ProcIdentity {
+        pid,
+        parent: fields[1].parse().context("invalid proc stat parent")?,
+        name: name.to_owned(),
+        // starttime is field 22; the suffix starts at field 3 (state).
+        started: fields[19].parse().context("invalid proc stat starttime")?,
+    })
+}
+#[cfg(any(target_os = "linux", test))]
+fn read_proc_process(path: &std::path::Path, pid: i32) -> Result<Option<Process>> {
+    let read_identity = || -> Result<ProcIdentity> {
+        parse_proc_stat(
+            &std::fs::read_to_string(path.join("stat")).context("reading proc stat")?,
+            pid,
+        )
+    };
+    let before = read_identity()?;
+    let bytes = std::fs::read(path.join("cmdline")).context("reading proc cmdline")?;
+    let after = read_identity()?;
+    // Reject detected PID reuse, comm changes or reparenting between reads.
+    // Command-line bytes may still change within one process lifetime, as with ps.
+    if before != after {
+        return Ok(None);
+    }
+    let argv = std::str::from_utf8(&bytes)
+        .context("proc cmdline is not UTF-8")?
+        .trim_end_matches('\0')
+        .replace('\0', " ");
+    Ok(Some(Process {
+        pid,
+        parent: after.parent,
+        executable: after.name,
+        argv,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,10 +259,140 @@ mod tests {
                 "/Applications/Agent App/codex",
                 "codex task with spaces",
             );
-        let table = ProcessTable::parse(&output).unwrap();
+        let table = ProcessTable::parse_bsd_ps(&output).unwrap();
         assert_eq!(table.processes[&2].argv, "codex task with spaces");
         assert_eq!(table.descendants_named(1, "codex").len(), 1);
         assert!(!table.is_descendant(1, 2));
+    }
+    struct ProcFixture(std::path::PathBuf);
+    impl ProcFixture {
+        fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "plane-proc-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+        fn process(&self, pid: i32, parent: i32, name: &str, cmdline: &[u8]) {
+            let path = self.0.join(pid.to_string());
+            std::fs::create_dir(&path).unwrap();
+            std::fs::write(path.join("stat"), stat(pid, parent, name)).unwrap();
+            std::fs::write(path.join("cmdline"), cmdline).unwrap();
+        }
+    }
+    impl Drop for ProcFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn stat(pid: i32, parent: i32, name: &str) -> String {
+        format!("{pid} ({name}) S {parent} {}12345 0\n", "0 ".repeat(17))
+    }
+    #[test]
+    fn linux_proc_snapshot_preserves_names_arguments_and_ancestry() {
+        let fixture = ProcFixture::new();
+        fixture.process(100, 0, "shell", b"shell\0");
+        fixture.process(
+            101,
+            100,
+            "codex",
+            b"/tmp/Agent App/codex\0task with spaces\0",
+        );
+        fixture.process(102, 100, "name )\n(with", b"changed title\0\0\0");
+        fixture.process(103, 0, "kworker", b"");
+        fixture.process(104, 100, "exited", b"exited\0");
+        std::fs::remove_file(fixture.0.join("104/cmdline")).unwrap();
+        // Reproduce the reported procps shape without copying real command lines.
+        // It is not a Linux input: /proc is canonical even if procps is installed.
+        let header = format!("    PID    PPID {} ARGV\n", "E".repeat(1024));
+        let procps = header + "    101     100 codex           /tmp/Agent App/codex task\n";
+        assert!(ProcessTable::parse_bsd_ps(&procps).is_err());
+        std::fs::write(fixture.0.join("procps-output"), procps).unwrap();
+        let table = ProcessTable::load_proc(&fixture.0).unwrap();
+        assert_eq!(table.processes[&101].executable, "codex");
+        assert_eq!(
+            table.processes[&101].argv,
+            "/tmp/Agent App/codex task with spaces"
+        );
+        assert_eq!(table.processes[&102].executable, "name )\n(with");
+        assert_eq!(table.processes[&102].argv, "changed title");
+        assert!(table.processes[&103].argv.is_empty());
+        assert!(!table.processes.contains_key(&104));
+        assert_eq!(table.descendants_named(100, "codex").len(), 1);
+        assert!(!table.is_descendant(100, 101));
+    }
+    #[test]
+    fn linux_proc_malformed_or_unreadable_records_fail_loudly() {
+        assert!(parse_proc_stat("101 (codex) S 100", 101).is_err());
+        assert!(parse_proc_stat(&stat(101, 100, "codex"), 102).is_err());
+        let fixture = ProcFixture::new();
+        fixture.process(101, 100, "codex", b"codex\0");
+        // A directory is a deterministic read failure, even when tests run as root.
+        std::fs::remove_file(fixture.0.join("101/cmdline")).unwrap();
+        std::fs::create_dir(fixture.0.join("101/cmdline")).unwrap();
+        let error = ProcessTable::load_proc(&fixture.0).err().unwrap();
+        assert!(format!("{error:#}").contains("reading proc process 101: reading proc cmdline"));
+    }
+    #[test]
+    fn live_process_snapshot_has_named_child_with_spaced_executable_path() {
+        struct Child(std::process::Child);
+        impl Drop for Child {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let fixture = ProcFixture::new();
+        let directory = fixture.0.join("Agent App");
+        std::fs::create_dir(&directory).unwrap();
+        let executable = directory.join("codex");
+        std::fs::copy("/bin/sleep", &executable).unwrap();
+        let child = Child(
+            std::process::Command::new(&executable)
+                .arg("30")
+                .spawn()
+                .unwrap(),
+        );
+        let table = ProcessTable::load().unwrap();
+        let process = &table.processes[&(child.0.id() as i32)];
+        assert_eq!(process.executable.rsplit('/').next(), Some("codex"));
+        #[cfg(target_os = "macos")]
+        assert_eq!(process.executable, executable.to_str().unwrap());
+        #[cfg(target_os = "linux")]
+        assert_eq!(process.executable, "codex");
+        assert_eq!(process.argv, format!("{} 30", executable.display()));
+        assert!(table.is_descendant(process.pid, std::process::id() as i32));
+        assert_eq!(
+            table
+                .descendants_named(std::process::id() as i32, "codex")
+                .len(),
+            1
+        );
+        let panes = [Pane {
+            id: "%fixture".into(),
+            pid: std::process::id() as i32,
+            session: "fixture".into(),
+            window: "@fixture".into(),
+            window_index: 0,
+            pane_index: 0,
+            cwd: directory.to_string_lossy().into_owned(),
+            title: "⠼ synthetic task".into(),
+            visible: false,
+            name: "fixture".into(),
+            parent: String::new(),
+        }];
+        // Exercise the daemon's real process-to-pane adapter with the native snapshot.
+        let observations = codex::scan(&ScanContext {
+            panes: &panes,
+            processes: &table,
+        })
+        .unwrap();
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].pane_id, "%fixture");
+        assert_eq!(observations[0].state, RawState::Working);
     }
     #[test]
     fn live_process_snapshot_has_caller() {

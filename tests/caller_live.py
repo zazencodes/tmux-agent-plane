@@ -3,7 +3,7 @@
 
 Run after cargo build: python3 tests/caller_live.py. Requires Codex and tmux.
 No prompt is submitted. Agent jobs use the branch CLI; raw tmux only manages
-isolated infrastructure. Results remain under target/caller-live-*/.
+isolated infrastructure. Results remain under /tmp/caller-live-*/.
 """
 import json
 import os
@@ -15,11 +15,13 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-WORK = Path(tempfile.mkdtemp(prefix="caller-live-", dir=ROOT / "target"))
+WORK = Path(tempfile.mkdtemp(prefix="caller-live-", dir="/tmp"))
 BIN = WORK / "bin"
 SCRATCH = WORK / "scratch"
 BIN.mkdir()
 SCRATCH.mkdir()
+(WORK / "home").mkdir()
+(WORK / "codex").mkdir()
 SERVER = "plane-caller-" + str(os.getpid())
 TMUX = shutil.which("tmux")
 assert TMUX and shutil.which("codex"), "tmux and Codex must be installed"
@@ -34,7 +36,8 @@ for name, command in {
     path.chmod(0o755)
 
 ENV = os.environ.copy()
-ENV.update(PATH=str(BIN) + os.pathsep + ENV["PATH"], XDG_STATE_HOME=str(WORK / "state"))
+ENV.update(PATH=str(BIN) + os.pathsep + ENV["PATH"], XDG_STATE_HOME=str(WORK / "state"),
+           HOME=str(WORK / "home"), CODEX_HOME=str(WORK / "codex"))
 # Model the real Codex tool-shell identity shape with an intentionally stale pane.
 ENV.update(CODEX_THREAD_ID="caller-fixture", TMUX_PANE="%999999")
 CLI = str(ROOT / "target/debug/tmux-agent-plane")
@@ -51,8 +54,10 @@ subprocess.run([
     TMUX, "-L", SERVER, "-f", "/dev/null", "new-session", "-d", "-s", "harness",
     "-c", str(SCRATCH),
 ], env=ENV, check=True)
+for option in ("default-shell", "default-command"):
+    subprocess.run([TMUX, "-L", SERVER, "set-option", "-g", option, "/bin/sh"], env=ENV, check=True)
 log = (WORK / "daemon.log").open("w")
-daemon = subprocess.Popen([CLI, "daemon"], env=ENV, stdout=log, stderr=log)
+daemon = subprocess.Popen([CLI, "daemon", "serve"], env=ENV, stdout=log, stderr=log)
 owned = []
 try:
     for _ in range(40):

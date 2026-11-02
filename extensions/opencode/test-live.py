@@ -2,7 +2,7 @@
 """Real OpenCode TUI integration against a local model, with no external inference.
 Run from the repository root after building a binary with OpenCode registered:
   python3 extensions/opencode/test-live.py --binary target/debug/tmux-agent-plane
-Artifacts (config, status files, model requests and daemon log) stay under target/.
+Artifacts (config, status files, model requests and daemon log) stay under the printed /tmp/ path.
 """
 import argparse
 import json
@@ -26,9 +26,7 @@ def main():
     tmux = shutil.which("tmux")
     if not tmux or not shutil.which("opencode"):
         raise RuntimeError("tmux and OpenCode 1.19.3 must be installed")
-    target = repo / "target"
-    target.mkdir(exist_ok=True)
-    run = Path(tempfile.mkdtemp(prefix="opencode-live-", dir=target))
+    run = Path(tempfile.mkdtemp(prefix="opencode-live-", dir="/tmp"))
     print(f"Artifacts: {run}", flush=True)
     server_name = run.name
     env = dict(os.environ)
@@ -36,6 +34,8 @@ def main():
         env.pop(key, None)
     for kind in ("STATE", "CONFIG", "DATA", "CACHE"):
         env[f"XDG_{kind}_HOME"] = str(run / kind.lower())
+    (run / "home").mkdir()
+    env["HOME"] = str(run / "home")
     env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
     env["OPENCODE_DISABLE_PROJECT_CONFIG"] = "1"
     shim = run / "bin"
@@ -128,8 +128,10 @@ def main():
     try:
         subprocess.run([tmux, "-L", server_name, "-f", "/dev/null", "new-session", "-d", "-s", "research", "-c", str(scratch)], env=env, check=True)
         started = True
+        for option in ("default-shell", "default-command"):
+            subprocess.run([tmux, "-L", server_name, "set-option", "-g", option, "/bin/sh"], env=env, check=True)
         with (run / "daemon.log").open("w") as log:
-            daemon = subprocess.Popen([str(binary), "daemon"], env=env, stdout=log, stderr=subprocess.STDOUT)
+            daemon = subprocess.Popen([str(binary), "daemon", "serve"], env=env, stdout=log, stderr=subprocess.STDOUT)
         until(lambda: (run / "state/tmux-agent-plane/agents.json").exists(), "daemon startup")
         for name in ("oc-fast", "oc-second"):
             names.add(name)

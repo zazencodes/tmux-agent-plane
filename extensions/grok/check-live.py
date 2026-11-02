@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Real Grok smoke check against a locally built, registered plane binary (macOS)."""
+import atexit
 import json
 import os
 import pty
@@ -12,14 +13,17 @@ import tempfile
 import time
 
 plane = Path(sys.argv[1]).resolve(strict=True)
-root = Path(tempfile.mkdtemp(prefix="grok-plane-live-"))
+root = Path(tempfile.mkdtemp(prefix="grok-plane-live-", dir="/tmp"))
 print(f"Evidence: {root}", flush=True)
 socket_name = root.name
 home = root / "grok"
 home.mkdir()
 (home / "config.toml").write_text("[cli]\nuse_leader = true\n")
 auth = Path(os.environ.get("GROK_HOME", str(Path.home() / ".grok"))) / "auth.json"
-(home / "auth.json").symlink_to(auth.resolve(strict=True))
+atexit.register((home / "auth.json").unlink, missing_ok=True)
+shutil.copy2(auth.resolve(strict=True), home / "auth.json")
+(home / "auth.json").chmod(0o600)
+(root / "home").mkdir()
 (root / "scratch").mkdir()
 (root / "bin").mkdir()
 tmux = shutil.which("tmux")
@@ -34,11 +38,14 @@ env = os.environ.copy()
 for name in ("TMUX", "TMUX_PANE"):
     env.pop(name, None)
 env.update(PATH=f"{root / 'bin'}:{env['PATH']}", XDG_STATE_HOME=str(root / "state"),
+           HOME=str(root / "home"),
            GROK_HOME=str(home), GROK_LEADER_SOCKET=str(home / "leader.sock"),
            GROK_FOLDER_TRUST="0", GROK_DISABLE_AUTOUPDATER="1")
 subprocess.run([tmux, "-L", socket_name, "-f", "/dev/null", "new-session", "-d", "-s", "check", "-c", str(root / "scratch")], env=env, check=True)
+for option in ("default-shell", "default-command"):
+    subprocess.run([tmux, "-L", socket_name, "set-option", "-g", option, "/bin/sh"], env=env, check=True)
 daemon_log = (root / "daemon.log").open("w")
-daemon = subprocess.Popen([str(plane), "daemon"], env=env, stdout=daemon_log, stderr=subprocess.STDOUT)
+daemon = subprocess.Popen([str(plane), "daemon", "serve"], env=env, stdout=daemon_log, stderr=subprocess.STDOUT)
 owned = []
 
 def call(*args, timeout=65, check=True):

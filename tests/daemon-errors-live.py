@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run against a built binary. Entirely private server/state/PTY, native fixture publishers.
 
-python3 tests/daemon-errors-live.py target/debug/tmux-agent-plane [--serve]
---serve selects the lifecycle integration's internal foreground verb.
+python3 tests/daemon-errors-live.py target/debug/tmux-agent-plane
+The harness uses the lifecycle integration's internal foreground daemon serve.
 """
 import argparse
 import json
@@ -18,7 +18,6 @@ import time
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("binary", type=Path)
-parser.add_argument("--serve", action="store_true")
 args = parser.parse_args()
 binary = args.binary.resolve()
 real_tmux = shutil.which("tmux")
@@ -47,6 +46,8 @@ for tool in ("osascript", "notify-send"):
 wrapper = bin_dir / "tmux"
 wrapper.write_text(
     "#!/bin/sh\n"
+    f'if [ -e {shlex.quote(str(root / "listing.fail"))} ]; then\n'
+    '  case "$1" in list-panes|list-sessions) echo "injected $1 failure" >&2; exit 31;; esac\nfi\n'
     f'if [ "$1" = refresh-client ] && [ -e {shlex.quote(str(root / "refresh.fail"))} ]; then\n'
     "  echo 'injected refresh-client failure' >&2; exit 29\nfi\n"
     f"exec {shlex.quote(real_tmux)} -L {shlex.quote(server)} \"$@\"\n"
@@ -109,7 +110,7 @@ def change(kind, value):
 
 def start_daemon():
     stderr = open(root / f"stderr-{len(daemons)}.log", "w")
-    process = subprocess.Popen([str(binary), "daemon", *(["serve"] if args.serve else [])], env=env, stdout=stderr, stderr=stderr)
+    process = subprocess.Popen([str(binary), "daemon", "serve"], env=env, stdout=stderr, stderr=stderr)
     daemons.append(process)
     return process
 
@@ -180,14 +181,16 @@ try:
     wait_for("other completion during notification failure", lambda: agents()["fixture-claude"]["completions"] == 1)
     private_client = tmux("list-clients", "-F", "#{client_name}").splitlines()[0]
     messages = tmux("show-messages", "-t", private_client)
-    assert "fixture-pi finished" in messages and "fixture-claude finished" in messages, messages
+    assert "fixture-pi finished" not in messages and "fixture-claude finished" not in messages, messages
+    recent = snapshot()["recent_event"]
+    assert recent["name"] == "fixture-claude" and recent["state"] == "done", recent
     assert daemon.poll() is None
     assert "injected desktop failure" in log()
     assert log().count("[notification:desktop] ERROR:") == 1
     (root / "desktop.fail").unlink()
     wait_for("notification recovery", lambda: "[notification:desktop] recovered" in log() and "notification:desktop" not in status())
     assert (root / "desktop.delivered").read_text().count("delivered") == 2
-    print("PASS failed desktop delivery keeps both agents/index/tmux notifications alive; only failed deliveries retried", flush=True)
+    print("PASS failed desktop delivery keeps both agents/index/sidebar events alive; only failed deliveries retried", flush=True)
 
     change("pi", "idle 3")
     wait_for("counter regression", lambda: "fixture-pi" not in agents() and "advance:pi:" in status())
@@ -226,6 +229,29 @@ try:
     wait_for("restart index fresh", lambda: snapshot()["updated_at"] > first and len(agents()) == 2 and "daemon stopped" not in status())
     for kind in ("claude", "pi"):
         plane("kill", f"fixture-{kind}")
+    # A failed server probe used to hide the original pane-listing error.
+    (root / "listing.fail").touch()
+    wait_for("tmux failure exits loudly", lambda: daemon.poll() is not None)
+    assert daemon.returncode != 0
+    assert "[fatal] listing tmux panes: tmux list-panes" in log()
+    assert "injected list-panes failure" in log()
+    assert "daemon stopped" in status()
+    (root / "listing.fail").unlink()
+    daemon = start_daemon()
+    wait_for("recovery after tmux failure", lambda: "daemon stopped" not in status())
+    print("PASS tmux pane-listing failure exits nonzero with original reason; restart recovers", flush=True)
+    duplicate = start_daemon()
+    wait_for("duplicate worker exits", lambda: duplicate.poll() is not None)
+    assert duplicate.returncode == 0
+    assert "worker skipped: daemon-control.lock is already owned" in log()
+    assert daemon.poll() is None
+    print("PASS duplicate worker records its exit reason and leaves the watcher alive", flush=True)
+    # All fixture agents are closed; remove the private base shell/server.
+    tmux("kill-server")
+    wait_for("server shutdown exits loudly", lambda: daemon.poll() is not None)
+    assert daemon.returncode != 0
+    assert log().count("[fatal] listing tmux panes: tmux list-panes") == 2
+    print("PASS real server shutdown records a fatal pane-listing reason", flush=True)
     (root / "messages.log").write_text(messages)
     print("All daemon diagnostics live checks passed; fixtures cleaned up.", flush=True)
 finally:
