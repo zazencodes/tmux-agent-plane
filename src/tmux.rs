@@ -96,7 +96,8 @@ pub fn list_panes() -> Result<Vec<Pane>> {
     ];
     let format = fields.join(&SEP.to_string());
     let out = run(&["list-panes", "-a", "-F", &format])?;
-    out.lines()
+    let panes = out
+        .lines()
         .map(|line| {
             let f: Vec<&str> = line.split(SEP).collect();
             if f.len() != fields.len() {
@@ -116,7 +117,23 @@ pub fn list_panes() -> Result<Vec<Pane>> {
                 parent: f[10].to_string(),
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    Ok(physical_panes(panes))
+}
+
+/// A linked window is listed once per session, but its processes belong to one
+/// physical pane. Choose the first session by name and retain visibility in any link.
+fn physical_panes(mut panes: Vec<Pane>) -> Vec<Pane> {
+    panes.sort_by(|a, b| a.session.cmp(&b.session));
+    let mut unique: Vec<Pane> = Vec::new();
+    for pane in panes {
+        if let Some(existing) = unique.iter_mut().find(|p| p.id == pane.id) {
+            existing.visible |= pane.visible;
+        } else {
+            unique.push(pane);
+        }
+    }
+    unique
 }
 
 pub fn clients() -> Result<Vec<String>> {
@@ -147,4 +164,35 @@ pub fn jump(session: &str, window: &str, pane: &str) -> Result<()> {
     run(&["select-window", "-t", window])?;
     run(&["select-pane", "-t", pane])?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linked_windows_share_one_process_identity_and_any_link_can_be_visible() {
+        let first = Pane {
+            id: "%1".into(),
+            pid: 10,
+            session: "alpha".into(),
+            window: "@1".into(),
+            window_index: 1,
+            pane_index: 0,
+            cwd: "/tmp".into(),
+            title: "agent".into(),
+            visible: false,
+            name: "agent".into(),
+            parent: String::new(),
+        };
+        let mut linked = first.clone();
+        linked.session = "zeta".into();
+        linked.window_index = 9;
+        linked.visible = true;
+        let panes = physical_panes(vec![linked, first]);
+        assert_eq!(panes.len(), 1);
+        assert_eq!(panes[0].session, "alpha");
+        assert_eq!(panes[0].window_index, 1);
+        assert!(panes[0].visible);
+    }
 }

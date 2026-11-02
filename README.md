@@ -132,12 +132,28 @@ Run your agents as usual. Then ask any of them things like:
 | --- | --- |
 | `prefix + S` | Open the sidebar in every window and move into it; close it everywhere when it is open |
 | `prefix + A` | Open the agent list popup, with a preview |
-| `j` `k` / `↓` `↑` | Move |
+| `j` `k` / `↓` `↑` | Move selection; in sidebar view mode, preview the selected agent’s window/session |
+| `V` | Toggle sidebar view mode (off initially): preview while keeping keyboard input in the sidebar |
+| `S` | Re-sort agents within each session by attention, then longest in state; keep the selected pane |
+| `F` | Cycle sidebar state filter: All → Blocked → Done → Working → Idle → All, skipping states with no search matches when pressed |
+| `\` | Edit sidebar search across name, task, blocked detail, location and directory; matches ignore case. `Enter` keeps the query and previews its selection when view mode is on, `Esc` cancels the edit, `Ctrl-W` deletes a word, `Ctrl-U` clears; arrows move selection while editing |
+| `Esc` | Clear sidebar search outside editing; close the popup |
 | `Enter` | Jump to the agent. The sidebar stays open; the popup closes |
+| `x` | Ask to kill the selected agent’s pane. The footer pins its name/state; `Enter` or lowercase `y` confirms, every other key cancels without replay. Refuses to end your attached session; warns if a remote session would end |
 | `r` | Rename the agent (sidebar), starting from its current name. `Ctrl-W` deletes a word, `Ctrl-U` clears, `Enter` saves, `Esc` cancels |
 | `q` | Close: the sidebar everywhere, or the popup (also `Esc`) |
 
-While the sidebar is open, every window has one, including windows and sessions you create later; each scrolls on its own. A window's sidebar closes with the window: when its other panes are gone, it goes too. The popup opens on the first blocked agent, or else the first done one. The agent you are looking at is shown in bold in the sidebar.
+An agent in a linked window has one index row, displayed under the first session by name. It counts as visible when its pane is visible through any link.
+
+While the sidebar is open, every window has one, including windows and sessions you create later; each keeps its own selection. A window's sidebar closes with the window: when its other panes are gone, it goes too. The sidebar and popup start on the first blocked agent, or else the first done one. The agent you are looking at is shown in bold in the sidebar.
+
+View mode starts off. With `V` on, moving with arrows or `j`/`k` previews the selected agent's window/session and keeps keyboard input in its sidebar. Previews carry selection, view mode, filter and search into the destination sidebar. `V` again returns to selecting without preview. Preview keeps the sidebar active, so a done agent remains unseen; `Enter` focuses it and makes it seen. Navigation requires a unique client in the input sidebar and refuses a destination session/window used by another client.
+
+Session headings stay in place. Within each session, agents start in blocked, done, working, idle order, longest in state first. While the sidebar has keyboard focus, the order is latched: badges and ages update in place, new agents append in their group, and removed agents disappear. `S`, changing the filter, or accepting a search rebuilds the order while preserving the selected pane. View-mode handoffs carry the same order snapshot.
+
+The view/filter/query controls stay visible above the list. Filters and search combine; a filter stays selected if its last match changes state or exits, until you press `F` again. Search updates as you type and pauses view mode, including arrow navigation, so editing stays in the current sidebar. With `V` on, the mode row shows `paused` and the footer offers `Enter` to preview. `Enter` keeps the query and previews the final selection when view mode is on; another `Enter` deliberately jumps to the selected agent. `Esc` while editing restores the previous query and selection; outside editing it clears search. While editing, letters such as `V`, `F`, `r` and `q` are query text.
+
+`x` closes the agent's pane using the same operation as `tmux-agent-plane kill`. It does not issue `kill-session`. The confirmation takes priority over notices and event footers, with separate name/state lines in narrow sidebars. It is pinned to the target's native identity and state; an exited, changed or renamed agent requires a new confirmation. After a successful kill, selection moves to the next visible agent (or the previous one at the end). Killing a final pane may naturally remove its window; if that would also end a remote session, the prompt names the session. Ending the originating client's attached session is refused.
 
 ### Notifications
 

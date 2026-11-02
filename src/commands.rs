@@ -280,9 +280,15 @@ pub fn focus(target: &str) -> Result<()> {
 pub fn kill(target: &str) -> Result<()> {
     let index = index::read()?;
     let agent = find_agent(&index, target)?;
-    tmux::run(&["kill-pane", "-t", &agent.pane])?;
+    kill_pane(&agent.pane)?;
     println!("killed {} ({})", agent.name, agent.pane);
     Ok(())
+}
+
+/// The single close operation shared by the CLI and the sidebar's confirmed action.
+/// tmux removes a window/session naturally only when its last pane/window is gone.
+pub fn kill_pane(pane: &str) -> Result<()> {
+    tmux::run(&["kill-pane", "-t", pane]).map(drop)
 }
 
 pub fn wait(target: &str, timeout: Option<u64>) -> Result<()> {
