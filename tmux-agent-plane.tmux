@@ -8,8 +8,10 @@ if ! command -v tmux-agent-plane >/dev/null; then
   exit 1
 fi
 
-# prefix + S: the agent sidebar on the left of the current window, toggled.
-tmux bind-key S run-shell "tmux-agent-plane toggle-sidebar '#{window_id}'"
+# prefix + S (or @agent-plane-sidebar-key): open the agent sidebar on the left of the window
+# and move into it; move into it when open; close it when you are in it.
+sidebar_key="$(tmux show-option -gqv @agent-plane-sidebar-key)"
+tmux bind-key "${sidebar_key:-S}" run-shell "tmux-agent-plane toggle-sidebar '#{window_id}'"
 # prefix + A: the agent list with a large preview, in a popup.
 tmux bind-key A display-popup -E -w 90% -h 85% -T " agents " "tmux-agent-plane ui"
 

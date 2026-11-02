@@ -42,7 +42,7 @@ enter jump · j/k move · q quit
 
 - **Every agent, every session.** One daemon watches every pane in every tmux session and keeps a single index of the agents in them: name, state, task, location and working directory.
 - **Know what needs you.** The status bar counts agents by state. An agent that finishes or blocks while you are looking elsewhere sends a tmux message and a desktop notification, and stays `done` until you look at it.
-- **A sidebar of agents.** `prefix + S` opens a live list of every agent down the left of your window: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar stays.
+- **A sidebar of agents.** `prefix + S` opens a live list of every agent down the left of your window and puts you in it: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar stays.
 - **Peek before you jump.** `prefix + A` opens the agent list in a popup with a large live preview of the selected agent's screen.
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
 - **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. Each spawned agent records its parent.
@@ -80,7 +80,11 @@ set -g @plugin 'zazencodes/tmux-agent-plane'
 
 Without TPM, clone the repo and add `run-shell /path/to/tmux-agent-plane/tmux-agent-plane.tmux` to `~/.tmux.conf`.
 
-The plugin starts the daemon, binds `prefix + S` to the sidebar and `prefix + A` to the agent list popup.
+The plugin starts the daemon, binds `prefix + S` to the sidebar and `prefix + A` to the agent list popup. To use another sidebar key, set it before the plugin loads:
+
+```tmux
+set -g @agent-plane-sidebar-key Space   # replaces tmux's next-layout binding
+```
 
 **3. The status bar.** Add `#{@agent_plane_status}` to `status-right` (or `status-left`):
 
@@ -115,7 +119,7 @@ Run your agents as usual. Then ask any of them things like:
 
 | Key | Action |
 | --- | --- |
-| `prefix + S` | Open or close the sidebar in the current window |
+| `prefix + S` | Open the sidebar and move into it; move into it when open; close it when you are in it |
 | `prefix + A` | Open the agent list popup, with a preview |
 | `j` `k` / `↓` `↑` | Move |
 | `Enter` | Jump to the agent. The sidebar stays open; the popup closes |
@@ -135,7 +139,7 @@ The sidebar belongs to the window it was opened in; open one in each window you 
 | `focus <agent>` | Show the agent on your screen |
 | `kill <agent>` | Close the agent's pane |
 | `spawn claude\|codex ["<task>"] [--in pane\|window\|session] [--cwd DIR] [--name NAME] [--wait] [--timeout S]` | Start an agent. `--in pane` (default) splits the caller's pane |
-| `toggle-sidebar <window>` | Open or close the sidebar in a window (a window or pane id) |
+| `toggle-sidebar <window>` | What the sidebar key does, for a window (a window or pane id) |
 | `sidebar` | The sidebar's agent list, run in the sidebar pane |
 | `ui` | The agent list popup |
 | `daemon` | The watcher, started by the plugin |

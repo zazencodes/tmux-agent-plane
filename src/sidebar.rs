@@ -17,36 +17,42 @@ const REFRESH: Duration = Duration::from_millis(500);
 /// Pane option marking a sidebar pane, so the toggle finds it.
 const MARK: &str = "@agent-plane-sidebar";
 
-/// Open a sidebar on the left of a window, or close the one there.
+/// The sidebar key: open the window's sidebar and move into it, move into it when it is
+/// already open, or close it when you are in it.
 pub fn toggle(window: &str) -> Result<()> {
     let panes = tmux::run(&[
         "list-panes",
         "-t",
         window,
         "-F",
-        &format!("#{{pane_id}} #{{{MARK}}}"),
+        &format!("#{{pane_id}} #{{pane_active}} #{{{MARK}}}"),
     ])?;
-    if let Some(sidebar) = panes.lines().find_map(|l| l.strip_suffix(" 1")) {
-        tmux::run(&["kill-pane", "-t", sidebar])?;
-        return Ok(());
+    let sidebar = panes.lines().find_map(|line| {
+        let mut fields = line.split(' ');
+        let (pane, active, mark) = (fields.next()?, fields.next()?, fields.next()?);
+        (mark == "1").then(|| (pane.to_string(), active == "1"))
+    });
+    match sidebar {
+        Some((pane, true)) => tmux::run(&["kill-pane", "-t", &pane]).map(drop),
+        Some((pane, false)) => tmux::run(&["select-pane", "-t", &pane]).map(drop),
+        None => {
+            let pane = tmux::run(&[
+                "split-window",
+                "-h",
+                "-b",
+                "-f",
+                "-l",
+                WIDTH,
+                "-t",
+                window,
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "tmux-agent-plane sidebar",
+            ])?;
+            tmux::run(&["set-option", "-p", "-t", pane.trim(), MARK, "1"]).map(drop)
+        }
     }
-    let pane = tmux::run(&[
-        "split-window",
-        "-h",
-        "-b",
-        "-f",
-        "-d",
-        "-l",
-        WIDTH,
-        "-t",
-        window,
-        "-P",
-        "-F",
-        "#{pane_id}",
-        "tmux-agent-plane sidebar",
-    ])?;
-    tmux::run(&["set-option", "-p", "-t", pane.trim(), MARK, "1"])?;
-    Ok(())
 }
 
 pub fn run() -> Result<()> {
