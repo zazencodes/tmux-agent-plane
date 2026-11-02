@@ -8,6 +8,8 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 - `src/detect.rs`: takes one process-table snapshot, joins adapter observations to tmux panes and rejects ambiguous identities.
 - `extensions/`: opt-in Pi/OpenCode publishers and Grok leader configuration. Keep install instructions in README More agents.
 - `src/daemon.rs`: one-second loop. Folds detection into `Done`/seen state, writes the index, sets the `@agent_plane_status` tmux option, notifies.
+- `src/diagnostics.rs`: persistent full-chain errors, deduplication, fault/recovery status and partial scan results.
+- `src/lifecycle.rs`: detached watcher start/restart/stop and private control socket.
 - `src/index.rs`: the index file (`~/.local/state/tmux-agent-plane/agents.json`) and its types. The daemon is its only writer.
 - `src/commands.rs`: `list`, `read`, `send`, `keys`, `focus`, `kill`, `wait`, `spawn`. Agents are told never to use raw tmux on agent panes, so every agent job needs a command here.
 - `src/ui.rs`: the ratatui agent list shown in the `prefix + A` popup.
@@ -18,7 +20,7 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 ## Rules
 
 - Prefer reliable native live signals without configuration (session/state files, titles, process tree or local APIs). An official mode such as Grok leader may be opt-in. When native signals are insufficient, use the official hook/plugin/extension API to publish per-session state. Ship publishers/configuration examples under `extensions/<kind>/`; install publishers by symlink plus required host configuration, documented in README More agents. Missing optional publisher files or leader socket leaves that kind untracked without errors or extra setup. Use one canonical method per kind; no fallback paths or screen scraping.
-- Fail loudly: unknown agent states, tmux errors and a stale index are errors.
+- Fail loudly: withdraw faulty kinds/observations, keep healthy tracking, and persist errors/recovery in daemon.log with degraded status. Process/pane snapshot, index and log failures remain fatal; stale index reads fail.
 - One canonical way per job; no fallbacks.
 
 ## Development
@@ -27,8 +29,10 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo install --path . --force               # reinstall the binary after a change so the user can test it
-pkill -f 'tmux-agent-plane daemon'; tmux source-file ~/.tmux.conf   # restart the daemon on the new build
+tmux-agent-plane daemon restart              # gracefully restart on the new build
 ```
+
+Use isolated tmux servers and short `/tmp` state roots for live tests. Antigravity agents and daemons must both use a private HOME; check the real settings.json hash in finally, and never change user trust/settings during tests.
 
 Test changes against live agents: spawn throwaway agents with `tmux-agent-plane spawn ... --in window` in a scratch folder, and kill them with `tmux-agent-plane kill` afterwards.
 

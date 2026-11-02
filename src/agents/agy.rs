@@ -2,6 +2,7 @@
 use super::{Launch, Observation, RawState, ScanContext};
 use anyhow::{Context, Result, bail, ensure};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -34,16 +35,28 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
     let mut interactive = Vec::new();
     for (pane, process) in candidates {
         if let Some(argv) = process_argv(process.pid)?
-            && interactive_argv(&argv)?
+            && let Some(options) = interactive_argv(&argv)?
         {
-            interactive.push((pane, process));
+            interactive.push((pane, process, options));
         }
     }
     if interactive.is_empty() {
         return Ok(Vec::new());
     }
-    let data = PathBuf::from(std::env::var_os("HOME").context("HOME is not set")?)
-        .join(".gemini/antigravity-cli");
+    let data = data_directory(Path::new(
+        &std::env::var_os("HOME").context("HOME is not set")?,
+    ));
+    let mut trusted = Vec::new();
+    for (pane, process, options) in interactive {
+        // The initial prompt can complete behind the folder trust modal.
+        // Presence, summaries and steps cannot establish workspace trust.
+        if workspace_trusted(&data, Path::new(&pane.cwd), &options)? {
+            trusted.push((pane, process));
+        }
+    }
+    if trusted.is_empty() {
+        return Ok(Vec::new());
+    }
     let presence = data.join("presence");
     let summaries_path = data.join("conversation_summaries.db");
     match presence.try_exists().and_then(|exists| {
@@ -57,7 +70,7 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
         Ok(true) => {}
         Err(error) => return Err(error).context("checking Antigravity presence directory"),
     }
-    let pids = interactive
+    let pids = trusted
         .iter()
         .map(|(_, process)| process.pid.to_string())
         .collect::<Vec<_>>()
@@ -84,7 +97,7 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
     }
     let summaries = open_database(&summaries_path)?;
     let mut found = Vec::new();
-    for (pane, process) in interactive {
+    for (pane, process) in trusted {
         let Some(ids) = sessions.get(&process.pid) else {
             continue;
         };
@@ -95,18 +108,22 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
             pane.id
         );
         let id = &ids[0];
-        let summary: Option<(String, String, i64)> = summaries
+        let summary: Option<(String, String, i64, String)> = summaries
             .query_row(
-                "SELECT status, title, not_fully_idle FROM conversation_summaries WHERE conversation_id = ?1",
+                "SELECT status, title, not_fully_idle, project_id FROM conversation_summaries WHERE conversation_id = ?1",
                 [id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .optional()?;
-        // Presence precedes initialization and the workspace trust prompt. Like Claude's
-        // pre-session trust dialog, this is addressable by pane id but has no agent state yet.
-        let Some((status, title, not_fully_idle)) = summary else {
+        // A trusted session can still be initializing its conversation.
+        let Some((status, title, not_fully_idle, project_id)) = summary else {
             continue;
         };
+        // Resume and /fork can select a project without a --project argument.
+        // Its folders cannot safely inherit the process cwd's saved trust.
+        if project_id != "default-cli-project" {
+            continue;
+        }
         ensure!(
             matches!(not_fully_idle, 0 | 1),
             "invalid Antigravity not_fully_idle flag {not_fully_idle}"
@@ -137,6 +154,79 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
 fn open_database(path: &Path) -> Result<Connection> {
     Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .with_context(|| format!("opening live Antigravity database {}", path.display()))
+}
+
+fn data_directory(home: &Path) -> PathBuf {
+    home.join(".gemini/antigravity-cli")
+}
+
+#[derive(Default, Debug)]
+struct InteractiveOptions {
+    settings: Option<Vec<u8>>,
+    selected_project: bool,
+}
+
+#[derive(Default, Deserialize)]
+struct TrustSettings {
+    #[serde(default, rename = "trustedWorkspaces")]
+    trusted_workspaces: Vec<PathBuf>,
+}
+
+fn workspace_trusted(data: &Path, cwd: &Path, options: &InteractiveOptions) -> Result<bool> {
+    // Explicit projects can select folders outside the process cwd. Their trust
+    // cannot be established from these local records, so keep them untracked.
+    if options.selected_project {
+        return Ok(false);
+    }
+    let settings_path = data.join("settings.json");
+    let settings = match std::fs::read(&settings_path) {
+        Ok(bytes) => serde_json::from_slice::<serde_json::Value>(&bytes)
+            .with_context(|| format!("reading Antigravity settings {}", settings_path.display()))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error).context("reading Antigravity trust settings"),
+    };
+    ensure!(
+        settings.is_object(),
+        "Antigravity settings must be an object"
+    );
+    if let Some(argument) = &options.settings {
+        let argument = std::str::from_utf8(argument)
+            .context("Antigravity --settings argument is not UTF-8")?;
+        let bytes = if argument.trim_start().starts_with('{') {
+            argument.as_bytes().to_vec()
+        } else {
+            let path = cwd.join(argument);
+            std::fs::read(&path).with_context(|| {
+                format!("reading Antigravity --settings file {}", path.display())
+            })?
+        };
+        let overlay: serde_json::Value =
+            serde_json::from_slice(&bytes).context("reading Antigravity session settings")?;
+        ensure!(
+            overlay.is_object(),
+            "Antigravity --settings must be an object"
+        );
+        if overlay.get("trustedWorkspaces").is_some() {
+            let trust: TrustSettings = serde_json::from_value(overlay)
+                .context("reading Antigravity session trustedWorkspaces")?;
+            // An explicit grant establishes startup trust. An override excluding
+            // cwd can force trust even when disk settings contain cwd. Subsequent
+            // acceptance changes the CLI's in-memory value, not its argv. That
+            // value is unavailable in these records, so it stays untracked.
+            return Ok(trust
+                .trusted_workspaces
+                .iter()
+                .any(|path| path.as_os_str() == cwd.as_os_str()));
+        }
+    }
+    let settings: TrustSettings =
+        serde_json::from_value(settings).context("reading Antigravity trustedWorkspaces")?;
+    // Native 1.4.12 matches exact folders, including when the cwd is a child of
+    // an already-trusted folder. Do not infer trust from a path prefix.
+    Ok(settings
+        .trusted_workspaces
+        .iter()
+        .any(|path| path.as_os_str() == cwd.as_os_str()))
 }
 
 // ps flattens argument boundaries. Read the OS's actual argv so a prompt containing
@@ -238,7 +328,8 @@ fn process_argv(_pid: i32) -> Result<Option<Vec<Vec<u8>>>> {
     bail!("Antigravity tracking supports macOS and Linux")
 }
 
-fn interactive_argv(argv: &[Vec<u8>]) -> Result<bool> {
+fn interactive_argv(argv: &[Vec<u8>]) -> Result<Option<InteractiveOptions>> {
+    let mut options = InteractiveOptions::default();
     let mut args = argv.iter().skip(1);
     while let Some(arg) = args.next() {
         let flag = arg
@@ -248,7 +339,7 @@ fn interactive_argv(argv: &[Vec<u8>]) -> Result<bool> {
         match flag {
             b"--" => break,
             b"--print" | b"--prompt" | b"-p" | b"--help" | b"-h" | b"-help" | b"--version"
-            | b"-version" | b"-v" | b"-V" => return Ok(false),
+            | b"-version" | b"-v" | b"-V" => return Ok(None),
             b"--add-dir"
             | b"--agent"
             | b"--conversation"
@@ -264,23 +355,30 @@ fn interactive_argv(argv: &[Vec<u8>]) -> Result<bool> {
             | b"--prompt-interactive"
             | b"-i"
             | b"--settings" => {
-                if !arg.contains(&b'=') {
+                let value = if let Some(offset) = arg.iter().position(|&byte| byte == b'=') {
+                    &arg[offset + 1..]
+                } else {
                     args.next()
-                        .context("Antigravity CLI flag missing its value")?;
+                        .context("Antigravity CLI flag missing its value")?
+                };
+                if flag == b"--settings" {
+                    options.settings = Some(value.to_vec());
+                } else if flag == b"--project" {
+                    options.selected_project = true;
                 }
             }
             b"--continue"
             | b"-c"
             | b"--dangerously-skip-permissions"
             | b"--disable-slash-commands"
-            | b"--new-project"
             | b"--remote-control"
             | b"--sandbox" => {}
+            b"--new-project" => options.selected_project = true,
             b"agent" | b"agents" | b"changelog" | b"help" | b"install" | b"mcp" | b"mic-serve"
             | b"models" | b"plugin" | b"plugins" | b"remote-control" | b"update" => {
-                return Ok(false);
+                return Ok(None);
             }
-            _ if arg.starts_with(b"-p") => return Ok(false),
+            _ if arg.starts_with(b"-p") => return Ok(None),
             _ if arg.starts_with(b"-") => bail!(
                 "unknown Antigravity interactive option {:?}",
                 String::from_utf8_lossy(arg)
@@ -288,7 +386,7 @@ fn interactive_argv(argv: &[Vec<u8>]) -> Result<bool> {
             _ => {} // Positional initial prompt, as one OS argument.
         }
     }
-    Ok(true)
+    Ok(Some(options))
 }
 
 fn parse_presence(output: &str, directory: &Path) -> Result<HashMap<i32, Vec<String>>> {
@@ -565,6 +663,7 @@ mod tests {
                     .collect::<Vec<_>>(),
             )
             .unwrap()
+            .is_some()
         };
         assert!(interactive(&["agy"]));
         assert!(interactive(&[
@@ -638,6 +737,144 @@ mod tests {
                 RawState::Working
             );
         }
+    }
+
+    #[test]
+    fn native_trust_uses_the_documented_default_path_and_exact_folders() {
+        let home = Path::new("/private/scratch-home");
+        assert_eq!(data_directory(home), home.join(".gemini/antigravity-cli"));
+        let data = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("agy-trust-settings-{}", std::process::id()));
+        std::fs::create_dir_all(&data).unwrap();
+        let path = data.join("settings.json");
+        let cwd = Path::new("/private/scratch/project");
+        let options = InteractiveOptions::default();
+        let check = || workspace_trusted(&data, cwd, &options).unwrap();
+        assert!(!check());
+        std::fs::write(
+            &path,
+            include_str!("../../tests/fixtures/agy/trust-unaccepted.json"),
+        )
+        .unwrap();
+        assert!(!check());
+        std::fs::write(
+            &path,
+            include_str!("../../tests/fixtures/agy/trust-accepted.json"),
+        )
+        .unwrap();
+        assert!(
+            check(),
+            "read saved trust again on each scan after native acceptance"
+        );
+        assert!(!workspace_trusted(&data, &cwd.join("child"), &options).unwrap());
+        assert!(
+            !workspace_trusted(&data, Path::new("/private/scratch/project-other"), &options)
+                .unwrap()
+        );
+        for broken in [
+            "{",
+            "[]",
+            "null",
+            r#"{"trustedWorkspaces":"all"}"#,
+            r#"{"trustedWorkspaces":[9]}"#,
+        ] {
+            std::fs::write(&path, broken).unwrap();
+            assert!(workspace_trusted(&data, cwd, &options).is_err(), "{broken}");
+        }
+        std::fs::remove_dir_all(data).unwrap();
+    }
+
+    #[test]
+    fn project_selection_and_session_trust_overrides_cannot_inherit_cwd_trust() {
+        let data = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("agy-trust-overrides-{}", std::process::id()));
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(
+            data.join("settings.json"),
+            include_str!("../../tests/fixtures/agy/trust-accepted.json"),
+        )
+        .unwrap();
+        let cwd = Path::new("/private/scratch/project");
+        let options = |args: &[&str]| {
+            interactive_argv(
+                &args
+                    .iter()
+                    .map(|arg| arg.as_bytes().to_vec())
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap()
+            .unwrap()
+        };
+        for args in [
+            vec!["agy", "--project", "/private/untrusted"],
+            vec!["agy", "--project=other-project"],
+            vec!["agy", "--new-project"],
+            vec!["agy", "--settings", r#"{"trustedWorkspaces":[]}"#],
+            vec!["agy", r#"--settings={"trustedWorkspaces":[]}"#],
+        ] {
+            assert!(
+                !workspace_trusted(&data, cwd, &options(&args)).unwrap(),
+                "{args:?}"
+            );
+        }
+        for args in [
+            vec![
+                "agy",
+                "--prompt-interactive",
+                "--project /private/untrusted --settings {}",
+            ],
+            vec!["agy", "-i", "--settings", "--settings", "{}"],
+            vec!["agy", "--", "--project", "/private/untrusted"],
+            vec!["agy", "--settings", r#"{"model":"--project --settings"}"#],
+        ] {
+            assert!(
+                workspace_trusted(&data, cwd, &options(&args)).unwrap(),
+                "{args:?}"
+            );
+        }
+        assert!(
+            workspace_trusted(
+                &data,
+                cwd,
+                &options(&[
+                    "agy",
+                    "--settings",
+                    r#"{"trustedWorkspaces":["/private/scratch/project"]}"#
+                ]),
+            )
+            .unwrap()
+        );
+        let overlay = data.join("session.json");
+        std::fs::write(&overlay, r#"{"trustedWorkspaces":[]}"#).unwrap();
+        assert!(
+            !workspace_trusted(
+                &data,
+                cwd,
+                &options(&["agy", "--settings", overlay.to_str().unwrap()])
+            )
+            .unwrap()
+        );
+        std::fs::write(&overlay, "{").unwrap();
+        assert!(
+            workspace_trusted(
+                &data,
+                cwd,
+                &options(&["agy", "--settings", overlay.to_str().unwrap()])
+            )
+            .is_err()
+        );
+        std::fs::remove_file(&overlay).unwrap();
+        assert!(
+            workspace_trusted(
+                &data,
+                cwd,
+                &options(&["agy", "--settings", overlay.to_str().unwrap()])
+            )
+            .is_err()
+        );
+        std::fs::remove_dir_all(data).unwrap();
     }
 
     #[test]

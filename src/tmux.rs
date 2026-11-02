@@ -44,16 +44,6 @@ pub fn run_with_stdin(args: &[&str], input: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn server_running() -> bool {
-    Command::new("tmux")
-        .args(["list-sessions"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
 #[derive(Clone, Debug)]
 pub struct Pane {
     pub id: String,

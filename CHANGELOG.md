@@ -14,6 +14,14 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Point stale-index errors to `daemon start` and the persistent daemon log
+- Record the original tmux pane-listing error when the watcher exits, including server shutdowns and transient failures; record why duplicate workers exit
+- Refuse ordinary sends to agents waiting on a question or permission before touching buffers or keys; deliberate textual replies use `send --answer`, which requires a blocked target and follows the reply turn with `--wait`
+- Notify for a new Pi or OpenCode completion even when the agent remains unseen and already shows done
+- Start the watcher detached from tmux jobs so startup, duplicate starts, stops, failures and signals never open job output over a pane; use `daemon restart` for a targeted graceful restart, with lifecycle diagnostics in `daemon.log`
+- Keep the index updating when tmux status writes or client refreshes fail; retry presentation and report the fault and recovery
+- Keep healthy agents tracking through kind scan, completion counter and notification failures; withdraw faulty observations, show degraded/recovered status, and persist full errors and fatal exit reasons in the state directory’s `daemon.log`
+- Keep Antigravity untracked until native folder trust is established; selected projects and session overrides that force trust stay untracked when live trust cannot be proven
 - Keep tracking agents when a Grok process exits during detection
 - Publish OpenCode completion counts together with fresh native state, preserving done notifications when a turn ends between polls
 - Reject unsafe Codex self references and pane splits when a shared app-server supplies a stale `TMUX_PANE`. Listing works without a caller marker; window/session spawning works with no parent
@@ -21,7 +29,12 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Show off-screen done and blocked notifications for five seconds in every open sidebar footer, preserving pane input and focus; desktop notifications keep their existing delivery channel
 - Reject ambiguous agent identities and match Claude session processes to their tmux panes, including when separate tmux servers reuse pane IDs
+
+### Upgrade notes
+
+- A running 0.1.x watcher must be stopped once during this upgrade; it has no lifecycle control socket. Start the new watcher with `tmux-agent-plane daemon start`. Future upgrades use `tmux-agent-plane daemon restart`.
 
 ## 0.1.1 - 2026-11-02
 

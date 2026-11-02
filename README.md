@@ -28,7 +28,7 @@ Claude Code, Codex and Antigravity use native signals. Pi and OpenCode use publi
 ## Features
 
 - **Every agent, every session.** One daemon watches every pane in every tmux session and keeps a single index of the agents in them: name, state, task, location and working directory.
-- **Know what needs you.** The status bar counts agents by state. An agent that finishes or blocks while you are looking elsewhere sends a tmux message and a desktop notification, and stays `done` until you look at it.
+- **Know what needs you.** The status bar counts agents by state. An agent that finishes or blocks while you are looking elsewhere shows a five-second notice in every open sidebar footer and sends a desktop notification, and stays `done` until you look at it.
 - **A sidebar of agents.** `prefix + S` opens a live list of every agent down the left of every window, in every session, and puts you in it: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar is there too. Close it once and it closes everywhere.
 - **Peek before you jump.** `prefix + A` opens the agent list in a popup with a large live preview of the selected agent's screen.
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
@@ -139,6 +139,14 @@ Run your agents as usual. Then ask any of them things like:
 
 While the sidebar is open, every window has one, including windows and sessions you create later; each scrolls on its own. A window's sidebar closes with the window: when its other panes are gone, it goes too. The popup opens on the first blocked agent, or else the first done one. The agent you are looking at is shown in bold in the sidebar.
 
+### Notifications
+
+When an agent finishes or blocks off screen, every open sidebar shows the latest transition on its bottom line for five seconds: `✓ grok-support done` in green or `◆ grok-support blocked` in red. Sidebars in other windows and sessions receive the same event. Rename errors and active rename controls take priority; normal key hints return when the notice expires. A notice never opens a closed sidebar, changes focus or intercepts pane input. Expired notices are discarded, and restarting the daemon clears the previous notice.
+
+Pi and OpenCode completion counters also report a new finished turn when it completes between polls while the agent still shows `done`. Each new completion follows the same footer and desktop policy.
+
+Desktop notifications keep the task or blocked detail and work with the sidebar closed. Daemon faults and recoveries still use tmux diagnostic messages; active faults remain in the status bar and full reasons are recorded in `daemon.log`.
+
 ### Agent launch syntax
 
 `spawn` starts a persistent interactive session. It types the literal command name into your shell so aliases apply, and quotes each argument separately.
@@ -160,7 +168,7 @@ All kinds except agy can be spawned without a task. `spawn agy` requires a task 
 | --- | --- |
 | `list [--json]` | All agents. `*` (or `"self": true`) marks a known caller |
 | `read <agent> [--lines N]` | The agent's screen, plus N lines of scrollback |
-| `send <agent> "<prompt>" [--wait] [--timeout S]` | Paste a prompt and press Enter. `--wait` returns when that turn ends or the agent blocks |
+| `send <agent> "<prompt>" [--answer] [--wait] [--timeout S]` | Paste a prompt and press Enter. Refuses blocked agents unless `--answer` deliberately replies to their question; `--answer` requires a blocked target. `--wait` follows the submitted turn until it ends or blocks |
 | `keys <agent> <key>...` | Press keys, by tmux key name: `Enter`, `Escape`, `Down`, `2` |
 | `wait <agent> [--timeout S]` | Wait until the agent is not working |
 | `rename <agent> <name>` | Name an agent: one word, unique. `self` requires a known caller |
@@ -171,9 +179,13 @@ All kinds except agy can be spawned without a task. `spawn agy` requires a task 
 | `follow-sidebar <window>` | Add the sidebar to a window while it is open. The plugin runs it when a window comes on screen |
 | `sidebar` | The sidebar's agent list, run in the sidebar pane |
 | `ui` | The agent list popup |
-| `daemon` | The watcher, started by the plugin |
+| `daemon start` | Start the detached watcher; the plugin runs this automatically |
+| `daemon restart` | Gracefully restart the watcher using the current binary |
+| `daemon stop` | Gracefully stop the watcher |
 
 `<agent>` is an agent's name, tmux pane id, or `self` when the caller can be identified. An agent is `<kind>-<pane number>` (`claude-154`) until it is named with `spawn --name`, `rename`, or `r` in the sidebar. The name is stored on the agent's tmux pane. `read` and `keys` also take any pane id, so an agent stuck on a prompt before it starts can still be answered.
+
+Read a blocked question before replying: `tmux-agent-plane read reviewer`, then `tmux-agent-plane send reviewer --answer "Use the existing naming convention"` when the user's instructions make that answer clear. Use `keys` for menus and permissions. Check `list` before status or escalation messages; defer them or report through an available lead if the target is blocked. Status and escalation messages must never use `--answer`, and a refusal must never automatically retry with that flag.
 
 ## How it works
 
@@ -183,7 +195,7 @@ All kinds except agy can be spawned without a task. `spawn agy` requires a task 
 - **Pi** publishes PID, pane, native session, live activity, UI prompts, and completed-turn counts through the opt-in extension in `extensions/pi/`.
 - **OpenCode** publishes its active TUI session and native status, permission and question snapshots through the opt-in TUI publisher plugin in `extensions/opencode/`. Its default TUI has no external HTTP listener.
 - **Grok Build** uses the official leader roster's `working`, `needs_input` and `idle` states. Native active-session records tie each local resident session to its live TUI process. The blinking terminal title is not used for state.
-- **The daemon** scans all enabled kinds once a second for every pane on the tmux server. It marks a turn that ends off screen as `done` until the pane is on screen, writes the index to `~/.local/state/tmux-agent-plane/agents.json`, sets the `@agent_plane_status` tmux option, and sends notifications. It exits with the tmux server, and a second copy exits at once.
+- **The daemon** scans all enabled kinds once a second for every pane on the tmux server. It marks a turn that ends off screen as `done` until the pane is on screen, writes the index to `~/.local/state/tmux-agent-plane/agents.json`, sets the `@agent_plane_status` tmux option, and sends notifications. It runs detached from tmux jobs, exits with the tmux server, and starting it again keeps the existing watcher. Lifecycle and daemon errors are appended to `daemon.log` alongside the index (`$XDG_STATE_HOME/tmux-agent-plane/daemon.log` when set).
 - **The CLI and the agent list** read the index. They fail with a clear error when the daemon is not running.
 - **`send`** pastes with bracketed paste, then presses Enter, so a multi-line prompt arrives as one message.
 
@@ -193,10 +205,11 @@ All kinds except agy can be spawned without a task. `spawn agy` requires a task 
 - Pi and OpenCode publish durable completion counters, so waits observe turns that finish between daemon polls. Claude Code, Codex, agy and Grok are sampled: a turn entirely between polls can be missed by `send --wait` or `spawn --wait`.
 - Codex tool shells may inherit a stale `TMUX_PANE` from a shared app-server. `list` works and marks no caller; `spawn --in window` and `--in session` work with `parent: null`. Self references, inherited-pane targets and `spawn --in pane` fail with a clear error. Use explicit agent names and window/session spawning.
 
+- Antigravity appears after its first message and native folder trust acceptance. Named projects (including resumed/forked projects) and `--settings` overlays excluding the cwd from `trustedWorkspaces` stay untracked because live trust cannot be proven.
 - A Claude Code session is detected once it writes its session file, after the folder trust prompt. When `spawn` reports that an agent did not start, read its pane and answer the prompt with `keys`.
 - Codex detection relies on its default terminal title. A `tui.terminal_title` setting that drops the activity spinner hides the `working` state.
-- Claude Code's session file is internal to Claude Code and can change between releases. The daemon stops with an error on a status it does not know.
-- After upgrading, restart the daemon: `pkill -f 'tmux-agent-plane daemon'`, then reload your tmux config.
+- An unknown, malformed or stale live state withdraws the affected kind or agent from the index. Other kinds keep tracking; the status bar shows the fault and `daemon.log` records its full reason and recovery. Errors reading the process/pane snapshot or writing the index/log stop the watcher.
+- After upgrading, run `tmux-agent-plane daemon restart`. This stops the managed watcher through its private control socket, waits for its index lock to release, then starts the current binary. `daemon stop` stops it without a replacement. Startup failures and SIGTERM exits are recorded in `~/.local/state/tmux-agent-plane/daemon.log` (under `$XDG_STATE_HOME` when set).
 - Only the default tmux server is watched.
 
 ## Changelog

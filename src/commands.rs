@@ -168,15 +168,42 @@ pub fn read(target: &str, lines: u32) -> Result<()> {
     Ok(())
 }
 
-pub fn send(target: &str, text: &str, wait: bool, timeout: Option<u64>) -> Result<()> {
+pub fn send(
+    target: &str,
+    text: &str,
+    answer: bool,
+    wait: bool,
+    timeout: Option<u64>,
+) -> Result<()> {
     let index = index::read()?;
     let agent = find_agent(&index, target)?.clone();
+    // Validate before loading a buffer or sending any input to the pane.
+    match (agent.state, answer) {
+        (State::Blocked, false) => bail!(
+            "{} ({}) is waiting on a question or permission. Read it with `tmux-agent-plane read {}`; then answer with `tmux-agent-plane keys {} ...` or deliberately `tmux-agent-plane send {} --answer <text>`. Status messages must wait",
+            agent.name,
+            agent.pane,
+            agent.name,
+            agent.name,
+            agent.name
+        ),
+        (State::Blocked, true) | (_, false) => {}
+        (_, true) => bail!(
+            "--answer requires a blocked target; {} ({}) is {}. Read it before deciding what to send",
+            agent.name,
+            agent.pane,
+            agent.state.as_str()
+        ),
+    }
     let before = agent.completions;
     let sent_at = index::now_ms();
     paste(&agent.pane, text)?;
     if wait {
         let done = wait_for(&agent.pane, timeout, |a| {
-            a.completions > before || (a.state == State::Blocked && a.state_since >= sent_at)
+            a.completions > before
+                || (a.state == State::Blocked
+                    && a.state_since >= sent_at
+                    && (agent.state != State::Blocked || a.state_since > agent.state_since))
         })?;
         print_settled(&done);
     }
