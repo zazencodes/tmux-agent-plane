@@ -54,11 +54,14 @@ enum Cmd {
         #[arg(long, default_value_t = 0)]
         lines: u32,
     },
-    /// Paste a prompt into an agent and press Enter
+    /// Paste a prompt and press Enter; blocked agents require a deliberate --answer
     Send {
         /// Agent name or pane id
         target: String,
         text: String,
+        /// Deliberately answer a blocked agent (fails if the target is not blocked)
+        #[arg(long)]
+        answer: bool,
         /// Wait until the agent finishes the turn or blocks
         #[arg(long)]
         wait: bool,
@@ -132,9 +135,10 @@ fn main() -> anyhow::Result<()> {
         Cmd::Send {
             target,
             text,
+            answer,
             wait,
             timeout,
-        } => commands::send(&target, &text, wait, timeout),
+        } => commands::send(&target, &text, answer, wait, timeout),
         Cmd::Keys { target, keys } => commands::keys(&target, &keys),
         Cmd::Rename { target, name } => commands::rename(&target, &name),
         Cmd::Focus { target } => commands::focus(&target),

@@ -38,7 +38,7 @@ Do every agent job through `tmux-agent-plane`: finding agents, reading their scr
 tmux-agent-plane list                     # all agents: name, kind, state, where, parent, cwd, task
 tmux-agent-plane list --json              # the same with every field
 tmux-agent-plane read <agent> [--lines N] # its screen, plus N lines of scrollback
-tmux-agent-plane send <agent> "<prompt>" [--wait] [--timeout S]
+tmux-agent-plane send <agent> "<prompt>" [--answer] [--wait] [--timeout S]
 tmux-agent-plane keys <agent> <key>...    # tmux key names: Enter Escape Up Down Tab 1 2 y n
 tmux-agent-plane rename <agent> <name>     # one word, unique; `self` requires reliable caller identity
 tmux-agent-plane wait <agent> [--timeout S]
@@ -74,6 +74,7 @@ Pi/OpenCode publish durable completion counters. Other kinds are sampled once pe
 ## Talking to an agent and waiting
 
 - `send <agent> "<prompt>" --wait` pastes the prompt, presses Enter, and returns when that turn ends or the agent blocks. It prints `<name> <state>: <task>`.
+- Ordinary `send` refuses a blocked target before sending any input. `send <agent> --answer "<text>"` deliberately replies to a blocked question and fails if the target is working, idle or done. With `--wait`, it follows the reply turn; the original question does not settle the wait. Never retry a refusal automatically with `--answer`.
 - `spawn ... "<task>" --wait` returns when the first turn ends or the agent blocks.
 - `wait <agent>` returns as soon as the agent is not `working`, so it returns at once for an idle agent. Use it to wait for work already running; use `send --wait` for work you start.
 - A turn wait returns when the turn ends or blocks; plain `wait` also returns immediately for an already idle/done agent. Sampled kinds have the fast-turn limitation above. Pass `--timeout` shorter than your shell tool limit, or run the wait in the background, then `read` the result.
@@ -81,9 +82,11 @@ Pi/OpenCode publish durable completion counters. Other kinds are sampled once pe
 
 ## Blocked agents
 
+Before **any status or escalation message**, inspect the target's current state with `list`. If it is blocked, defer the message or report through a lead whose current state permits a normal send. If no safe recipient is available, keep the report pending. **Status and escalation messages NEVER use `--answer`**, even when urgent or when a normal send refuses. A status update can be consumed as the answer to the target's question.
+
 1. `read <agent>` to see the question or prompt.
-2. If the answer is clear from the user's instructions, answer it: `keys <agent> 2` to pick option 2, `keys <agent> Enter` to confirm, `send <agent> "<text>"` to type a reply.
-3. Otherwise, ask the user. Never approve a destructive or irreversible action on another agent's behalf without the user's say.
+2. Only when the answer is clear from the user's instructions, answer it: `keys <agent> 2` to pick option 2, `keys <agent> Enter` to confirm, `send <agent> --answer "<text>"` for a deliberate textual reply. Use `keys` for menus and permissions.
+3. Otherwise, ask the user or escalate through a safe lead as above. Never guess credentials or approve a destructive or irreversible action on another agent's behalf without the user's say.
 
 ## Working as a super agent
 

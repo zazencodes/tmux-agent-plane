@@ -160,7 +160,7 @@ All kinds except agy can be spawned without a task. `spawn agy` requires a task 
 | --- | --- |
 | `list [--json]` | All agents. `*` (or `"self": true`) marks a known caller |
 | `read <agent> [--lines N]` | The agent's screen, plus N lines of scrollback |
-| `send <agent> "<prompt>" [--wait] [--timeout S]` | Paste a prompt and press Enter. `--wait` returns when that turn ends or the agent blocks |
+| `send <agent> "<prompt>" [--answer] [--wait] [--timeout S]` | Paste a prompt and press Enter. Refuses blocked agents unless `--answer` deliberately replies to their question; `--answer` requires a blocked target. `--wait` follows the submitted turn until it ends or blocks |
 | `keys <agent> <key>...` | Press keys, by tmux key name: `Enter`, `Escape`, `Down`, `2` |
 | `wait <agent> [--timeout S]` | Wait until the agent is not working |
 | `rename <agent> <name>` | Name an agent: one word, unique. `self` requires a known caller |
@@ -176,6 +176,8 @@ All kinds except agy can be spawned without a task. `spawn agy` requires a task 
 | `daemon stop` | Gracefully stop the watcher |
 
 `<agent>` is an agent's name, tmux pane id, or `self` when the caller can be identified. An agent is `<kind>-<pane number>` (`claude-154`) until it is named with `spawn --name`, `rename`, or `r` in the sidebar. The name is stored on the agent's tmux pane. `read` and `keys` also take any pane id, so an agent stuck on a prompt before it starts can still be answered.
+
+Read a blocked question before replying: `tmux-agent-plane read reviewer`, then `tmux-agent-plane send reviewer --answer "Use the existing naming convention"` when the user's instructions make that answer clear. Use `keys` for menus and permissions. Check `list` before status or escalation messages; defer them or report through an available lead if the target is blocked. Status and escalation messages must never use `--answer`, and a refusal must never automatically retry with that flag.
 
 ## How it works
 
