@@ -147,3 +147,24 @@ Orchestrator: `pub mod grok;` in `src/agents/mod.rs`; `Kind::Grok` with
 clap/serde `grok`, `as_str() = "grok"`, and dispatch to
 `grok::{scan,launch}`. Shared `Observation` must contain both optional completion
 fields from `862398a`. No other shared orchestration changes are required.
+
+## Process-exit race follow-up
+
+A native macOS `PROC_PIDTBSDINFO` probe against absent PIDs `2147483647`
+and `2000000000` returned `filled=0`, `errno=3` (`ESRCH`, "No such process").
+An active-registry candidate can exit between the scan's process-table
+snapshot and this lookup. `process_start` now returns `Result<Option<u64>>`:
+only the native zero-result/ESRCH combination returns `None`, and the adapter
+skips that vanished process. A mismatched start token remains a stale record
+and is ignored. Permission errors and every other lookup failure remain errors.
+
+Regression coverage includes an injected vanished result for a candidate
+still present in the process snapshot, propagation of EPERM/EACCES/EIO,
+and a real nonexistent macOS PID lookup. This follow-up requires no Grok
+model turn, lifecycle harness, launch change, or shared orchestration change.
+
+Validation: `rustfmt --check` and diff checks passed. A separate temporary
+validation copy based on shared `862398a`, with this Grok module/fixtures and
+registration, passed all 28 tests and clippy `--all-targets -- -D warnings`.
+No shared files in this worktree were changed; the branch's launch signature
+remains unchanged for the orchestrator's independent `Result<Launch>` update.

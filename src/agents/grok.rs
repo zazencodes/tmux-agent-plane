@@ -104,7 +104,7 @@ fn active_sessions(bytes: &[u8], context: &ScanContext<'_>) -> Result<Vec<Active
 fn active_sessions_with_start(
     bytes: &[u8],
     context: &ScanContext<'_>,
-    start: impl Fn(i32) -> Result<u64>,
+    start: impl Fn(i32) -> Result<Option<u64>>,
 ) -> Result<Vec<Active>> {
     let rows: Vec<Value> =
         serde_json::from_slice(bytes).context("invalid Grok active-session registry")?;
@@ -139,7 +139,11 @@ fn active_sessions_with_start(
         if file.pid != pid || file.session_id.is_empty() {
             bail!("invalid live Grok session identity for PID {pid}");
         }
-        if start(pid)? != file.pid_start {
+        let Some(started_at) = start(pid)? else {
+            // The process can exit after the scan's process snapshot.
+            continue;
+        };
+        if started_at != file.pid_start {
             // PID reuse: the published record belongs to a process that has exited.
             continue;
         }
@@ -155,23 +159,26 @@ fn active_sessions_with_start(
 }
 
 #[cfg(target_os = "macos")]
-fn process_start(pid: i32) -> Result<u64> {
+fn process_start(pid: i32) -> Result<Option<u64>> {
     // SAFETY: proc_bsdinfo is a kernel output struct; zero is valid and the buffer is sized exactly.
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of_val(&info) as i32;
     let filled =
         unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
     if filled != size {
-        bail!(
-            "cannot read live Grok PID {pid} start time: {}",
-            std::io::Error::last_os_error()
-        );
+        let error = std::io::Error::last_os_error();
+        if filled == 0 && error.raw_os_error() == Some(libc::ESRCH) {
+            return Ok(None);
+        }
+        return Err(error).with_context(|| format!("cannot read live Grok PID {pid} start time"));
     }
-    Ok(info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
+    Ok(Some(
+        info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec,
+    ))
 }
 
 #[cfg(not(target_os = "macos"))]
-fn process_start(_pid: i32) -> Result<u64> {
+fn process_start(_pid: i32) -> Result<Option<u64>> {
     bail!(
         "Grok leader integration currently requires macOS: Linux pid_start token semantics have not been verified"
     )
@@ -454,7 +461,7 @@ mod tests {
             processes: &processes,
         };
         let bytes = br#"[{"pid":11,"pid_start":123,"session_id":"grok-live"},{"pid":21,"pid_start":123,"session_id":"second"},{"pid":999,"session_id":false}]"#;
-        let active = active_sessions_with_start(bytes, &context, |_| Ok(123)).unwrap();
+        let active = active_sessions_with_start(bytes, &context, |_| Ok(Some(123))).unwrap();
         assert_eq!(active.len(), 2);
         assert_eq!(active[0].pane_id, "%1");
         assert_eq!(active[1].pane_id, "%2");
@@ -486,7 +493,7 @@ mod tests {
             br#"[{"pid":11,"session_id":""}]"#,
             br#"[{"pid":11,"session_id":"s"},{"pid":11,"session_id":"s"}]"#,
         ] {
-            assert!(active_sessions_with_start(bytes, &context, |_| Ok(123)).is_err());
+            assert!(active_sessions_with_start(bytes, &context, |_| Ok(Some(123))).is_err());
         }
     }
     #[test]
@@ -656,11 +663,47 @@ mod tests {
             ["--", "quote ' and\nnewline"]
         );
     }
+    #[test]
+    fn registry_candidate_exiting_after_snapshot_is_ignored() {
+        let panes = [pane("%1", 10)];
+        let processes = table();
+        let context = ScanContext {
+            panes: &panes,
+            processes: &processes,
+        };
+        let bytes = br#"[{"pid":11,"pid_start":123,"session_id":"s"}]"#;
+        let active = active_sessions_with_start(bytes, &context, |pid| {
+            assert_eq!(pid, 11);
+            Ok(None)
+        })
+        .unwrap();
+        assert!(active.is_empty());
+        for errno in [libc::EPERM, libc::EACCES, libc::EIO] {
+            let error = active_sessions_with_start(bytes, &context, |_| {
+                Err(std::io::Error::from_raw_os_error(errno).into())
+            })
+            .err()
+            .unwrap();
+            assert_eq!(
+                error
+                    .downcast_ref::<std::io::Error>()
+                    .unwrap()
+                    .raw_os_error(),
+                Some(errno)
+            );
+        }
+    }
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn nonexistent_native_pid_has_no_process_start() {
+        // Probed with PROC_PIDTBSDINFO on macOS: returns 0 and sets ESRCH.
+        assert_eq!(process_start(i32::MAX).unwrap(), None);
+    }
     #[cfg(target_os = "macos")]
     #[test]
     fn native_process_start_token_is_checked() {
         let pid = std::process::id() as i32;
-        let start = process_start(pid).unwrap();
+        let start = process_start(pid).unwrap().unwrap();
         let processes = ProcessTable {
             processes: HashMap::from([(
                 pid,

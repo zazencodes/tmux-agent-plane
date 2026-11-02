@@ -9,6 +9,10 @@ before 1.0, a breaking change bumps the minor version.
 
 - Track and spawn Grok Build on macOS through its opt-in leader mode, including questions and permission prompts
 
+### Fixed
+
+- Keep tracking agents when a Grok process exits during detection
+
 ### Changed
 
 - Reject ambiguous agent identities and match Claude session processes to their tmux panes, including when separate tmux servers reuse pane IDs
