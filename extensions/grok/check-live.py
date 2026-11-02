@@ -25,6 +25,11 @@ auth = Path(os.environ.get("GROK_HOME", str(Path.home() / ".grok"))) / "auth.jso
 tmux = shutil.which("tmux")
 (root / "bin/tmux").write_text(f"#!/bin/sh\nexec {shlex.quote(tmux)} -L {shlex.quote(socket_name)} \"$@\"\n")
 (root / "bin/tmux").chmod(0o755)
+# Isolated integration must not display desktop notifications.
+for command in ("osascript", "notify-send"):
+    path = root / "bin" / command
+    path.write_text("#!/bin/sh\nexit 0\n")
+    path.chmod(0o755)
 env = os.environ.copy()
 for name in ("TMUX", "TMUX_PANE"):
     env.pop(name, None)
