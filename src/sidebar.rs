@@ -1,5 +1,6 @@
 //! A narrow, always-on agent list in a pane down the side of a window.
 
+use crate::agents::{ProcessTable, RawState, ScanContext};
 use crate::commands;
 use crate::index::{self, Agent, RecentEvent, State};
 use crate::tmux;
@@ -11,10 +12,11 @@ use anyhow::{Context, Result, bail};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashSet};
 use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
 
@@ -196,6 +198,160 @@ struct Rename {
     name: String,
 }
 
+fn kill_accepts(key: KeyEvent) -> bool {
+    key.modifiers.is_empty() && matches!(key.code, KeyCode::Enter | KeyCode::Char('y'))
+}
+
+struct KillConfirmation {
+    agent: Agent,
+    codex_pid: Option<i32>,
+    client: String,
+    client_pid: String,
+    ends_sessions: Vec<String>,
+}
+
+/// Changes in task/state/turn or native identity require a new deliberate confirmation.
+fn same_kill_target(before: &Agent, current: &Agent) -> bool {
+    before.pane == current.pane
+        && before.window == current.window
+        && before.session == current.session
+        && before.kind == current.kind
+        && before.name == current.name
+        && before.session_id == current.session_id
+        && before.completion_epoch == current.completion_epoch
+        && before.state == current.state
+        && before.state_since == current.state_since
+        && before.completions == current.completions
+        && before.reported_completions == current.reported_completions
+        && before.title == current.title
+        && before.detail == current.detail
+}
+
+/// Read the native signal again, rather than trusting a possibly one-tick-old index at y.
+/// Codex has no session id in its title signal, so pin its unique live process PID too.
+fn kill_identity(agent: &Agent) -> Result<Option<i32>> {
+    let panes = tmux::list_panes()?;
+    let pane = panes
+        .iter()
+        .find(|p| p.id == agent.pane && p.window == agent.window && p.session == agent.session)
+        .context("agent exited; kill cancelled")?;
+    if pane.name != agent.name
+        && !(pane.name.is_empty()
+            && agent.name
+                == format!(
+                    "{}-{}",
+                    agent.kind.as_str(),
+                    pane.id.trim_start_matches('%')
+                ))
+    {
+        bail!("agent renamed; press x again");
+    }
+    let processes = ProcessTable::load()?;
+    let observations = (agent.kind.adapter().scan)(&ScanContext {
+        panes: &panes,
+        processes: &processes,
+    })?;
+    let observation = observations
+        .iter()
+        .find(|observation| observation.pane_id == agent.pane)
+        .context("agent exited or changed; press x again")?;
+    let raw_state = match agent.state {
+        State::Working => RawState::Working,
+        State::Blocked => RawState::Blocked,
+        State::Done | State::Idle => RawState::Idle,
+    };
+    if observation.state != raw_state
+        || observation.session_id != agent.session_id
+        || observation.completion_epoch != agent.completion_epoch
+        || observation.completed_turns != agent.reported_completions
+        || observation.detail != agent.detail
+        || (!observation.preserve_title && observation.title != agent.title)
+    {
+        bail!("agent state/identity changed; press x again");
+    }
+    if agent.kind == index::Kind::Codex {
+        let pids = processes.descendants_named(pane.pid, "codex");
+        if pids.len() != 1 {
+            bail!("agent process changed; press x again");
+        }
+        Ok(Some(pids[0].pid))
+    } else {
+        if agent.session_id.is_none() {
+            bail!("agent has no native identity; kill cancelled");
+        }
+        Ok(None)
+    }
+}
+
+/// Include the sidebar's automatic alone exit and every session linking this window.
+/// Refuse to remove the originating client's attached session, even indirectly.
+fn ending_sessions(agent: &Agent, client: &Client) -> Result<Vec<String>> {
+    let panes = tmux::run(&[
+        "list-panes",
+        "-t",
+        &agent.window,
+        "-F",
+        "#{pane_id}\x1f#{@agent-plane-sidebar}",
+    ])?;
+    if !window_will_end(&agent.pane, &panes)? {
+        return Ok(Vec::new());
+    }
+    let windows = tmux::run(&[
+        "list-windows",
+        "-a",
+        "-F",
+        "#{session_id}\x1f#{session_name}\x1f#{window_id}",
+    ])?;
+    session_endings(&agent.window, &client.session, &windows)
+}
+
+fn window_will_end(target: &str, panes: &str) -> Result<bool> {
+    let mut found = false;
+    let mut remaining = Vec::new();
+    for line in panes.lines() {
+        let (pane, sidebar) = line
+            .split_once('\x1f')
+            .context("unexpected pane context while checking kill")?;
+        if pane == target {
+            found = true;
+        } else {
+            remaining.push(sidebar == "1");
+        }
+    }
+    if !found {
+        bail!("agent exited; kill cancelled");
+    }
+    Ok(remaining.is_empty() || remaining == [true])
+}
+
+fn session_endings(window: &str, attached_session: &str, windows: &str) -> Result<Vec<String>> {
+    let mut sessions: BTreeMap<String, (String, HashSet<String>)> = BTreeMap::new();
+    for line in windows.lines() {
+        let fields: Vec<_> = line.split('\x1f').collect();
+        if fields.len() != 3 {
+            bail!("unexpected window context: {line:?}");
+        }
+        let (name, windows) = sessions
+            .entry(fields[0].into())
+            .or_insert_with(|| (fields[1].into(), HashSet::new()));
+        if name != fields[1] {
+            bail!("session identity changed while checking kill");
+        }
+        windows.insert(fields[2].into());
+    }
+    let mut ending = Vec::new();
+    for (id, (name, windows)) in sessions {
+        if windows.len() == 1 && windows.contains(window) {
+            if id == attached_session {
+                bail!("would end your attached session; kill refused");
+            }
+            ending.push(name);
+        }
+    }
+    ending.sort();
+    Ok(ending)
+}
+
 #[derive(Default)]
 struct Sidebar {
     all_agents: Vec<Agent>,
@@ -206,6 +362,9 @@ struct Sidebar {
     error: Option<String>,
     editing: Option<Rename>,
     notice: Option<String>,
+    killing: Option<KillConfirmation>,
+    /// Hide successfully closed panes until the daemon has removed them from the index.
+    closed: HashSet<String>,
 }
 
 impl Navigation {
@@ -246,7 +405,13 @@ impl Sidebar {
     fn refresh(&mut self) {
         match index::read() {
             Ok(index) => {
-                self.all_agents = index.agents;
+                self.closed
+                    .retain(|pane| index.agents.iter().any(|a| &a.pane == pane));
+                self.all_agents = index
+                    .agents
+                    .into_iter()
+                    .filter(|a| !self.closed.contains(&a.pane))
+                    .collect();
                 self.recent_event = index.recent_event;
                 self.error = None;
             }
@@ -371,6 +536,99 @@ impl Sidebar {
         let len = self.agents.len() as isize;
         let i = self.list.selected().unwrap_or(0) as isize;
         self.select(Some((i + delta).rem_euclid(len) as usize));
+    }
+
+    /// Confirmation consumes every key. Enter/y confirm; all others only cancel.
+    fn kill_key(&mut self, key: KeyEvent, own: &str) -> bool {
+        if let Some(confirmation) = self.killing.take() {
+            self.notice = None;
+            if kill_accepts(key) {
+                match self.confirm_kill(&confirmation, own) {
+                    Ok(()) => {
+                        let position = self
+                            .agents
+                            .iter()
+                            .position(|a| a.pane == confirmation.agent.pane);
+                        let next = position
+                            .and_then(|i| {
+                                self.agents
+                                    .get(i + 1)
+                                    .or_else(|| i.checked_sub(1).and_then(|i| self.agents.get(i)))
+                            })
+                            .map(|a| a.pane.clone());
+                        self.closed.insert(confirmation.agent.pane.clone());
+                        self.all_agents
+                            .retain(|a| a.pane != confirmation.agent.pane);
+                        self.navigation.pane = next;
+                        self.rebuild();
+                    }
+                    Err(error) => self.notice = Some(error.to_string()),
+                }
+            }
+            return true;
+        }
+        if key.code != KeyCode::Char('x')
+            || self.editing.is_some()
+            || self.navigation.search.is_some()
+        {
+            return false;
+        }
+        self.notice = None;
+        let result = (|| {
+            let Some(selected) = self.selected().filter(|a| a.pane != own).cloned() else {
+                return Ok(None);
+            };
+            let index = index::read()?;
+            let current = index
+                .agents
+                .iter()
+                .find(|a| a.pane == selected.pane)
+                .context("agent exited; kill cancelled")?;
+            if !same_kill_target(&selected, current) {
+                bail!("agent changed; refresh and press x again");
+            }
+            let clients = clients()?;
+            let client = input_client(&clients, own)?;
+            let ends_sessions = ending_sessions(current, client)?;
+            Ok(Some(KillConfirmation {
+                agent: current.clone(),
+                codex_pid: kill_identity(current)?,
+                client: client.name.clone(),
+                client_pid: client.pid.clone(),
+                ends_sessions,
+            }))
+        })();
+        match result {
+            Ok(confirmation) => self.killing = confirmation,
+            Err(error) => self.notice = Some(error.to_string()),
+        }
+        true
+    }
+
+    fn confirm_kill(&self, confirmation: &KillConfirmation, own: &str) -> Result<()> {
+        if confirmation.agent.pane == own {
+            bail!("cannot kill the sidebar");
+        }
+        let clients = clients()?;
+        let client = input_client(&clients, own)?;
+        if client.name != confirmation.client || client.pid != confirmation.client_pid {
+            bail!("confirmation client changed; press x again");
+        }
+        let index = index::read()?;
+        let current = index
+            .agents
+            .iter()
+            .find(|a| a.pane == confirmation.agent.pane)
+            .context("agent exited; kill cancelled")?;
+        if !same_kill_target(&confirmation.agent, current)
+            || kill_identity(current)? != confirmation.codex_pid
+        {
+            bail!("agent changed; press x again");
+        }
+        if ending_sessions(current, client)? != confirmation.ends_sessions {
+            bail!("session/window changed; press x again");
+        }
+        commands::kill_pane(&current.pane)
     }
 
     fn key(&mut self, key: KeyEvent) -> bool {
@@ -545,6 +803,7 @@ fn receive_handoff(sidebar: &mut Sidebar, own: &str) -> Result<bool> {
         tmux::run(&["set-option", "-pu", "-t", own, HANDOFF])?;
         sidebar.navigation = handoff.navigation;
         sidebar.editing = None;
+        sidebar.killing = None;
         sidebar.notice = None;
         sidebar.refresh();
         return Ok(true);
@@ -635,6 +894,12 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
                             }
                         }
                     }
+                    if sidebar.kill_key(key, &own) {
+                        if !event::poll(Duration::ZERO)? {
+                            break;
+                        }
+                        continue;
+                    }
                     let command = sidebar.editing.is_none() && sidebar.navigation.search.is_none();
                     focus = key.code == KeyCode::Enter && command;
                     // Search edits, including arrows, stay in this pane. Only accepting the
@@ -697,8 +962,13 @@ fn truncate(s: &str, width: usize) -> String {
 }
 
 fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
+    let confirmation = sidebar
+        .killing
+        .as_ref()
+        .map(|kill| kill_footer(kill, f.area().width as usize));
+    let footer_height = confirmation.as_ref().map_or(1, |lines| lines.len() as u16);
     let [list_area, help_area] =
-        Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
+        Layout::vertical([Constraint::Min(3), Constraint::Length(footer_height)]).areas(f.area());
     let inner = list_area.width.saturating_sub(2) as usize;
     let block = panel(Line::from(" agents ")).title_top(counts(&sidebar.all_agents));
     let content = block.inner(list_area);
@@ -769,10 +1039,45 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         f.render_stateful_widget(List::new(items), agents_area, &mut sidebar.list);
     }
 
-    f.render_widget(
-        Paragraph::new(footer(sidebar, inner + 2, index::now_ms())),
-        help_area,
+    let footer = confirmation.map_or_else(
+        || Text::from(footer(sidebar, inner + 2, index::now_ms())),
+        Text::from,
     );
+    f.render_widget(Paragraph::new(footer), help_area);
+}
+
+/// Two lines keep both name and state readable in a narrow pane. Remote session
+/// destruction gets a third, explicit risk line; Y/n always remains visible.
+fn kill_footer(confirmation: &KillConfirmation, width: usize) -> Vec<Line<'static>> {
+    let agent = &confirmation.agent;
+    let narrow = agent.name.chars().count() + 6 > width;
+    let name = if narrow {
+        truncate(&agent.name, width)
+    } else {
+        format!(" kill {}", agent.name)
+    };
+    let state = format!(
+        "{}({}){}",
+        if narrow { "kill " } else { " " },
+        agent.state.as_str(),
+        if confirmation.ends_sessions.is_empty() {
+            "? Y/n"
+        } else {
+            ""
+        }
+    );
+    let mut lines = vec![
+        Line::styled(name, Style::default().fg(TEXT).bold()),
+        Line::styled(state, colour(agent.state)),
+    ];
+    if !confirmation.ends_sessions.is_empty() {
+        let risk = truncate(
+            &format!(" ends session {}", confirmation.ends_sessions.join(", ")),
+            width.saturating_sub(5),
+        );
+        lines.push(Line::styled(format!("{risk}? Y/n"), colour(State::Blocked)));
+    }
+    lines
 }
 
 /// Local failures and rename controls take priority; a shared event never hides them.
@@ -810,7 +1115,12 @@ fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
                     colour(state),
                 )
             }
-            None => hints(&[("⏎", "jump"), ("r", "rename"), ("q", "close")]),
+            None => hints(&[
+                ("⏎", "jump"),
+                ("r", "rename"),
+                ("x", "kill"),
+                ("q", "close"),
+            ]),
         },
     }
 }
@@ -1175,6 +1485,149 @@ mod tests {
             sidebar.rebuild();
             terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
         }
+    }
+
+    fn confirmation(state: State) -> KillConfirmation {
+        KillConfirmation {
+            agent: agent("%1", state),
+            codex_pid: None,
+            client: "client".into(),
+            client_pid: "123".into(),
+            ends_sessions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn kill_enter_and_lowercase_y_only_and_every_other_key_cancels_without_replay() {
+        for code in [KeyCode::Enter, KeyCode::Char('y')] {
+            assert!(kill_accepts(KeyEvent::new(code, KeyModifiers::NONE)));
+        }
+        for key in [
+            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT),
+        ] {
+            assert!(!kill_accepts(key));
+        }
+        for code in [
+            KeyCode::Esc,
+            KeyCode::Char('n'),
+            KeyCode::Char('Y'),
+            KeyCode::Char('q'),
+            KeyCode::Char('j'),
+            KeyCode::Down,
+            KeyCode::Char('r'),
+            KeyCode::Char('F'),
+            KeyCode::Char('V'),
+            KeyCode::Char('x'),
+            KeyCode::Char('\\'),
+        ] {
+            let key = KeyEvent::new(code, KeyModifiers::NONE);
+            assert!(!kill_accepts(key));
+            let mut sidebar = Sidebar {
+                all_agents: vec![agent("%1", State::Working), agent("%2", State::Idle)],
+                killing: Some(confirmation(State::Working)),
+                notice: Some("old error".into()),
+                ..Sidebar::default()
+            };
+            sidebar.rebuild();
+            assert!(sidebar.kill_key(key, "%sidebar"));
+            assert!(sidebar.killing.is_none());
+            assert_eq!(sidebar.selected().unwrap().pane, "%1");
+            assert!(!sidebar.navigation.view);
+            assert!(sidebar.navigation.filter.is_none());
+            assert!(sidebar.navigation.search.is_none());
+            assert!(sidebar.editing.is_none());
+            assert!(sidebar.closed.is_empty());
+        }
+    }
+
+    #[test]
+    fn kill_guard_pins_native_identity_state_turn_name_and_location() {
+        let original = agent("%1", State::Working);
+        assert!(same_kill_target(&original, &original));
+        for change in 0..10 {
+            let mut current = original.clone();
+            match change {
+                0 => current.pane = "%2".into(),
+                1 => current.name = "new-name".into(),
+                2 => current.state = State::Blocked,
+                3 => current.state_since = 1,
+                4 => current.session_id = Some("new-native-session".into()),
+                5 => current.completion_epoch = Some("new-native-process".into()),
+                6 => current.completions = 1,
+                7 => current.title = "new task".into(),
+                8 => current.window = "@2".into(),
+                _ => current.session = "other".into(),
+            }
+            assert!(!same_kill_target(&original, &current), "change {change}");
+        }
+    }
+
+    #[test]
+    fn kill_last_window_refuses_attached_session_and_names_remote_linked_sessions() {
+        let windows = "$1\x1fscratch\x1f@1\n$1\x1fscratch\x1f@2\n$2\x1fremote\x1f@3\n";
+        assert!(session_endings("@2", "$1", windows).unwrap().is_empty());
+        assert_eq!(session_endings("@3", "$1", windows).unwrap(), ["remote"]);
+        assert!(
+            session_endings("@3", "$2", windows)
+                .unwrap_err()
+                .to_string()
+                .contains("attached session")
+        );
+        let linked = format!("{windows}$3\x1flinked\x1f@3\n");
+        assert_eq!(
+            session_endings("@3", "$1", &linked).unwrap(),
+            ["linked", "remote"]
+        );
+        assert!(session_endings("@3", "$3", &linked).is_err());
+        assert!(window_will_end("%1", "%1\x1f\n").unwrap());
+        assert!(window_will_end("%1", "%1\x1f\n%sidebar\x1f1\n").unwrap());
+        assert!(!window_will_end("%1", "%1\x1f\n%shell\x1f\n%sidebar\x1f1\n").unwrap());
+        assert!(!window_will_end("%1", "%1\x1f\n%side1\x1f1\n%side2\x1f1\n").unwrap());
+        assert!(window_will_end("%gone", "%1\x1f\n").is_err());
+        assert!(window_will_end("%1", "malformed").is_err());
+    }
+
+    #[test]
+    fn kill_never_offers_own_sidebar_and_prompt_keeps_name_state_and_default_yes_legible() {
+        let mut sidebar = Sidebar {
+            all_agents: vec![agent("%1", State::Idle)],
+            ..Sidebar::default()
+        };
+        sidebar.rebuild();
+        assert!(sidebar.kill_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE), "%1"));
+        assert!(sidebar.killing.is_none()); // No tmux/index call for the own-pane exclusion.
+        let mut kill = confirmation(State::Working);
+        kill.agent.name = "kill-name-is-long".into();
+        for width in [20, 38] {
+            let lines = kill_footer(&kill, width);
+            assert_eq!(lines.len(), 2);
+            assert!(lines[0].to_string().contains("kill-name-is-long"));
+            assert!(lines[1].to_string().contains("working"));
+            assert!(lines[1].to_string().ends_with("Y/n"));
+            assert!(lines.iter().all(|line| line.width() <= width));
+        }
+        kill.ends_sessions = vec!["remote".into()];
+        let lines = kill_footer(&kill, 38);
+        assert_eq!(lines.len(), 3);
+        assert!(lines[2].to_string().contains("ends session remote? Y/n"));
+        // Render confirmation over a local error/event; no hidden normal key hints.
+        use ratatui::{Terminal, backend::TestBackend};
+        sidebar.killing = Some(kill);
+        sidebar.notice = Some("rename error".into());
+        let mut terminal = Terminal::new(TestBackend::new(38, 12)).unwrap();
+        terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
+        let rows: Vec<String> = (0..12)
+            .map(|y| {
+                (0..38)
+                    .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                    .collect()
+            })
+            .collect();
+        assert!(rows[9].contains("kill-name-is-long"));
+        assert!(rows[10].contains("working"));
+        assert!(rows[11].contains("ends session remote? Y/n"));
+        assert!(!rows.iter().any(|row| row.contains("rename error")));
     }
 
     #[test]
