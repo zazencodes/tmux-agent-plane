@@ -5,6 +5,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+## 0.1.1 - 2026-11-02
+
 ### Changed
 
 - The sidebar is open in every window of every session at once: `prefix + S` opens it everywhere, windows and sessions you go to later get it too, and the key (from any pane) or `q` closes it everywhere. A sidebar closes with its window when the window's other panes are gone
