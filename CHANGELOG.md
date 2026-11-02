@@ -5,6 +5,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+## 0.2.0 - 2026-11-02
+
 ### Added
 
 - Track Antigravity CLI (`agy`) from its first turn, including permissions, questions and background work; spawning requires a task and rejects omission before creating a pane
