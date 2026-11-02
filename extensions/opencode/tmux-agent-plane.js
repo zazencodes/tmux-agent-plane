@@ -20,7 +20,6 @@ export default {
     let disposed = false
     let polling = false
     let revision = 0
-    let snapshot
 
     function write(value) {
       if (disposed) return
@@ -89,11 +88,8 @@ export default {
       const { sessionID, status } = event.properties
       try {
         record(sessionID, status.type)
-        if (snapshot) {
-          publish(snapshot.statuses, snapshot.permissions, snapshot.questions, snapshot.routeIdentity, snapshot.verifiedAt)
-        }
       } catch (error) {
-        write({ state: "error", detail: String(error) })
+        write({ session_id: `${generation}:error`, title: "OpenCode", state: "error", detail: String(error) })
       }
     })
 
@@ -118,10 +114,12 @@ export default {
         }
         // An event arriving during these requests supersedes this snapshot.
         if (before !== revision || routeIdentity !== routeKey()) return
-        snapshot = { statuses: statuses.data, permissions: permissions.data, questions: questions.data, routeIdentity, verifiedAt: Date.now() }
-        publish(snapshot.statuses, snapshot.permissions, snapshot.questions, snapshot.routeIdentity, snapshot.verifiedAt)
+        // Publish the current event counter atomically with this verified state.
+        // Publishing it from an idle event against an older busy snapshot could
+        // make the daemon consume a completion before it can derive done.
+        publish(statuses.data, permissions.data, questions.data, routeIdentity, Date.now())
       } catch (error) {
-        write({ state: "error", detail: String(error) })
+        write({ session_id: `${generation}:error`, title: "OpenCode", state: "error", detail: String(error) })
       } finally {
         polling = false
       }

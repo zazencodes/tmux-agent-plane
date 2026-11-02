@@ -47,7 +47,7 @@ test("official TUI publisher preserves identity, native state and durable comple
       assert.equal(read().completed_turns, 0)
       event("ses_one", "idle")
       event("ses_one", "idle")
-      assert.equal(read().completed_turns, 1)
+      assert.equal(read().completed_turns, 0)
       await delay()
       assert.equal(read().completed_turns, 1)
     })
@@ -109,10 +109,27 @@ test("official TUI publisher preserves identity, native state and durable comple
       assert.equal(read().completed_turns, 2)
       event("ses_one", "busy") // Another busy event for the same turn.
       event("ses_one", "idle")
-      assert.equal(read().completed_turns, 3)
+      assert.equal(read().completed_turns, 2)
       await delay()
       event("ses_one", "idle")
       assert.equal(read().completed_turns, 3)
+    })
+    await t.test("an idle event waits for a fresh idle snapshot before publishing its completion", async () => {
+      statuses = { ses_one: { type: "busy" } }
+      event("ses_one", "busy")
+      await delay()
+      const before = read()
+      assert.equal(before.state, "working")
+      assert.equal(before.completed_turns, 3)
+      statuses = {}
+      event("ses_one", "idle")
+      // A daemon sample between polls must see the entire previous snapshot,
+      // never a new counter paired with its stale busy state.
+      assert.deepEqual(read(), before)
+      await delay()
+      assert.equal(read().state, "idle")
+      assert.equal(read().completed_turns, 4)
+      assert.equal(read().completion_epoch, before.completion_epoch)
     })
     await t.test("unknown native status and failed fresh snapshot publish errors", async () => {
       statuses = { ses_one: { type: "sleeping" } }
@@ -124,6 +141,10 @@ test("official TUI publisher preserves identity, native state and durable comple
       await delay()
       assert.equal(read().state, "error")
       assert.match(read().detail, /disconnected/)
+      // Required adapter fields are present so its unknown-state error includes
+      // the original source detail rather than failing JSON shape validation.
+      assert.match(read().session_id, /:error$/)
+      assert.equal(read().title, "OpenCode")
     })
   } finally {
     dispose?.()
