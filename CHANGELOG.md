@@ -9,7 +9,7 @@ before 1.0, a breaking change bumps the minor version.
 
 - Reject unsafe Codex self references and pane splits when a shared app-server supplies a stale `TMUX_PANE`. Listing works without a caller marker; window/session spawning works with no parent
 
-- Use published completion counters when available so wait commands observe turns that finish between daemon polls
+- Use published completion counters when available so wait commands observe turns that finish between daemon polls, without recounting turns when navigating between sessions
 
 ### Changed
 

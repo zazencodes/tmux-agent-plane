@@ -27,6 +27,7 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
                 session_id: Some(session.session_id.clone()),
                 preserve_title: false,
                 completed_turns: None,
+                completion_epoch: None,
             })
         })
         .collect())
