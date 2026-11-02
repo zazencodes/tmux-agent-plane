@@ -14,6 +14,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Keep Antigravity untracked until native folder trust is established; selected projects and session overrides that force trust stay untracked when live trust cannot be proven
+
 - Keep tracking agents when a Grok process exits during detection
 - Publish OpenCode completion counts together with fresh native state, preserving done notifications when a turn ends between polls
 - Reject unsafe Codex self references and pane splits when a shared app-server supplies a stale `TMUX_PANE`. Listing works without a caller marker; window/session spawning works with no parent
