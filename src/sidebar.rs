@@ -7,13 +7,14 @@ use crate::ui::{
     LAVENDER, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, counts, hints, icon,
     message, name_style, panel, state_style,
 };
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
+use serde::{Deserialize, Serialize};
 use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
 
@@ -23,6 +24,9 @@ const REFRESH: Duration = Duration::from_millis(500);
 const MARK: &str = "@agent-plane-sidebar";
 /// Global option set while the sidebar is open, in every window of every session.
 const OPEN: &str = "@agent-plane-sidebar-open";
+/// A one-shot transfer to the sidebar in the previewed window. Never global: only the
+/// named client may adopt it, after that client has arrived in this pane.
+const HANDOFF: &str = "@agent-plane-sidebar-navigation";
 
 /// The sidebar key: close the sidebar everywhere when it is open, wherever you are; otherwise
 /// open it everywhere and move into this window's.
@@ -165,84 +169,199 @@ fn alone() -> Result<bool> {
     Ok(panes.trim() == "1")
 }
 
+#[derive(Clone, Default, Serialize, Deserialize)]
+struct Navigation {
+    view: bool,
+    filter: Option<State>,
+    query: String,
+    pane: Option<String>,
+    search: Option<SearchEdit>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct SearchEdit {
+    query: String,
+    pane: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Handoff {
+    client: String,
+    client_pid: String,
+    navigation: Navigation,
+}
+
+struct Rename {
+    pane: String,
+    name: String,
+}
+
+#[derive(Default)]
 struct Sidebar {
+    all_agents: Vec<Agent>,
     agents: Vec<Agent>,
+    navigation: Navigation,
     recent_event: Option<RecentEvent>,
     list: ListState,
     error: Option<String>,
-    /// The name being typed for the selected agent, while renaming.
-    editing: Option<String>,
-    /// Why the last rename failed.
+    editing: Option<Rename>,
     notice: Option<String>,
+}
+
+impl Navigation {
+    fn matches_query(&self, agent: &Agent) -> bool {
+        let query = self.query.to_lowercase();
+        [&agent.name, &agent.title, &agent.location, &agent.cwd]
+            .into_iter()
+            .chain(agent.detail.as_ref())
+            .any(|field| field.to_lowercase().contains(&query))
+    }
+
+    /// Only a deliberate F skips categories. Refreshing must never change the filter.
+    fn cycle_filter(&mut self, agents: &[Agent]) {
+        let cycle = [
+            None,
+            Some(State::Blocked),
+            Some(State::Done),
+            Some(State::Working),
+            Some(State::Idle),
+        ];
+        let current = cycle
+            .iter()
+            .position(|state| *state == self.filter)
+            .unwrap();
+        self.filter = (1..=cycle.len())
+            .map(|step| cycle[(current + step) % cycle.len()])
+            .find(|state| {
+                state.is_none()
+                    || agents
+                        .iter()
+                        .any(|a| Some(a.state) == *state && self.matches_query(a))
+            })
+            .unwrap(); // All is always available, including an empty index/query.
+    }
 }
 
 impl Sidebar {
     fn refresh(&mut self) {
-        let keep = self
-            .list
-            .selected()
-            .and_then(|i| self.agents.get(i))
-            .map(|a| a.pane.clone());
         match index::read() {
             Ok(index) => {
-                self.agents = index.agents;
+                self.all_agents = index.agents;
                 self.recent_event = index.recent_event;
                 self.error = None;
             }
             Err(e) => {
-                self.agents.clear();
+                self.all_agents.clear();
                 self.recent_event = None;
                 self.error = Some(e.to_string());
             }
         }
-        let selected = keep
-            .and_then(|pane| self.agents.iter().position(|a| a.pane == pane))
-            .or(if self.agents.is_empty() {
-                None
-            } else {
-                Some(0)
-            });
+        self.rebuild();
+    }
+
+    fn rebuild(&mut self) {
+        self.agents = self
+            .all_agents
+            .iter()
+            .filter(|a| {
+                self.navigation.filter.is_none_or(|state| a.state == state)
+                    && self.navigation.matches_query(a)
+            })
+            .cloned()
+            .collect();
+        let selected = self
+            .navigation
+            .pane
+            .as_ref()
+            .and_then(|pane| self.agents.iter().position(|a| &a.pane == pane))
+            .or_else(|| {
+                [State::Blocked, State::Done]
+                    .into_iter()
+                    .find_map(|state| self.agents.iter().position(|a| a.state == state))
+            })
+            .or_else(|| (!self.agents.is_empty()).then_some(0));
+        self.select(selected);
+        if self
+            .editing
+            .as_ref()
+            .is_some_and(|edit| !self.agents.iter().any(|a| a.pane == edit.pane))
+        {
+            self.editing = None;
+            self.notice = Some("agent left list; rename cancelled".into());
+        }
+    }
+
+    fn select(&mut self, selected: Option<usize>) {
         self.list.select(selected);
+        self.navigation.pane = self.selected().map(|a| a.pane.clone());
     }
 
     fn selected(&self) -> Option<&Agent> {
         self.list.selected().and_then(|i| self.agents.get(i))
     }
 
-    /// A key while renaming: edit the name, save it, or give up.
+    /// Rename is pinned to the original pane, even if an agent exits during editing.
     fn edit_key(&mut self, key: KeyEvent) {
-        let Some(name) = self.editing.as_mut() else {
+        let Some(edit) = self.editing.as_mut() else {
             return;
         };
+        self.notice = None;
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
             KeyCode::Esc => self.editing = None,
             KeyCode::Enter => {
-                let name = name.clone();
-                let Some(pane) = self.selected().map(|a| a.pane.clone()) else {
-                    return;
-                };
+                let pane = edit.pane.clone();
+                let name = edit.name.clone();
                 match commands::set_name(&pane, &name) {
                     Ok(_) => {
-                        // Show it now; the daemon picks it up on its next tick.
-                        if let Some(agent) = self.agents.iter_mut().find(|a| a.pane == pane) {
+                        if let Some(agent) = self.all_agents.iter_mut().find(|a| a.pane == pane) {
                             agent.name = name;
                         }
                         self.editing = None;
-                        self.notice = None;
+                        self.rebuild();
                     }
                     Err(e) => self.notice = Some(e.to_string()),
                 }
             }
-            KeyCode::Char('w') if ctrl => delete_word(name),
-            KeyCode::Char('u') if ctrl => name.clear(),
+            KeyCode::Char('w') if ctrl => delete_word(&mut edit.name),
+            KeyCode::Char('u') if ctrl => edit.name.clear(),
             KeyCode::Backspace => {
-                name.pop();
+                edit.name.pop();
             }
-            KeyCode::Char(' ') => name.push('-'),
-            KeyCode::Char(c) if !ctrl => name.push(c),
+            KeyCode::Char(' ') => edit.name.push('-'),
+            KeyCode::Char(c) if !ctrl => edit.name.push(c),
             _ => {}
         }
+    }
+
+    fn search_key(&mut self, key: KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Esc => {
+                let before = self.navigation.search.take().unwrap();
+                self.navigation.query = before.query;
+                self.navigation.pane = before.pane;
+            }
+            KeyCode::Enter => {
+                self.navigation.search = None;
+            }
+            KeyCode::Down => {
+                self.step(1);
+                return;
+            }
+            KeyCode::Up => {
+                self.step(-1);
+                return;
+            }
+            KeyCode::Char('w') if ctrl => delete_word(&mut self.navigation.query),
+            KeyCode::Char('u') if ctrl => self.navigation.query.clear(),
+            KeyCode::Backspace => {
+                self.navigation.query.pop();
+            }
+            KeyCode::Char(c) if !ctrl => self.navigation.query.push(c),
+            _ => return,
+        }
+        self.rebuild();
     }
 
     fn step(&mut self, delta: isize) {
@@ -251,50 +370,308 @@ impl Sidebar {
         }
         let len = self.agents.len() as isize;
         let i = self.list.selected().unwrap_or(0) as isize;
-        self.list.select(Some((i + delta).rem_euclid(len) as usize));
+        self.select(Some((i + delta).rem_euclid(len) as usize));
+    }
+
+    fn key(&mut self, key: KeyEvent) -> bool {
+        if self.editing.is_some() {
+            self.edit_key(key);
+            return false;
+        }
+        self.notice = None;
+        if self.navigation.search.is_some() {
+            self.search_key(key);
+            return false;
+        }
+        match key.code {
+            KeyCode::Char('q') => return true,
+            KeyCode::Char('r') => {
+                self.editing = self.selected().map(|a| Rename {
+                    pane: a.pane.clone(),
+                    name: a.name.clone(),
+                })
+            }
+            KeyCode::Char('j') | KeyCode::Down => self.step(1),
+            KeyCode::Char('k') | KeyCode::Up => self.step(-1),
+            KeyCode::Char('V') => self.navigation.view = !self.navigation.view,
+            KeyCode::Char('F') => {
+                self.navigation.cycle_filter(&self.all_agents);
+                self.rebuild();
+            }
+            KeyCode::Char('\\') => {
+                self.navigation.search = Some(SearchEdit {
+                    query: self.navigation.query.clone(),
+                    pane: self.navigation.pane.clone(),
+                });
+            }
+            KeyCode::Esc => {
+                self.navigation.query.clear();
+                self.rebuild();
+            }
+            _ => {}
+        }
+        false
     }
 }
 
-fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
-    let mut sidebar = Sidebar {
-        agents: Vec::new(),
-        recent_event: None,
-        list: ListState::default(),
-        error: None,
-        editing: None,
-        notice: None,
+/// list-clients expands these fields in each client's context, including active-pane clients.
+struct Client {
+    name: String,
+    pid: String,
+    session: String,
+    window: String,
+    pane: String,
+}
+
+fn clients() -> Result<Vec<Client>> {
+    let output = tmux::run(&[
+        "list-clients",
+        "-F",
+        "#{client_name}\x1f#{client_pid}\x1f#{session_id}\x1f#{window_id}\x1f#{pane_id}",
+    ])?;
+    output
+        .lines()
+        .map(|line| {
+            let fields: Vec<_> = line.split('\x1f').collect();
+            if fields.len() != 5 {
+                bail!("unexpected client context: {line:?}");
+            }
+            Ok(Client {
+                name: fields[0].into(),
+                pid: fields[1].into(),
+                session: fields[2].into(),
+                window: fields[3].into(),
+                pane: fields[4].into(),
+            })
+        })
+        .collect()
+}
+
+fn input_client<'a>(clients: &'a [Client], pane: &str) -> Result<&'a Client> {
+    let mut candidates = clients.iter().filter(|client| client.pane == pane);
+    let client = candidates.next().context("no client in this sidebar")?;
+    if candidates.next().is_some() {
+        bail!("multiple clients in sidebar; use a separate session");
+    }
+    Ok(client)
+}
+
+/// Sessions share their current window, and linked windows share their active pane.
+/// Explicit -c alone does not isolate those changes. Refuse to disturb another client.
+fn guard_destination(
+    clients: &[Client],
+    client: &Client,
+    session: &str,
+    window: &str,
+) -> Result<()> {
+    if clients.iter().any(|other| {
+        other.name != client.name && (other.session == session || other.window == window)
+    }) {
+        bail!("target shared with another client; use a separate session");
+    }
+    Ok(())
+}
+
+fn navigate(sidebar: &Sidebar, own: &str, focus: bool) -> Result<Option<Client>> {
+    let Some(agent) = sidebar.selected() else {
+        return Ok(None);
     };
+    let clients = clients()?;
+    let client = input_client(&clients, own)?;
+    let window_target = format!("={}:{}", agent.session, agent.window);
+    // Resolve the indexed session explicitly: a pane can be linked into several sessions.
+    let session = tmux::run(&[
+        "display-message",
+        "-p",
+        "-t",
+        &window_target,
+        "#{session_id}",
+    ])?;
+    guard_destination(&clients, client, session.trim(), &agent.window)?;
+    let target = if focus {
+        agent.pane.clone()
+    } else {
+        add(&window_target)?
+    };
+    if target == own {
+        return Ok(None);
+    }
+    if !focus {
+        let handoff = Handoff {
+            client: client.name.clone(),
+            client_pid: client.pid.clone(),
+            navigation: sidebar.navigation.clone(),
+        };
+        tmux::run(&[
+            "set-option",
+            "-p",
+            "-t",
+            &target,
+            HANDOFF,
+            &serde_json::to_string(&handoff)?,
+        ])?;
+    }
+    // One targeted tmux command changes session/window/pane without an intermediate agent focus.
+    // Preview targets only the sidebar, so neither agent keys nor seen state are manufactured.
+    let pane_target = format!("={}:{}.{}", agent.session, agent.window, target);
+    if let Err(error) = tmux::run(&["switch-client", "-c", &client.name, "-t", &pane_target]) {
+        if !focus {
+            tmux::run(&["set-option", "-pu", "-t", &target, HANDOFF])
+                .context(format!("{error}; also failed to clear sidebar handoff"))?;
+        }
+        return Err(error);
+    }
+    Ok((!focus).then(|| Client {
+        name: client.name.clone(),
+        pid: client.pid.clone(),
+        session: client.session.clone(),
+        window: client.window.clone(),
+        pane: target,
+    }))
+}
+
+fn receive_handoff(sidebar: &mut Sidebar, own: &str) -> Result<bool> {
+    let value = tmux::run(&["show-option", "-pqv", "-t", own, HANDOFF])?;
+    if value.trim().is_empty() {
+        return Ok(false);
+    }
+    let handoff: Handoff =
+        serde_json::from_str(value.trim()).context("invalid sidebar navigation handoff")?;
+    let clients = clients()?;
+    if clients.iter().any(|client| {
+        client.name == handoff.client && client.pid == handoff.client_pid && client.pane == own
+    }) {
+        // Consume before handling buffered keys in the destination pane.
+        tmux::run(&["set-option", "-pu", "-t", own, HANDOFF])?;
+        sidebar.navigation = handoff.navigation;
+        sidebar.editing = None;
+        sidebar.notice = None;
+        sidebar.refresh();
+        return Ok(true);
+    } else if !clients
+        .iter()
+        .any(|client| client.name == handoff.client && client.pid == handoff.client_pid)
+    {
+        tmux::run(&["set-option", "-pu", "-t", own, HANDOFF])?;
+    }
+    Ok(false)
+}
+
+/// Keys may reach the old PTY while tmux is executing the switch. Relay those only to
+/// the same live client's current sidebar. A pane marker and a unique client are required;
+/// deliberate Enter focus ends the relay rather than sending any subsequent key to an agent.
+fn relay_key(key: KeyEvent, own: &str, origin: &Client) -> Result<bool> {
+    let clients = clients()?;
+    if clients.iter().any(|client| client.pane == own) {
+        return Ok(false);
+    }
+    let client = clients
+        .iter()
+        .find(|client| client.name == origin.name && client.pid == origin.pid)
+        .context("navigation client disconnected; buffered key discarded")?;
+    input_client(&clients, &client.pane)?;
+    if tmux::run(&["show-option", "-pqv", "-t", &client.pane, MARK])?.trim() != "1" {
+        bail!("client left sidebar; buffered key discarded");
+    }
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    let (literal, code) = match key.code {
+        KeyCode::Char(c) => (!ctrl && !alt, c.to_string()),
+        KeyCode::Enter => (false, "Enter".into()),
+        KeyCode::Esc => (false, "Escape".into()),
+        KeyCode::Backspace => (false, "BSpace".into()),
+        KeyCode::Up => (false, "Up".into()),
+        KeyCode::Down => (false, "Down".into()),
+        _ => return Ok(true), // Other keys have no sidebar action.
+    };
+    let code = format!(
+        "{}{}{code}",
+        if ctrl { "C-" } else { "" },
+        if alt { "M-" } else { "" }
+    );
+    let mut args = vec!["send-keys", "-t", &client.pane];
+    if literal {
+        args.push("-l");
+    }
+    args.push(&code);
+    tmux::run(&args)?;
+    Ok(true)
+}
+
+fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
+    // This is the native sidebar process's own pane, never a caller inferred by the CLI.
+    let own = std::env::var("TMUX_PANE")?;
+    let mut sidebar = Sidebar::default();
     sidebar.refresh();
+    receive_handoff(&mut sidebar, &own)?;
     let mut refreshed = Instant::now();
+    let mut relay = None;
     loop {
         terminal.draw(|f| draw(f, &mut sidebar))?;
-        if event::poll(Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-        {
-            if sidebar.editing.is_some() {
-                sidebar.edit_key(key);
-                continue;
+        if event::poll(Duration::from_millis(100))? {
+            if receive_handoff(&mut sidebar, &own)? {
+                terminal.draw(|f| draw(f, &mut sidebar))?;
             }
-            sidebar.notice = None;
-            match key.code {
-                KeyCode::Char('q') => return Ok(Exit::Quit),
-                KeyCode::Char('r') => sidebar.editing = sidebar.selected().map(|a| a.name.clone()),
-                KeyCode::Char('j') | KeyCode::Down => sidebar.step(1),
-                KeyCode::Char('k') | KeyCode::Up => sidebar.step(-1),
-                KeyCode::Enter => {
-                    if let Some(a) = sidebar.list.selected().and_then(|i| sidebar.agents.get(i)) {
-                        tmux::jump(&a.session, &a.window, &a.pane)?;
+            let mut focus = false;
+            let mut preview = false;
+            // Apply the complete buffered burst before changing panes. Otherwise a fast jjj
+            // would strand the second and third keys in the sidebar we just left.
+            loop {
+                if let Event::Key(key) = event::read()?
+                    && key.kind == KeyEventKind::Press
+                {
+                    if let Some(origin) = &relay {
+                        match relay_key(key, &own, origin) {
+                            Ok(true) => {
+                                if !event::poll(Duration::ZERO)? {
+                                    break;
+                                }
+                                continue;
+                            }
+                            Ok(false) => relay = None,
+                            Err(error) => {
+                                sidebar.notice = Some(error.to_string());
+                                break;
+                            }
+                        }
+                    }
+                    let command = sidebar.editing.is_none() && sidebar.navigation.search.is_none();
+                    focus = key.code == KeyCode::Enter && command;
+                    // Search edits, including arrows, stay in this pane. Only accepting the
+                    // query previews its final selection; cancellation never switches context.
+                    preview |= (key.code == KeyCode::Enter && sidebar.navigation.search.is_some())
+                        || (command
+                            && matches!(
+                                key.code,
+                                KeyCode::Up
+                                    | KeyCode::Down
+                                    | KeyCode::Esc
+                                    | KeyCode::Char('j' | 'k' | 'F' | 'V')
+                            ));
+                    if sidebar.key(key) {
+                        return Ok(Exit::Quit);
                     }
                 }
-                _ => {}
+                if focus || !event::poll(Duration::ZERO)? {
+                    break;
+                }
+            }
+            if focus || (preview && sidebar.navigation.view && sidebar.navigation.search.is_none())
+            {
+                match navigate(&sidebar, &own, focus) {
+                    Ok(destination) => relay = destination,
+                    Err(error) => sidebar.notice = Some(error.to_string()),
+                }
             }
         }
         if refreshed.elapsed() >= REFRESH {
             if alone()? {
                 return Ok(Exit::Alone);
             }
-            sidebar.refresh();
+            // Refresh may change selection when an agent vanishes. Only input triggers preview.
+            if !receive_handoff(&mut sidebar, &own)? {
+                sidebar.refresh();
+            }
             refreshed = Instant::now();
         }
     }
@@ -323,30 +700,73 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let [list_area, help_area] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
     let inner = list_area.width.saturating_sub(2) as usize;
-    let block = panel(Line::from(" agents ")).title_top(counts(&sidebar.agents));
+    let block = panel(Line::from(" agents ")).title_top(counts(&sidebar.all_agents));
+    let content = block.inner(list_area);
+    f.render_widget(block, list_area);
+    let [mode_area, query_area, agents_area] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .areas(content);
+    let mode = format!(
+        " V {}{}  F {}",
+        if sidebar.navigation.view { "on" } else { "off" },
+        if sidebar.navigation.view && sidebar.navigation.search.is_some() {
+            " · paused"
+        } else {
+            ""
+        },
+        sidebar.navigation.filter.map_or("all", State::as_str)
+    );
+    f.render_widget(Paragraph::new(Line::styled(mode, LAVENDER)), mode_area);
+    let query = &sidebar.navigation.query;
+    let search = sidebar.navigation.search.is_some();
+    let query = if search {
+        let tail: String = query.chars().rev().take(inner.saturating_sub(4)).collect();
+        format!(" \\ {}▏", tail.chars().rev().collect::<String>())
+    } else if query.is_empty() {
+        " \\ search".into()
+    } else {
+        truncate(&format!(" \\ {query}"), inner)
+    };
+    f.render_widget(
+        Paragraph::new(Line::styled(query, if search { TEXT } else { SUBTEXT })),
+        query_area,
+    );
     if let Some(e) = &sidebar.error {
         message(
             f,
-            list_area,
-            block,
+            agents_area,
+            ratatui::widgets::Block::default(),
             colour(State::Blocked),
             &["daemon not running", e],
         );
     } else if sidebar.agents.is_empty() {
-        message(
-            f,
-            list_area,
-            block,
-            TEXT,
-            &[
+        let text = if sidebar.all_agents.is_empty() {
+            [
                 "no agents running",
                 "start claude or codex in any tmux pane",
-            ],
+            ]
+        } else {
+            ["no matching agents", "F changes state · esc clears search"]
+        };
+        message(
+            f,
+            agents_area,
+            ratatui::widgets::Block::default(),
+            TEXT,
+            &text,
         );
     } else {
         let selected = sidebar.list.selected();
-        let items = items(&sidebar.agents, selected, sidebar.editing.as_ref(), inner);
-        f.render_stateful_widget(List::new(items).block(block), list_area, &mut sidebar.list);
+        let items = items(
+            &sidebar.agents,
+            selected,
+            sidebar.editing.as_ref().map(|edit| &edit.name),
+            inner,
+        );
+        f.render_stateful_widget(List::new(items), agents_area, &mut sidebar.list);
     }
 
     f.render_widget(
@@ -363,6 +783,18 @@ fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
             colour(State::Blocked),
         ),
         (None, Some(_)) => hints(&[("⏎", "save"), ("esc", "cancel"), ("^w ^u", "clear")]),
+        (None, None) if sidebar.navigation.search.is_some() => hints(&[
+            (
+                "⏎",
+                if sidebar.navigation.view {
+                    "preview"
+                } else {
+                    "keep"
+                },
+            ),
+            ("esc", "cancel"),
+            ("^w ^u", "clear"),
+        ]),
         (None, None) => match sidebar
             .recent_event
             .as_ref()
@@ -496,6 +928,7 @@ mod tests {
                 occurred_at: 100,
                 expires_at: 5100,
             }),
+            ..Sidebar::default()
         };
         for (event_state, state, expected) in [
             (EventState::Done, State::Done, " ✓ grok-support done"),
@@ -511,11 +944,237 @@ mod tests {
             assert_eq!(line.style.fg, Some(colour(state)));
         }
         assert!(footer(&sidebar, 38, 5100).to_string().contains("jump"));
-        sidebar.editing = Some("rename".into());
+        sidebar.navigation.search = Some(SearchEdit {
+            query: String::new(),
+            pane: None,
+        });
+        assert!(footer(&sidebar, 38, 100).to_string().contains("keep"));
+        sidebar.navigation.view = true;
+        assert!(footer(&sidebar, 38, 100).to_string().contains("preview"));
+        sidebar.editing = Some(Rename {
+            pane: "%1".into(),
+            name: "rename".into(),
+        });
         assert!(footer(&sidebar, 38, 100).to_string().contains("save"));
         sidebar.notice = Some("rename failed".into());
         assert_eq!(footer(&sidebar, 38, 100).to_string(), " rename failed");
         assert_eq!(footer(&sidebar, 8, 100).to_string(), " rename…");
+    }
+
+    fn agent(pane: &str, state: State) -> Agent {
+        Agent {
+            name: format!("agent-{pane}"),
+            pane: pane.into(),
+            kind: index::Kind::Pi,
+            state,
+            detail: None,
+            title: "Review payment flow".into(),
+            location: "work:1.1".into(),
+            session: "work".into(),
+            window: "@1".into(),
+            cwd: "/tmp/checkout".into(),
+            parent: None,
+            session_id: None,
+            state_since: 0,
+            completions: 0,
+            reported_completions: None,
+            completion_epoch: None,
+            visible: false,
+        }
+    }
+
+    fn press(sidebar: &mut Sidebar, code: KeyCode) {
+        sidebar.key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn selection_priority_identity_and_mode_off() {
+        let mut sidebar = Sidebar {
+            all_agents: vec![
+                agent("%1", State::Working),
+                agent("%2", State::Done),
+                agent("%3", State::Blocked),
+            ],
+            ..Sidebar::default()
+        };
+        sidebar.rebuild();
+        assert!(!sidebar.navigation.view);
+        assert_eq!(sidebar.navigation.pane.as_deref(), Some("%3"));
+        press(&mut sidebar, KeyCode::Down);
+        assert_eq!(sidebar.navigation.pane.as_deref(), Some("%1"));
+        sidebar.all_agents.reverse();
+        sidebar.rebuild();
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        sidebar.all_agents.retain(|a| a.pane != "%1");
+        sidebar.rebuild();
+        assert_eq!(sidebar.selected().unwrap().pane, "%3");
+        press(&mut sidebar, KeyCode::Char('V'));
+        assert!(sidebar.navigation.view);
+        press(&mut sidebar, KeyCode::Char('V'));
+        assert!(!sidebar.navigation.view);
+    }
+
+    #[test]
+    fn filters_compose_with_query_and_never_change_on_refresh() {
+        let mut sidebar = Sidebar {
+            all_agents: vec![
+                agent("%1", State::Working),
+                agent("%2", State::Done),
+                agent("%3", State::Blocked),
+                agent("%4", State::Idle),
+            ],
+            ..Sidebar::default()
+        };
+        sidebar.rebuild();
+        for expected in [
+            Some(State::Blocked),
+            Some(State::Done),
+            Some(State::Working),
+            Some(State::Idle),
+            None,
+        ] {
+            press(&mut sidebar, KeyCode::Char('F'));
+            assert_eq!(sidebar.navigation.filter, expected);
+        }
+        sidebar.navigation.query = "AGENT-%2".into();
+        sidebar.rebuild();
+        press(&mut sidebar, KeyCode::Char('F'));
+        assert_eq!(sidebar.navigation.filter, Some(State::Done));
+        sidebar.all_agents[1].state = State::Idle;
+        sidebar.rebuild();
+        assert_eq!(sidebar.navigation.filter, Some(State::Done));
+        assert!(sidebar.selected().is_none());
+        press(&mut sidebar, KeyCode::Char('F'));
+        assert_eq!(sidebar.navigation.filter, Some(State::Idle));
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
+        sidebar.navigation.query = "no such agent".into();
+        sidebar.rebuild();
+        press(&mut sidebar, KeyCode::Char('F'));
+        assert_eq!(sidebar.navigation.filter, None);
+        assert!(sidebar.agents.is_empty());
+    }
+
+    #[test]
+    fn search_edit_cancel_keep_clear_and_literal_keys() {
+        let mut sidebar = Sidebar {
+            all_agents: vec![agent("%1", State::Idle), agent("%2", State::Working)],
+            ..Sidebar::default()
+        };
+        sidebar.rebuild();
+        press(&mut sidebar, KeyCode::Char('\\'));
+        for c in "PaYmEnT".chars() {
+            press(&mut sidebar, KeyCode::Char(c));
+        }
+        assert_eq!(sidebar.agents.len(), 2);
+        press(&mut sidebar, KeyCode::Enter);
+        assert!(sidebar.navigation.search.is_none());
+        assert_eq!(sidebar.navigation.query, "PaYmEnT");
+        press(&mut sidebar, KeyCode::Char('\\'));
+        for c in "qVFr".chars() {
+            press(&mut sidebar, KeyCode::Char(c));
+        }
+        assert!(!sidebar.navigation.view);
+        assert!(sidebar.editing.is_none());
+        assert_eq!(sidebar.navigation.filter, None);
+        assert!(sidebar.agents.is_empty());
+        press(&mut sidebar, KeyCode::Esc);
+        assert_eq!(sidebar.navigation.query, "PaYmEnT");
+        press(&mut sidebar, KeyCode::Esc);
+        assert!(sidebar.navigation.query.is_empty());
+        let a = sidebar.all_agents.first_mut().unwrap();
+        a.detail = Some("Please approve".into());
+        for query in ["approve", "CHECKOUT", "work:1", "AGENT-%1"] {
+            sidebar.navigation.query = query.into();
+            sidebar.rebuild();
+            assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        }
+    }
+
+    #[test]
+    fn rename_cannot_retarget_after_agent_leaves_filtered_list() {
+        let mut sidebar = Sidebar {
+            all_agents: vec![agent("%1", State::Blocked), agent("%2", State::Working)],
+            ..Sidebar::default()
+        };
+        sidebar.rebuild();
+        press(&mut sidebar, KeyCode::Char('r'));
+        sidebar.all_agents.remove(0);
+        sidebar.rebuild();
+        assert!(sidebar.editing.is_none());
+        assert!(
+            sidebar
+                .notice
+                .as_ref()
+                .unwrap()
+                .contains("rename cancelled")
+        );
+    }
+
+    #[test]
+    fn accepted_handoff_preserves_query_mode_and_identity() {
+        let original = Handoff {
+            client: "/dev/pts/1".into(),
+            client_pid: "42".into(),
+            navigation: Navigation {
+                view: true,
+                query: "review".into(),
+                pane: Some("%8".into()),
+                filter: Some(State::Done),
+                search: None,
+            },
+        };
+        let restored: Handoff =
+            serde_json::from_str(&serde_json::to_string(&original).unwrap()).unwrap();
+        assert!(restored.navigation.view);
+        assert_eq!(restored.navigation.filter, Some(State::Done));
+        assert_eq!(restored.navigation.pane.as_deref(), Some("%8"));
+        assert!(restored.navigation.search.is_none());
+    }
+
+    #[test]
+    fn client_ambiguity_and_shared_targets_are_rejected() {
+        let clients = vec![
+            Client {
+                name: "one".into(),
+                pid: "1".into(),
+                session: "$1".into(),
+                window: "@1".into(),
+                pane: "%1".into(),
+            },
+            Client {
+                name: "two".into(),
+                pid: "2".into(),
+                session: "$2".into(),
+                window: "@2".into(),
+                pane: "%2".into(),
+            },
+        ];
+        assert!(input_client(&clients, "%9").is_err());
+        assert_eq!(input_client(&clients, "%1").unwrap().name, "one");
+        assert!(guard_destination(&clients, &clients[0], "$2", "@9").is_err());
+        assert!(guard_destination(&clients, &clients[0], "$9", "@2").is_err());
+        assert!(guard_destination(&clients, &clients[0], "$3", "@3").is_ok());
+        let mut shared = clients;
+        shared[1].pane = "%1".into();
+        assert!(input_client(&shared, "%1").is_err());
+    }
+
+    #[test]
+    fn narrow_and_empty_draws_keep_navigation_and_footer_safe() {
+        use ratatui::{Terminal, backend::TestBackend};
+        for (width, height) in [(38, 28), (20, 9), (8, 4), (1, 1), (0, 0)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            let mut sidebar = Sidebar::default();
+            terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
+            sidebar.navigation.query = "very long query with Unicode 界".into();
+            sidebar.navigation.search = Some(SearchEdit {
+                query: String::new(),
+                pane: None,
+            });
+            sidebar.all_agents.push(agent("%1", State::Done));
+            sidebar.rebuild();
+            terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
+        }
     }
 
     #[test]
