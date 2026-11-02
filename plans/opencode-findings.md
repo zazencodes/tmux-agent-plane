@@ -80,8 +80,9 @@ renamed into `$XDG_STATE_HOME/tmux-agent-plane/opencode/<pid>.json`, defaulting 
 - permission/question membership for the selected root plus direct child sessions,
   matching OpenCode's own
   [session UI](https://github.com/anomalyco/opencode/blob/v1.19.3/packages/tui/src/routes/session/index.tsx);
-- `updated_at`, time of the last **successful native API snapshot**. Status events
-  may publish immediately but cannot extend freshness using an old snapshot;
+- `updated_at`, time of the last **successful native API snapshot**. Completion
+  events update only the internal counter; successful snapshots atomically publish
+  current state, count and freshness. Events never republish cached state;
 - launch-unique `completion_epoch` and monotonically increasing `completed_turns`.
   Only the ordered `session.status` event stream counts live busy/retry → idle
   transitions. API snapshots never mutate the completion lifecycle: native idle
@@ -170,3 +171,11 @@ turns, no double count, regression errors and native navigation.
   only actual pending permission/question requests publish blocked.
 - Mid-turn daemon startup cannot recover completions before publisher activation.
   It does preserve turns observed after activation, including sub-tick turns.
+
+Follow-up publication regression: a native idle event between two API polls must
+leave the previous busy snapshot unchanged. Only the next successful idle API
+snapshot publishes the incremented completion counter, so the daemon cannot
+consume the delta while still observing cached working state. The test failed
+against the cached-event publication and passed after removing it. Error snapshots
+include the required session/title fields so the adapter reports the original
+source error detail through its unknown-state error.
