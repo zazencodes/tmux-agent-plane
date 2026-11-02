@@ -14,6 +14,8 @@ pub struct Detected {
     pub title: String,
     pub session_id: Option<String>,
     pub preserve_title: bool,
+    /// Durable completed turns in the published session, when available.
+    pub completed_turns: Option<u64>,
 }
 
 pub fn detect(panes: &[Pane]) -> Result<Vec<Detected>> {
@@ -44,6 +46,7 @@ pub fn detect(panes: &[Pane]) -> Result<Vec<Detected>> {
                 title: observation.title,
                 session_id: observation.session_id,
                 preserve_title: observation.preserve_title,
+                completed_turns: observation.completed_turns,
             });
         }
     }

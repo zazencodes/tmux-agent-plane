@@ -87,6 +87,9 @@ pub struct Agent {
     pub state_since: u64,
     /// Number of finished turns seen by the daemon.
     pub completions: u64,
+    /// Last durable completion counter from the current published session.
+    #[serde(default)]
+    pub reported_completions: Option<u64>,
     /// The pane is on screen right now.
     pub visible: bool,
 }

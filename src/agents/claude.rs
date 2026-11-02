@@ -26,6 +26,7 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
                 title: clean_title(&pane.title),
                 session_id: Some(session.session_id.clone()),
                 preserve_title: false,
+                completed_turns: None,
             })
         })
         .collect())
