@@ -7,6 +7,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
+- Order agents within session groups by attention and time in state; keep rows latched during sidebar navigation, with `S` to re-sort explicitly
+
 - Add sidebar view mode (`V`) to preview agent windows and sessions while retaining sidebar input, incremental search (`\`) that pauses preview until accepted, and a state filter cycle (`F`); carry navigation state between sidebars and refuse ambiguous/shared-client switches
 - Track Antigravity CLI (`agy`) from its first turn, including permissions, questions and background work; spawning requires a task and rejects omission before creating a pane
 - Track and spawn Grok Build on macOS through its opt-in official leader mode, including permissions and questions

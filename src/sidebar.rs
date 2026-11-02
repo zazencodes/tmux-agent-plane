@@ -176,6 +176,7 @@ struct Navigation {
     query: String,
     pane: Option<String>,
     search: Option<SearchEdit>,
+    order: Vec<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -206,6 +207,7 @@ struct Sidebar {
     error: Option<String>,
     editing: Option<Rename>,
     notice: Option<String>,
+    focused: bool,
 }
 
 impl Navigation {
@@ -243,6 +245,78 @@ impl Navigation {
 }
 
 impl Sidebar {
+    fn update_focus(&mut self, focused: bool) {
+        if focused && !self.focused {
+            // A fresh keyboard visit ranks current state; V handoffs set focused directly.
+            self.navigation.order.clear();
+        }
+        self.focused = focused;
+    }
+
+    fn rank_order(&mut self) {
+        let attention = |state| match state {
+            State::Blocked => 0,
+            State::Done => 1,
+            State::Working => 2,
+            State::Idle => 3,
+        };
+        let mut agents: Vec<_> = self.all_agents.iter().collect();
+        agents.sort_by_key(|a| {
+            (
+                &a.session,
+                attention(a.state),
+                a.state_since,
+                &a.location,
+                &a.pane,
+            )
+        });
+        self.navigation.order = agents.into_iter().map(|a| a.pane.clone()).collect();
+    }
+
+    /// Keep existing rows in place; append arrivals within their existing session group.
+    fn sync_order(&mut self) {
+        if self.navigation.order.is_empty() {
+            self.rank_order();
+            return;
+        }
+        let mut sessions: Vec<String> = Vec::new();
+        for pane in &self.navigation.order {
+            if let Some(agent) = self.all_agents.iter().find(|a| &a.pane == pane)
+                && !sessions.contains(&agent.session)
+            {
+                sessions.push(agent.session.clone());
+            }
+        }
+        for agent in &self.all_agents {
+            if !sessions.contains(&agent.session) {
+                sessions.push(agent.session.clone());
+            }
+        }
+        let mut order = Vec::new();
+        for session in sessions {
+            for pane in &self.navigation.order {
+                if self
+                    .all_agents
+                    .iter()
+                    .any(|a| &a.pane == pane && a.session == session)
+                {
+                    order.push(pane.clone());
+                }
+            }
+            for agent in &self.all_agents {
+                if agent.session == session && !order.contains(&agent.pane) {
+                    order.push(agent.pane.clone());
+                }
+            }
+        }
+        self.navigation.order = order;
+    }
+
+    fn resort(&mut self) {
+        self.rank_order();
+        self.rebuild();
+    }
+
     fn refresh(&mut self) {
         match index::read() {
             Ok(index) => {
@@ -256,13 +330,19 @@ impl Sidebar {
                 self.error = Some(e.to_string());
             }
         }
+        if !self.focused {
+            self.rank_order();
+        }
         self.rebuild();
     }
 
     fn rebuild(&mut self) {
+        self.sync_order();
         self.agents = self
-            .all_agents
+            .navigation
+            .order
             .iter()
+            .filter_map(|pane| self.all_agents.iter().find(|a| &a.pane == pane))
             .filter(|a| {
                 self.navigation.filter.is_none_or(|state| a.state == state)
                     && self.navigation.matches_query(a)
@@ -344,6 +424,7 @@ impl Sidebar {
             }
             KeyCode::Enter => {
                 self.navigation.search = None;
+                self.rank_order();
             }
             KeyCode::Down => {
                 self.step(1);
@@ -396,8 +477,9 @@ impl Sidebar {
             KeyCode::Char('V') => self.navigation.view = !self.navigation.view,
             KeyCode::Char('F') => {
                 self.navigation.cycle_filter(&self.all_agents);
-                self.rebuild();
+                self.resort();
             }
+            KeyCode::Char('S') => self.resort(),
             KeyCode::Char('\\') => {
                 self.navigation.search = Some(SearchEdit {
                     query: self.navigation.query.clone(),
@@ -544,6 +626,7 @@ fn receive_handoff(sidebar: &mut Sidebar, own: &str) -> Result<bool> {
         // Consume before handling buffered keys in the destination pane.
         tmux::run(&["set-option", "-pu", "-t", own, HANDOFF])?;
         sidebar.navigation = handoff.navigation;
+        sidebar.focused = true;
         sidebar.editing = None;
         sidebar.notice = None;
         sidebar.refresh();
@@ -603,6 +686,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
     let own = std::env::var("TMUX_PANE")?;
     let mut sidebar = Sidebar::default();
     sidebar.refresh();
+    sidebar.focused = clients()?.iter().any(|client| client.pane == own);
     receive_handoff(&mut sidebar, &own)?;
     let mut refreshed = Instant::now();
     let mut relay = None;
@@ -611,6 +695,14 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
         if event::poll(Duration::from_millis(100))? {
             if receive_handoff(&mut sidebar, &own)? {
                 terminal.draw(|f| draw(f, &mut sidebar))?;
+            } else {
+                let focused = clients()?.iter().any(|client| client.pane == own);
+                if focused && !sidebar.focused {
+                    sidebar.update_focus(focused);
+                    sidebar.refresh();
+                } else {
+                    sidebar.focused = focused;
+                }
             }
             let mut focus = false;
             let mut preview = false;
@@ -670,6 +762,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
             }
             // Refresh may change selection when an agent vanishes. Only input triggers preview.
             if !receive_handoff(&mut sidebar, &own)? {
+                sidebar.update_focus(clients()?.iter().any(|client| client.pane == own));
                 sidebar.refresh();
             }
             refreshed = Instant::now();
@@ -810,7 +903,12 @@ fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
                     colour(state),
                 )
             }
-            None => hints(&[("⏎", "jump"), ("r", "rename"), ("q", "close")]),
+            None => hints(&[
+                ("⏎", "jump"),
+                ("S", "sort"),
+                ("r", "rename"),
+                ("q", "close"),
+            ]),
         },
     }
 }
@@ -1001,11 +1099,11 @@ mod tests {
         assert!(!sidebar.navigation.view);
         assert_eq!(sidebar.navigation.pane.as_deref(), Some("%3"));
         press(&mut sidebar, KeyCode::Down);
-        assert_eq!(sidebar.navigation.pane.as_deref(), Some("%1"));
+        assert_eq!(sidebar.navigation.pane.as_deref(), Some("%2"));
         sidebar.all_agents.reverse();
         sidebar.rebuild();
-        assert_eq!(sidebar.selected().unwrap().pane, "%1");
-        sidebar.all_agents.retain(|a| a.pane != "%1");
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
+        sidebar.all_agents.retain(|a| a.pane != "%2");
         sidebar.rebuild();
         assert_eq!(sidebar.selected().unwrap().pane, "%3");
         press(&mut sidebar, KeyCode::Char('V'));
@@ -1052,6 +1150,87 @@ mod tests {
         press(&mut sidebar, KeyCode::Char('F'));
         assert_eq!(sidebar.navigation.filter, None);
         assert!(sidebar.agents.is_empty());
+    }
+
+    fn order(sidebar: &Sidebar) -> Vec<&str> {
+        sidebar.agents.iter().map(|a| a.pane.as_str()).collect()
+    }
+
+    #[test]
+    fn attention_order_latches_badges_appends_removes_and_resorts_without_retargeting() {
+        let mut sidebar = Sidebar {
+            all_agents: vec![
+                agent("%1", State::Idle),
+                agent("%2", State::Done),
+                agent("%3", State::Blocked),
+                agent("%4", State::Blocked),
+            ],
+            focused: true,
+            ..Sidebar::default()
+        };
+        sidebar.all_agents[2].state_since = 20;
+        sidebar.all_agents[3].state_since = 10;
+        sidebar.rebuild();
+        assert_eq!(order(&sidebar), ["%4", "%3", "%2", "%1"]);
+        sidebar.select(Some(1)); // identity %3 must survive every rebuild.
+        sidebar.all_agents[3].state = State::Idle;
+        sidebar.all_agents[0].state = State::Blocked;
+        sidebar.rebuild();
+        assert_eq!(order(&sidebar), ["%4", "%3", "%2", "%1"]);
+        assert_eq!(sidebar.agents[0].state, State::Idle); // live badge, fixed row.
+        sidebar.all_agents.push(agent("%5", State::Blocked));
+        sidebar.rebuild();
+        assert_eq!(order(&sidebar), ["%4", "%3", "%2", "%1", "%5"]);
+        sidebar.all_agents.retain(|a| a.pane != "%2");
+        sidebar.rebuild();
+        assert_eq!(order(&sidebar), ["%4", "%3", "%1", "%5"]);
+        press(&mut sidebar, KeyCode::Char('S'));
+        assert_eq!(order(&sidebar), ["%1", "%5", "%3", "%4"]);
+        assert_eq!(sidebar.selected().unwrap().pane, "%3");
+        // A new keyboard visit rebuilds current priorities after focus left.
+        sidebar.update_focus(false);
+        sidebar.all_agents[0].state = State::Working;
+        sidebar.update_focus(true);
+        sidebar.rebuild();
+        assert_eq!(order(&sidebar), ["%5", "%3", "%1", "%4"]);
+        assert_eq!(sidebar.selected().unwrap().pane, "%3");
+    }
+
+    #[test]
+    fn session_groups_and_search_acceptance_carry_a_stable_handoff_snapshot() {
+        let mut sidebar = Sidebar {
+            all_agents: vec![agent("%1", State::Idle), agent("%2", State::Working)],
+            focused: true,
+            ..Sidebar::default()
+        };
+        let mut remote = agent("%3", State::Blocked);
+        remote.session = "other".into();
+        sidebar.all_agents.push(remote);
+        sidebar.rebuild();
+        assert_eq!(order(&sidebar), ["%3", "%2", "%1"]);
+        sidebar.all_agents.push(agent("%4", State::Blocked));
+        sidebar.rebuild();
+        assert_eq!(order(&sidebar), ["%3", "%2", "%1", "%4"]);
+        sidebar.select(Some(2));
+        press(&mut sidebar, KeyCode::Char('\\'));
+        sidebar.rebuild();
+        assert_eq!(order(&sidebar), ["%3", "%2", "%1", "%4"]);
+        press(&mut sidebar, KeyCode::Enter);
+        assert_eq!(order(&sidebar), ["%3", "%4", "%2", "%1"]);
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        let nav: Navigation =
+            serde_json::from_str(&serde_json::to_string(&sidebar.navigation).unwrap()).unwrap();
+        let mut destination = Sidebar {
+            all_agents: sidebar.all_agents.clone(),
+            navigation: nav,
+            focused: true,
+            ..Sidebar::default()
+        };
+        destination.all_agents[2].state = State::Idle;
+        destination.rebuild();
+        assert_eq!(order(&destination), ["%3", "%4", "%2", "%1"]);
+        assert_eq!(destination.selected().unwrap().pane, "%1");
+        assert!(footer(&destination, 38, 100).to_string().contains("sort"));
     }
 
     #[test]
@@ -1121,6 +1300,7 @@ mod tests {
                 pane: Some("%8".into()),
                 filter: Some(State::Done),
                 search: None,
+                order: vec!["%8".into()],
             },
         };
         let restored: Handoff =
@@ -1129,6 +1309,7 @@ mod tests {
         assert_eq!(restored.navigation.filter, Some(State::Done));
         assert_eq!(restored.navigation.pane.as_deref(), Some("%8"));
         assert!(restored.navigation.search.is_none());
+        assert_eq!(restored.navigation.order, vec!["%8"]);
     }
 
     #[test]
