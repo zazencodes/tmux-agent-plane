@@ -1,0 +1,119 @@
+mod commands;
+mod daemon;
+mod detect;
+mod index;
+mod tmux;
+mod ui;
+
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+
+/// See and steer every coding agent running in tmux.
+#[derive(Parser)]
+#[command(name = "tmux-agent-plane", version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Watch tmux and keep the agent index current (started by the tmux plugin)
+    Daemon,
+    /// Open the agent list with a live preview; Enter jumps to the agent
+    Ui,
+    /// List running agents (`*` marks the caller)
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print an agent's recent screen
+    Read {
+        /// Agent name or pane id
+        target: String,
+        /// Lines of scrollback to include above the visible screen
+        #[arg(long, default_value_t = 0)]
+        lines: u32,
+    },
+    /// Paste a prompt into an agent and press Enter
+    Send {
+        /// Agent name or pane id
+        target: String,
+        text: String,
+        /// Wait until the agent finishes the turn or blocks
+        #[arg(long)]
+        wait: bool,
+        /// Give up waiting after this many seconds
+        #[arg(long, requires = "wait")]
+        timeout: Option<u64>,
+    },
+    /// Press keys in an agent's pane (tmux key names: Enter, Escape, Up, Down, 1, y ...)
+    Keys {
+        /// Agent name or pane id
+        target: String,
+        #[arg(required = true)]
+        keys: Vec<String>,
+    },
+    /// Wait until an agent is not working (done, idle or blocked)
+    Wait {
+        /// Agent name or pane id
+        target: String,
+        /// Give up after this many seconds
+        #[arg(long)]
+        timeout: Option<u64>,
+    },
+    /// Start an agent in a new pane, window or session
+    Spawn {
+        kind: index::Kind,
+        /// The first prompt
+        task: Option<String>,
+        #[arg(long = "in", value_enum, default_value = "pane")]
+        placement: commands::Placement,
+        /// Working directory (default: current directory)
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+        /// Agent name (default: <kind>-<pane number>)
+        #[arg(long)]
+        name: Option<String>,
+        /// Wait until the agent finishes its first turn or blocks
+        #[arg(long)]
+        wait: bool,
+        /// Give up waiting after this many seconds
+        #[arg(long, requires = "wait")]
+        timeout: Option<u64>,
+    },
+}
+
+fn main() -> anyhow::Result<()> {
+    match Cli::parse().command {
+        Cmd::Daemon => daemon::run(),
+        Cmd::Ui => ui::run(),
+        Cmd::List { json } => commands::list(json),
+        Cmd::Read { target, lines } => commands::read(&target, lines),
+        Cmd::Send {
+            target,
+            text,
+            wait,
+            timeout,
+        } => commands::send(&target, &text, wait, timeout),
+        Cmd::Keys { target, keys } => commands::keys(&target, &keys),
+        Cmd::Wait { target, timeout } => commands::wait(&target, timeout),
+        Cmd::Spawn {
+            kind,
+            task,
+            placement,
+            cwd,
+            name,
+            wait,
+            timeout,
+        } => commands::spawn(commands::Spawn {
+            kind,
+            placement,
+            cwd,
+            name,
+            task,
+            wait,
+            timeout,
+        }),
+    }
+}
