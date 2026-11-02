@@ -21,23 +21,9 @@ Start Claude Code or Codex in any tmux pane, the way you already do. tmux-agent-
 
 No hooks, no wrappers, nothing to configure in your agents.
 
-```text
- tmux status bar                                    ◆ 1 ✓ 1 ● 2 ○ 1   ~/pro/app
-
-┌ agents · 5 ──────────────────────────────────────────────────────────────────┐
-│◆ reviewer      blocked  12s  work:2.2   Review the auth diff                 │
-│✓ claude-154    done      3m  work:1.1   Add rate limiting to the API         │
-│● codex-164     working  41s  work:3.1   Migrate the billing tests | app      │
-│● docs-writer   working   2m  docs:1.1   Document the new endpoints           │
-│○ claude-163    idle      9m  site:1.1   Landing page copy                    │
-└──────────────────────────────────────────────────────────────────────────────┘
-┌ reviewer · input needed · /Users/you/pro/app ────────────────────────────────┐
-│ Do you want to apply this change to src/auth.rs?                             │
-│ ❯ 1. Yes                                                                     │
-│   2. No, and tell Claude what to do differently                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-enter jump · j/k move · q quit
-```
+<p align="center">
+  <img src="docs/assets/screenshot.png" alt="The agent sidebar on the left of a tmux window, next to a Codex agent" width="700">
+</p>
 
 ## Features
 
