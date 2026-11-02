@@ -35,7 +35,7 @@ A daemon polls once a second and reads what the agents already publish:
 - **Claude Code** keeps `~/.claude/sessions/<pid>.json` for each running session, with its tmux pane and a `status` of `busy`, `waiting` (with `waitingFor`), `idle` or `shell` (a background shell runs on after the turn).
 - **Codex** sets the terminal title: a braille spinner in front while a turn runs, `[ ! ] Action Required` while an approval or question waits. A pane is a Codex agent when a `codex` process runs under it.
 
-The daemon writes everything to one index, `~/.local/state/tmux-agent-plane/agents.json`, which the CLI and the agent list read.
+Every pane in every tmux session is checked, and the daemon writes everything to one index, `~/.local/state/tmux-agent-plane/agents.json`, which the CLI and the agent list read.
 
 ## Install
 
@@ -64,6 +64,8 @@ tmux-agent-plane read <agent> [--lines N]
 tmux-agent-plane send <agent> "<prompt>" [--wait] [--timeout S]
 tmux-agent-plane keys <agent> <key>...
 tmux-agent-plane wait <agent> [--timeout S]
+tmux-agent-plane focus <agent>
+tmux-agent-plane kill <agent>
 tmux-agent-plane spawn claude|codex ["<task>"] [--in pane|window|session] [--cwd DIR] [--name NAME] [--wait] [--timeout S]
 tmux-agent-plane ui
 tmux-agent-plane daemon

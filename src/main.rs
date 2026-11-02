@@ -54,6 +54,16 @@ enum Cmd {
         #[arg(required = true)]
         keys: Vec<String>,
     },
+    /// Show an agent on the user's screen
+    Focus {
+        /// Agent name or pane id
+        target: String,
+    },
+    /// Close an agent's pane, ending the agent
+    Kill {
+        /// Agent name or pane id
+        target: String,
+    },
     /// Wait until an agent is not working (done, idle or blocked)
     Wait {
         /// Agent name or pane id
@@ -97,6 +107,8 @@ fn main() -> anyhow::Result<()> {
             timeout,
         } => commands::send(&target, &text, wait, timeout),
         Cmd::Keys { target, keys } => commands::keys(&target, &keys),
+        Cmd::Focus { target } => commands::focus(&target),
+        Cmd::Kill { target } => commands::kill(&target),
         Cmd::Wait { target, timeout } => commands::wait(&target, timeout),
         Cmd::Spawn {
             kind,

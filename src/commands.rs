@@ -171,6 +171,22 @@ pub fn keys(target: &str, keys: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Show an agent on the user's screen. Viewing it marks a `done` agent seen.
+pub fn focus(target: &str) -> Result<()> {
+    let index = index::read()?;
+    let agent = index::find(&index, target)?;
+    tmux::jump(&agent.session, &agent.window, &agent.pane)
+}
+
+/// Close an agent's pane, ending the agent and its shell.
+pub fn kill(target: &str) -> Result<()> {
+    let index = index::read()?;
+    let agent = index::find(&index, target)?;
+    tmux::run(&["kill-pane", "-t", &agent.pane])?;
+    println!("killed {} ({})", agent.name, agent.pane);
+    Ok(())
+}
+
 pub fn wait(target: &str, timeout: Option<u64>) -> Result<()> {
     let index = index::read()?;
     let pane = index::find(&index, target)?.pane.clone();

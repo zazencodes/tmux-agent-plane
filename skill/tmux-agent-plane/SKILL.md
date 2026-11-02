@@ -1,6 +1,6 @@
 ---
 name: tmux-agent-plane
-description: The user's coding agents (Claude Code, Codex) running in tmux panes, tracked by the `tmux-agent-plane` CLI. Use whenever the user mentions another agent, by name (`claude-154`, `codex-26`, `reviewer`) or by pane, or asks how an agent is doing, what agents are running, to check on, read, message, answer or wait for an agent, to start or spawn a new agent in a pane, window or session, to delegate work to another agent, or to act as a super agent that coordinates other agents. Use it, not raw tmux commands, for anything involving other agents.
+description: The system-wide index of the user's coding agents (Claude Code, Codex) across every tmux session, and the only way to work with them, through the `tmux-agent-plane` CLI. Load it first, before any tmux command, whenever a task touches another agent: the user names an agent (`claude-154`, `codex-26`, `reviewer`) or a pane, asks how an agent is doing or what agents are running, wants to check on, read, message, answer, wait for, show, close, start or spawn an agent (in a pane, window or session), wants work delegated to another agent, or wants a super agent that coordinates others.
 ---
 
 # tmux-agent-plane
@@ -14,6 +14,10 @@ Every Claude Code and Codex agent running in the user's tmux is tracked by a bac
 
 You are an agent in this list too. `list` marks you with `*` (or `"self": true` in JSON).
 
+## Rule: the CLI, never raw tmux
+
+Do every agent job through `tmux-agent-plane`: finding agents, reading their screens, typing into them, starting, showing and closing them. Never run `tmux list-panes`, `capture-pane`, `send-keys`, `split-window`, `new-window` or `kill-pane` against agents yourself. The daemon already indexes every agent in every session; `list` answers in one call what tmux would make you piece together, and the CLI keeps names, parents and done/seen state right. Raw tmux is fine only for panes that are not agents (a dev server, a log tail).
+
 ## Commands
 
 ```bash
@@ -23,6 +27,8 @@ tmux-agent-plane read <agent> [--lines N] # its screen, plus N lines of scrollba
 tmux-agent-plane send <agent> "<prompt>" [--wait] [--timeout S]
 tmux-agent-plane keys <agent> <key>...    # tmux key names: Enter Escape Up Down Tab 1 2 y n
 tmux-agent-plane wait <agent> [--timeout S]
+tmux-agent-plane focus <agent>            # bring it on screen for the user
+tmux-agent-plane kill <agent>             # close its pane, ending it
 tmux-agent-plane spawn claude|codex ["<task>"] [--in pane|window|session] [--cwd DIR] [--name NAME] [--wait] [--timeout S]
 ```
 
@@ -59,4 +65,4 @@ tmux-agent-plane spawn claude|codex ["<task>"] [--in pane|window|session] [--cwd
 
 ## Working as a super agent
 
-When coordinating several agents: spawn each with a self-contained task and a name, `send --wait` or `wait` on them, `read` their results, and check `list` for anything `blocked` or `done`. Give each agent its own files or worktree so they do not edit the same files. Close a finished agent's pane only when the user wants it gone: `tmux kill-pane -t <pane>`.
+When coordinating several agents: spawn each with a self-contained task and a name, `send --wait` or `wait` on them, `read` their results, and check `list` for anything `blocked` or `done`. Give each agent its own files or worktree so they do not edit the same files. When the user wants to look at an agent, `focus` it. Close a finished agent only when the user wants it gone: `kill <agent>`.
