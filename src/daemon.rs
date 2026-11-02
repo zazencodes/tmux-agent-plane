@@ -3,6 +3,7 @@
 
 use crate::agents::RawState;
 use crate::detect::{self, Detected};
+use crate::diagnostics::{self, Active, Batch, Issue};
 use crate::index::{self, Agent, Index, State};
 use crate::tmux;
 use anyhow::{Context, Result, bail};
@@ -10,6 +11,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::os::fd::AsRawFd;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 const TICK: Duration = Duration::from_secs(1);
@@ -17,47 +19,118 @@ const TICK: Duration = Duration::from_secs(1);
 /// tmux option holding the status bar segment. Put `#{@agent_plane_status}` in `status-right`.
 const STATUS_OPTION: &str = "@agent_plane_status";
 
-pub fn run() -> Result<()> {
-    let dir = index::state_dir()?;
-    std::fs::create_dir_all(&dir)?;
-    let lock = File::create(dir.join("daemon.lock"))?;
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        // Another daemon owns the index; sourcing tmux.conf again lands here.
-        return Ok(());
-    }
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
+/// Called by the lifecycle worker's signal/control handlers.
+#[allow(dead_code)] // Used by the lifecycle worker once its separate change is integrated.
+pub fn request_shutdown() {
+    SHUTDOWN.store(true, Ordering::Relaxed);
+}
+
+/// Persist and surface a fatal daemon/lifecycle error without desktop notification recursion.
+pub fn report_fatal(error: &anyhow::Error) -> Result<()> {
+    let path = diagnostics::log_path()?;
+    let reason = format!("{error:#}");
+    let persistence = diagnostics::record("fatal", &reason);
+    let _ = tmux::run(&[
+        "set-option",
+        "-g",
+        STATUS_OPTION,
+        "#[fg=#f38ba8]⚠ daemon stopped; see daemon.log#[default] ",
+    ]);
+    let _ = tmux_message(&format!(
+        "tmux-agent-plane stopped: {reason}; log: {}",
+        path.display()
+    ));
+    persistence
+}
+
+pub fn run() -> Result<()> {
+    let path = diagnostics::log_path()?;
+    if let Err(error) = run_inner() {
+        return match report_fatal(&error) {
+            Ok(()) => Err(error.context(format!("daemon stopped; see {}", path.display()))),
+            Err(log_error) => Err(error.context(format!(
+                "daemon stopped; could not persist reason to {}: {log_error:#}",
+                path.display()
+            ))),
+        };
+    }
+    Ok(())
+}
+
+fn run_inner() -> Result<()> {
+    let dir = index::state_dir()?;
+    std::fs::create_dir_all(&dir).context("creating daemon state directory")?;
+    let lock = File::create(dir.join("daemon.lock")).context("opening daemon lock")?;
+    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        let error = std::io::Error::last_os_error();
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            return Ok(());
+        }
+        return Err(error).context("locking daemon index");
+    }
+    diagnostics::record("daemon", "active")?;
     let mut prev: HashMap<String, Agent> = index::read_any()?
         .map(|i| i.agents.into_iter().map(|a| (a.pane.clone(), a)).collect())
         .unwrap_or_default();
     let mut status = None;
+    let mut active = Active::default();
+    let mut notifications = Notifications::default();
+    // Diagnostic announcements use only tmux and are never sent through notification retry.
+    let mut announcement: Option<String> = None;
 
     loop {
+        if SHUTDOWN.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         let panes = match tmux::list_panes() {
             Ok(panes) => panes,
             Err(_) if !tmux::server_running() => return Ok(()),
             Err(e) => return Err(e),
         };
         let now = index::now_ms();
-        let mut detected = detect::detect(&panes)?;
-        detected.sort_by(|a, b| {
-            (&a.pane.session, a.pane.window_index, a.pane.pane_index).cmp(&(
-                &b.pane.session,
-                b.pane.window_index,
-                b.pane.pane_index,
-            ))
-        });
-
-        let mut agents = Vec::with_capacity(detected.len());
-        for d in detected {
-            let before = prev.get(&d.pane.id).filter(|a| a.kind == d.kind);
-            let agent = advance(before, d, now)?;
-            if let Some(message) = transition_message(before, &agent) {
-                notify(&agent.name, &message)?;
+        let before = prev.clone();
+        let batch = fold(&mut prev, detect::detect(&panes)?, &panes, now);
+        let agents = batch.values;
+        let mut issues = batch.issues;
+        for agent in &agents {
+            if let Some(message) = transition_message(
+                before.get(&agent.pane).filter(|a| a.kind == agent.kind),
+                agent,
+            ) {
+                notifications.push(&agent.name, &message);
             }
-            agents.push(agent);
         }
-
-        let segment = status_segment(&agents);
+        issues.extend(notifications.deliver());
+        if let Some(message) = &announcement {
+            match tmux_message(message) {
+                Ok(()) => announcement = None,
+                Err(error) => {
+                    // Retain the announcement for retry. Its failure never announces itself.
+                    issues.push(Issue::new("diagnostics:tmux", error));
+                }
+            }
+        }
+        let changes = active.update(&issues)?;
+        let announcements: Vec<_> = changes
+            .into_iter()
+            .filter(|message| !message.starts_with("diagnostics:tmux:"))
+            .collect();
+        if !announcements.is_empty() {
+            announcement = Some(format!(
+                "tmux-agent-plane: {}; log: {}",
+                announcements.join("; "),
+                diagnostics::log_path()?.display()
+            ));
+        }
+        // Publish the index before touching presentation, including on notification failure.
+        index::write(&Index {
+            updated_at: now,
+            agents: agents.clone(),
+        })
+        .context("writing agent index")?;
+        let segment = active.status() + &status_segment(&agents);
         if status.as_ref() != Some(&segment) {
             tmux::run(&["set-option", "-g", STATUS_OPTION, &segment])?;
             for client in tmux::clients()? {
@@ -65,14 +138,62 @@ pub fn run() -> Result<()> {
             }
             status = Some(segment);
         }
-
-        index::write(&Index {
-            updated_at: now,
-            agents: agents.clone(),
-        })?;
-        prev = agents.into_iter().map(|a| (a.pane.clone(), a)).collect();
         std::thread::sleep(TICK);
     }
+}
+
+/// Retain last good counters/unseen state only internally while their live pane is faulted.
+/// The public batch contains exclusively agents observed successfully on this tick.
+fn fold(
+    previous: &mut HashMap<String, Agent>,
+    mut batch: Batch<Detected>,
+    panes: &[tmux::Pane],
+    now: u64,
+) -> Batch<Agent> {
+    batch.values.sort_by(|a, b| {
+        (&a.pane.session, a.pane.window_index, a.pane.pane_index).cmp(&(
+            &b.pane.session,
+            b.pane.window_index,
+            b.pane.pane_index,
+        ))
+    });
+    let mut result = Batch {
+        values: Vec::new(),
+        issues: batch.issues,
+    };
+    let mut next = HashMap::new();
+    for d in batch.values {
+        let pane = d.pane.id.clone();
+        let kind = d.kind;
+        let before = previous.get(&pane).filter(|a| a.kind == kind);
+        match advance(before, d, now) {
+            Ok(agent) => {
+                next.insert(pane, agent.clone());
+                result.values.push(agent);
+            }
+            Err(error) => {
+                result.issues.push(Issue::new(
+                    format!("advance:{}:{pane}", kind.as_str()),
+                    error,
+                ));
+                if let Some(before) = before {
+                    next.insert(pane, before.clone());
+                }
+            }
+        }
+    }
+    for (pane, agent) in previous.drain() {
+        if panes.iter().any(|p| p.id == pane)
+            && result
+                .issues
+                .iter()
+                .any(|e| e.component == format!("scan:{}", agent.kind.as_str()))
+        {
+            next.entry(pane).or_insert(agent);
+        }
+    }
+    *previous = next;
+    result
 }
 
 /// Fold one tick of detection into an agent's record.
@@ -94,7 +215,10 @@ fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Result<Agent> {
         (None, None) => u64::from(was_working && d.state == RawState::Idle),
         _ => bail!("agent completion counter requires a nonempty publisher epoch"),
     };
-    let completions = before.map_or(0, |a| a.completions) + completed;
+    let completions = before
+        .map_or(0, |a| a.completions)
+        .checked_add(completed)
+        .context("agent completion count overflowed")?;
     let unseen = before.is_some_and(|a| a.state == State::Done) || completed > 0;
     let state = match State::from(d.state) {
         State::Idle if unseen && !d.pane.visible => State::Done,
@@ -149,18 +273,99 @@ fn transition_message(before: Option<&Agent>, agent: &Agent) -> Option<String> {
     }
 }
 
-fn notify(name: &str, message: &str) -> Result<()> {
-    for client in tmux::clients()? {
-        tmux::run(&[
-            "display-message",
-            "-c",
-            &client,
-            "-d",
-            "5000",
-            &format!("{name} {message}"),
-        ])?;
+#[derive(Clone)]
+enum Destination {
+    Desktop,
+    Clients,
+    Client(String),
+}
+#[derive(Clone)]
+struct Notification {
+    destination: Destination,
+    name: String,
+    message: String,
+}
+#[derive(Default)]
+struct Notifications {
+    pending: Vec<Notification>,
+}
+impl Notifications {
+    fn push(&mut self, name: &str, message: &str) {
+        for destination in [Destination::Clients, Destination::Desktop] {
+            self.pending.push(Notification {
+                destination,
+                name: name.into(),
+                message: message.into(),
+            });
+        }
     }
-    system_notification(name, message)
+    fn deliver(&mut self) -> Vec<Issue> {
+        self.deliver_with(tmux::clients, |notification| {
+            match &notification.destination {
+                Destination::Desktop => {
+                    system_notification(&notification.name, &notification.message)
+                }
+                Destination::Client(client) => client_message(
+                    client,
+                    &format!("{} {}", notification.name, notification.message),
+                ),
+                Destination::Clients => unreachable!("expanded before delivery"),
+            }
+        })
+    }
+    fn deliver_with(
+        &mut self,
+        mut clients: impl FnMut() -> Result<Vec<String>>,
+        mut send: impl FnMut(&Notification) -> Result<()>,
+    ) -> Vec<Issue> {
+        let mut issues = Vec::new();
+        let mut deliveries = Vec::new();
+        let mut retries = Vec::new();
+        for notification in self.pending.drain(..) {
+            if matches!(notification.destination, Destination::Clients) {
+                match clients() {
+                    Ok(clients) => {
+                        for client in clients {
+                            let mut n = notification.clone();
+                            n.destination = Destination::Client(client);
+                            deliveries.push(n);
+                        }
+                    }
+                    Err(error) => {
+                        issues.push(Issue::new("notification:clients", error));
+                        retries.push(notification);
+                    }
+                }
+            } else {
+                deliveries.push(notification);
+            }
+        }
+        for notification in deliveries {
+            if let Err(error) = send(&notification) {
+                let component = match &notification.destination {
+                    Destination::Desktop => "notification:desktop".into(),
+                    Destination::Client(client) => format!("notification:tmux:{client}"),
+                    Destination::Clients => unreachable!(),
+                };
+                issues.push(Issue::new(component, error));
+                retries.push(notification);
+            }
+        }
+        self.pending = retries;
+        issues
+    }
+}
+
+fn client_message(client: &str, message: &str) -> Result<()> {
+    tmux::run(&["display-message", "-c", client, "-d", "5000", message])?;
+    Ok(())
+}
+
+fn tmux_message(message: &str) -> Result<()> {
+    for client in tmux::clients()? {
+        client_message(&client, message)?;
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -171,24 +376,32 @@ fn system_notification(name: &str, message: &str) -> Result<()> {
         quote(message),
         quote(name)
     );
-    let status = Command::new("osascript")
+    let output = Command::new("osascript")
         .args(["-e", &script])
-        .status()
+        .output()
         .context("failed to execute osascript")?;
-    if !status.success() {
-        bail!("osascript notification failed");
+    if !output.status.success() {
+        bail!(
+            "osascript notification failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
     Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
 fn system_notification(name: &str, message: &str) -> Result<()> {
-    let status = Command::new("notify-send")
+    let output = Command::new("notify-send")
         .args([name, message])
-        .status()
+        .output()
         .context("failed to execute notify-send")?;
-    if !status.success() {
-        bail!("notify-send failed");
+    if !output.status.success() {
+        bail!(
+            "notify-send failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
     Ok(())
 }
@@ -246,6 +459,166 @@ mod tests {
 
     fn tick(before: Option<&Agent>, state: RawState, visible: bool) -> Agent {
         advance(before, observation(state, visible), 0).unwrap()
+    }
+
+    fn batch(values: Vec<Detected>, issues: Vec<Issue>) -> Batch<Detected> {
+        Batch { values, issues }
+    }
+
+    #[test]
+    fn scan_fault_withdraws_public_agent_preserves_unseen_state_and_drops_dead_panes() {
+        let mut d = observation(RawState::Idle, false);
+        d.completed_turns = Some(2);
+        d.completion_epoch = Some("epoch".into());
+        let pane = d.pane.clone();
+        let agent = advance(None, d, 1).unwrap();
+        let mut prev = HashMap::from([(agent.pane.clone(), agent)]);
+        let result = fold(
+            &mut prev,
+            batch(
+                Vec::new(),
+                vec![Issue::new("scan:claude", anyhow::anyhow!("bad state"))],
+            ),
+            std::slice::from_ref(&pane),
+            2,
+        );
+        assert!(result.values.is_empty());
+        assert_eq!(prev["%1"].state, State::Done);
+        let mut d = observation(RawState::Idle, false);
+        d.completed_turns = Some(2);
+        d.completion_epoch = Some("epoch".into());
+        let recovered = fold(
+            &mut prev,
+            batch(vec![d], Vec::new()),
+            std::slice::from_ref(&pane),
+            3,
+        );
+        assert_eq!(
+            (recovered.values[0].state, recovered.values[0].completions),
+            (State::Done, 2)
+        );
+        fold(
+            &mut prev,
+            batch(
+                Vec::new(),
+                vec![Issue::new("scan:claude", anyhow::anyhow!("bad state"))],
+            ),
+            &[],
+            4,
+        );
+        assert!(prev.is_empty());
+    }
+
+    #[test]
+    fn regressed_counter_stays_faulted_until_caught_up_while_other_observation_advances() {
+        let mut d = observation(RawState::Idle, false);
+        d.completed_turns = Some(5);
+        d.completion_epoch = Some("epoch".into());
+        let agent = advance(None, d, 1).unwrap();
+        let mut prev = HashMap::from([(agent.pane.clone(), agent)]);
+        for count in [3, 4, 5] {
+            let mut faulty = observation(RawState::Idle, false);
+            faulty.completed_turns = Some(count);
+            faulty.completion_epoch = Some("epoch".into());
+            let mut healthy = observation(RawState::Working, false);
+            healthy.pane.id = "%2".into();
+            let panes = [faulty.pane.clone(), healthy.pane.clone()];
+            let result = fold(
+                &mut prev,
+                batch(vec![faulty, healthy], Vec::new()),
+                &panes,
+                count,
+            );
+            assert!(
+                result
+                    .values
+                    .iter()
+                    .any(|a| a.pane == "%2" && a.state == State::Working)
+            );
+            assert_eq!(result.issues.len(), usize::from(count < 5));
+            assert_eq!(prev["%1"].completions, 5);
+            assert_eq!(prev["%1"].reported_completions, Some(5));
+            if count < 5 {
+                assert!(result.values.iter().all(|a| a.pane != "%1"));
+            } else {
+                let recovered = result.values.iter().find(|a| a.pane == "%1").unwrap();
+                assert_eq!(recovered.state, State::Done);
+            }
+        }
+        // A successfully observed different kind in the same pane replaces the baseline.
+        let mut d = observation(RawState::Idle, false);
+        d.kind = Kind::Codex;
+        let panes = [d.pane.clone()];
+        fold(
+            &mut prev,
+            batch(
+                vec![d],
+                vec![Issue::new("scan:claude", anyhow::anyhow!("fault"))],
+            ),
+            &panes,
+            9,
+        );
+        assert_eq!(prev["%1"].kind, Kind::Codex);
+        assert_eq!(prev["%1"].completions, 0);
+    }
+
+    #[test]
+    fn desktop_failure_retries_only_failed_delivery_and_other_notifications_continue() {
+        let mut notifications = Notifications::default();
+        notifications.push("first", "finished");
+        notifications.push("second", "needs you");
+        let mut tmux_deliveries = Vec::new();
+        let failures = notifications.deliver_with(
+            || Ok(vec!["client".into()]),
+            |n| {
+                match n.destination {
+                    Destination::Desktop => anyhow::bail!("desktop unavailable"),
+                    Destination::Client(_) => tmux_deliveries.push(n.name.clone()),
+                    Destination::Clients => unreachable!(),
+                }
+                Ok(())
+            },
+        );
+        assert_eq!(failures.len(), 2);
+        assert!(
+            failures
+                .iter()
+                .all(|e| e.component == "notification:desktop")
+        );
+        assert_eq!(tmux_deliveries, ["first", "second"]);
+        assert_eq!(notifications.pending.len(), 2);
+        let mut retried = Vec::new();
+        let issues = notifications.deliver_with(
+            || panic!("successful clients must not be retried"),
+            |n| {
+                assert!(matches!(n.destination, Destination::Desktop));
+                retried.push(n.name.clone());
+                Ok(())
+            },
+        );
+        assert!(issues.is_empty());
+        assert!(notifications.pending.is_empty());
+        assert_eq!(retried, ["first", "second"]);
+    }
+
+    #[test]
+    fn client_failure_does_not_prevent_desktop_or_other_clients() {
+        let mut notifications = Notifications::default();
+        notifications.push("agent", "finished");
+        let mut delivered = 0;
+        let issues = notifications.deliver_with(
+            || Ok(vec!["bad".into(), "good".into()]),
+            |n| {
+                if matches!(&n.destination, Destination::Client(client) if client == "bad") {
+                    anyhow::bail!("client vanished");
+                }
+                delivered += 1;
+                Ok(())
+            },
+        );
+        assert_eq!(delivered, 2);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(notifications.pending.len(), 1);
     }
 
     #[test]
