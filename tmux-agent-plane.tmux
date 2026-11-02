@@ -22,8 +22,11 @@ tmux set-hook -g 'client-session-changed[90]' "$follow"
 # prefix + A: the agent list with a large preview, in a popup.
 tmux bind-key A display-popup -E -w 90% -h 85% -T " agents " "tmux-agent-plane ui"
 
-# Start is a short control command. The watcher detaches its session and output
-# before this plugin's tmux job exits. Lifecycle failures are recorded in daemon.log.
-if ! tmux-agent-plane daemon start >/dev/null 2>&1; then
-  tmux display-message "tmux-agent-plane: daemon start failed; run 'tmux-agent-plane daemon start' for diagnostics"
+# Initial tmux.conf runs before the first session exists. Start from the session
+# hook once there are panes to scan; reloading the plugin also starts an existing
+# server's watcher. Start is idempotent and lifecycle failures go to daemon.log.
+start='tmux-agent-plane daemon start >/dev/null 2>&1 || tmux display-message "tmux-agent-plane: daemon start failed; run tmux-agent-plane daemon start for diagnostics"'
+tmux set-hook -g 'session-created[90]' "run-shell -b '$start'"
+if tmux has-session 2>/dev/null; then
+  sh -c "$start"
 fi

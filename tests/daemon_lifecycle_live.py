@@ -97,7 +97,19 @@ def job(action):
 client = None
 master = None
 try:
-    tmux("-f", "/dev/null", "new-session", "-d", "-s", "harness", "-c", str(WORK))
+    # Load the plugin while tmux is still reading its initial config, before
+    # new-session has created a target. Loading it into an existing server
+    # alone misses this startup ordering bug.
+    config = WORK / "tmux.conf"
+    config.write_text("run-shell " + shlex.quote(str(ROOT / "tmux-agent-plane.tmux")) + "\n")
+    tmux("-f", str(config), "new-session", "-d", "-s", "harness", "-c", str(WORK))
+    wait_for(lambda: plane("list", "--json", check=False).returncode == 0,
+             "plugin cold start")
+    wait_for(lambda: not tmux("show-messages", "-J").stdout.strip(),
+             "cold start job exit")
+    assert "[fatal]" not in LOG.read_text(), LOG.read_text()
+    cold_pid = pid()
+    clean("plugin cold start before first session")
     master, slave = pty.openpty()
     client = subprocess.Popen([TMUX, "-L", SERVER, "attach-session", "-t", "harness"],
                               env=ENV, stdin=slave, stdout=slave, stderr=slave,
@@ -131,6 +143,7 @@ try:
                          "#{pane_in_mode}").stdout.strip() == "0", "dismiss negative control")
     plugin()
     first = pid()
+    assert first == cold_pid
     clean("plugin start")
     # Child is detached from the plugin job, has no controlling terminal and
     # redirects all output to daemon.log (setsid makes pgid equal its pid).

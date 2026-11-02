@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Fixed
+
+- Start the daemon after tmux creates its first session, preventing a stopped watcher when opening a fresh tmux server
+
 ## 0.3.0 - 2026-11-02
 
 ### Added
