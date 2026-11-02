@@ -14,6 +14,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Notify for a new Pi or OpenCode completion even when the agent remains unseen and already shows done
 - Start the watcher detached from tmux jobs so startup, duplicate starts, stops, failures and signals never open job output over a pane; use `daemon restart` for a targeted graceful restart, with lifecycle diagnostics in `daemon.log`
 - Keep the index updating when tmux status writes or client refreshes fail; retry presentation and report the fault and recovery
 - Keep healthy agents tracking through kind scan, completion counter and notification failures; withdraw faulty observations, show degraded/recovered status, and persist full errors and fatal exit reasons in the state directory’s `daemon.log`
@@ -24,6 +25,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Show off-screen done and blocked notifications for five seconds in every open sidebar footer, preserving pane input and focus; desktop notifications keep their existing delivery channel
 - Reject ambiguous agent identities and match Claude session processes to their tmux panes, including when separate tmux servers reuse pane IDs
 
 ### Upgrade notes

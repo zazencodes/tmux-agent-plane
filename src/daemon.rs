@@ -4,7 +4,7 @@
 use crate::agents::RawState;
 use crate::detect::{self, Detected};
 use crate::diagnostics::{self, Active, Batch, Issue};
-use crate::index::{self, Agent, Index, State};
+use crate::index::{self, Agent, Index, RecentEvent, State};
 use crate::tmux;
 use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
@@ -76,6 +76,7 @@ fn run_inner() -> Result<()> {
     let mut presentation = Presentation::default();
     let mut active = Active::default();
     let mut notifications = Notifications::default();
+    let mut recent_event: Option<RecentEvent> = None;
     // Diagnostic announcements use only tmux and are never sent through notification retry.
     let mut announcement: Option<String> = None;
 
@@ -93,11 +94,13 @@ fn run_inner() -> Result<()> {
         let batch = fold(&mut prev, detect::detect(&panes)?, &panes, now);
         let agents = batch.values;
         let mut issues = batch.issues;
+        recent_event = recent_event.filter(|event| event.is_live(now));
         for agent in &agents {
             if let Some(message) = transition_message(
                 before.get(&agent.pane).filter(|a| a.kind == agent.kind),
                 agent,
             ) {
+                recent_event = RecentEvent::new(agent, now);
                 notifications.push(&agent.name, &message);
             }
         }
@@ -115,6 +118,7 @@ fn run_inner() -> Result<()> {
         index::write(&Index {
             updated_at: now,
             agents: agents.clone(),
+            recent_event: recent_event.clone(),
         })
         .context("writing agent index")?;
         // Use the last diagnostic snapshot for presentation, then fold this attempt's issues
@@ -301,7 +305,10 @@ fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Result<Agent> {
 
 fn transition_message(before: Option<&Agent>, agent: &Agent) -> Option<String> {
     let before = before?;
-    if before.state == agent.state || agent.visible {
+    // Durable publishers can complete another turn between polls while still unseen/Done.
+    // Footer and desktop delivery share this policy so neither loses that completion.
+    let completed_again = agent.state == State::Done && agent.completions > before.completions;
+    if (before.state == agent.state && !completed_again) || agent.visible {
         return None;
     }
     match agent.state {
@@ -314,15 +321,7 @@ fn transition_message(before: Option<&Agent>, agent: &Agent) -> Option<String> {
     }
 }
 
-#[derive(Clone)]
-enum Destination {
-    Desktop,
-    Clients,
-    Client(String),
-}
-#[derive(Clone)]
 struct Notification {
-    destination: Destination,
     name: String,
     message: String,
 }
@@ -332,67 +331,24 @@ struct Notifications {
 }
 impl Notifications {
     fn push(&mut self, name: &str, message: &str) {
-        for destination in [Destination::Clients, Destination::Desktop] {
-            self.pending.push(Notification {
-                destination,
-                name: name.into(),
-                message: message.into(),
-            });
-        }
+        self.pending.push(Notification {
+            name: name.into(),
+            message: message.into(),
+        });
     }
     fn deliver(&mut self) -> Vec<Issue> {
-        self.deliver_with(tmux::clients, |notification| {
-            match &notification.destination {
-                Destination::Desktop => {
-                    system_notification(&notification.name, &notification.message)
-                }
-                Destination::Client(client) => client_message(
-                    client,
-                    &format!("{} {}", notification.name, notification.message),
-                ),
-                Destination::Clients => unreachable!("expanded before delivery"),
-            }
-        })
+        self.deliver_with(|n| system_notification(&n.name, &n.message))
     }
-    fn deliver_with(
-        &mut self,
-        mut clients: impl FnMut() -> Result<Vec<String>>,
-        mut send: impl FnMut(&Notification) -> Result<()>,
-    ) -> Vec<Issue> {
+    fn deliver_with(&mut self, mut send: impl FnMut(&Notification) -> Result<()>) -> Vec<Issue> {
         let mut issues = Vec::new();
-        let mut deliveries = Vec::new();
-        let mut retries = Vec::new();
-        for notification in self.pending.drain(..) {
-            if matches!(notification.destination, Destination::Clients) {
-                match clients() {
-                    Ok(clients) => {
-                        for client in clients {
-                            let mut n = notification.clone();
-                            n.destination = Destination::Client(client);
-                            deliveries.push(n);
-                        }
-                    }
-                    Err(error) => {
-                        issues.push(Issue::new("notification:clients", error));
-                        retries.push(notification);
-                    }
-                }
+        self.pending.retain(|notification| {
+            if let Err(error) = send(notification) {
+                issues.push(Issue::new("notification:desktop", error));
+                true
             } else {
-                deliveries.push(notification);
+                false
             }
-        }
-        for notification in deliveries {
-            if let Err(error) = send(&notification) {
-                let component = match &notification.destination {
-                    Destination::Desktop => "notification:desktop".into(),
-                    Destination::Client(client) => format!("notification:tmux:{client}"),
-                    Destination::Clients => unreachable!(),
-                };
-                issues.push(Issue::new(component, error));
-                retries.push(notification);
-            }
-        }
-        self.pending = retries;
+        });
         issues
     }
 }
@@ -685,58 +641,63 @@ mod tests {
         let mut notifications = Notifications::default();
         notifications.push("first", "finished");
         notifications.push("second", "needs you");
-        let mut tmux_deliveries = Vec::new();
-        let failures = notifications.deliver_with(
-            || Ok(vec!["client".into()]),
-            |n| {
-                match n.destination {
-                    Destination::Desktop => anyhow::bail!("desktop unavailable"),
-                    Destination::Client(_) => tmux_deliveries.push(n.name.clone()),
-                    Destination::Clients => unreachable!(),
-                }
-                Ok(())
-            },
-        );
-        assert_eq!(failures.len(), 2);
+        let mut delivered = Vec::new();
+        let failures = notifications.deliver_with(|n| {
+            if n.name == "first" {
+                anyhow::bail!("desktop unavailable");
+            }
+            delivered.push(n.name.clone());
+            Ok(())
+        });
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].component, "notification:desktop");
+        assert_eq!(delivered, ["second"]);
+        assert_eq!(notifications.pending.len(), 1);
         assert!(
-            failures
-                .iter()
-                .all(|e| e.component == "notification:desktop")
+            notifications
+                .deliver_with(|n| {
+                    delivered.push(n.name.clone());
+                    Ok(())
+                })
+                .is_empty()
         );
-        assert_eq!(tmux_deliveries, ["first", "second"]);
-        assert_eq!(notifications.pending.len(), 2);
-        let mut retried = Vec::new();
-        let issues = notifications.deliver_with(
-            || panic!("successful clients must not be retried"),
-            |n| {
-                assert!(matches!(n.destination, Destination::Desktop));
-                retried.push(n.name.clone());
-                Ok(())
-            },
-        );
-        assert!(issues.is_empty());
         assert!(notifications.pending.is_empty());
-        assert_eq!(retried, ["first", "second"]);
+        assert_eq!(delivered, ["second", "first"]);
     }
 
     #[test]
-    fn client_failure_does_not_prevent_desktop_or_other_clients() {
-        let mut notifications = Notifications::default();
-        notifications.push("agent", "finished");
-        let mut delivered = 0;
-        let issues = notifications.deliver_with(
-            || Ok(vec!["bad".into(), "good".into()]),
-            |n| {
-                if matches!(&n.destination, Destination::Client(client) if client == "bad") {
-                    anyhow::bail!("client vanished");
-                }
-                delivered += 1;
-                Ok(())
-            },
-        );
-        assert_eq!(delivered, 2);
-        assert_eq!(issues.len(), 1);
-        assert_eq!(notifications.pending.len(), 1);
+    fn event_metadata_accepts_only_notification_states_and_bounds_name() {
+        let working = tick(None, RawState::Working, false);
+        assert!(RecentEvent::new(&working, 100).is_none());
+        let idle = tick(None, RawState::Idle, false);
+        assert!(RecentEvent::new(&idle, 100).is_none());
+        for raw in [RawState::Idle, RawState::Blocked] {
+            let mut agent = tick(Some(&working), raw, false);
+            agent.name = "界".repeat(200);
+            let event = RecentEvent::new(&agent, 100).unwrap();
+            assert_eq!(event.name.chars().count(), 128);
+            assert_eq!(event.state.state(), agent.state);
+            assert_eq!((event.occurred_at, event.expires_at), (100, 5100));
+        }
+    }
+
+    #[test]
+    fn durable_new_turn_while_still_done_notifies_once() {
+        let completed = |count| {
+            let mut d = observation(RawState::Idle, false);
+            d.completed_turns = Some(count);
+            d.completion_epoch = Some("launch".into());
+            d
+        };
+        let before = advance(None, completed(1), 100).unwrap();
+        let after = advance(Some(&before), completed(2), 200).unwrap();
+        assert_eq!((before.state, after.state), (State::Done, State::Done));
+        assert!(transition_message(Some(&before), &after).is_some());
+        let unchanged = advance(Some(&after), completed(2), 300).unwrap();
+        assert!(transition_message(Some(&after), &unchanged).is_none());
+        let mut watched = after.clone();
+        watched.visible = true;
+        assert!(transition_message(Some(&before), &watched).is_none());
     }
 
     #[test]

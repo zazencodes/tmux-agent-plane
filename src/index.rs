@@ -125,6 +125,59 @@ pub struct Agent {
 pub struct Index {
     pub updated_at: u64,
     pub agents: Vec<Agent>,
+    /// Latest off-screen transition. Never restored by a restarted daemon.
+    #[serde(default)]
+    pub recent_event: Option<RecentEvent>,
+}
+
+pub const EVENT_LIFETIME_MS: u64 = 5_000;
+
+/// Only states that warrant a transition notification may appear in the footer.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum EventState {
+    Done,
+    Blocked,
+}
+
+impl EventState {
+    pub fn state(self) -> State {
+        match self {
+            Self::Done => State::Done,
+            Self::Blocked => State::Blocked,
+        }
+    }
+}
+
+/// One bounded notice shared by every sidebar, with an absolute expiry.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RecentEvent {
+    pub name: String,
+    pub state: EventState,
+    pub occurred_at: u64,
+    pub expires_at: u64,
+}
+
+impl RecentEvent {
+    pub fn new(agent: &Agent, now: u64) -> Option<Self> {
+        let state = match agent.state {
+            State::Done => EventState::Done,
+            State::Blocked => EventState::Blocked,
+            State::Working | State::Idle => return None,
+        };
+        Some(Self {
+            name: agent.name.chars().take(128).collect(),
+            state,
+            occurred_at: now,
+            expires_at: now.saturating_add(EVENT_LIFETIME_MS),
+        })
+    }
+
+    pub fn is_live(&self, now: u64) -> bool {
+        self.occurred_at <= now
+            && now < self.expires_at
+            && self.expires_at.saturating_sub(self.occurred_at) <= EVENT_LIFETIME_MS
+    }
 }
 
 pub fn now_ms() -> u64 {
@@ -196,4 +249,39 @@ pub fn find<'a>(index: &'a Index, target: &str) -> Result<&'a Agent> {
         bail!("no agent named {target:?}: no agents are running");
     }
     bail!("no agent named {target:?}. Agents: {}", names.join(", "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_index_has_no_event_and_invalid_event_states_fail() {
+        let old: Index = serde_json::from_str(r#"{"updated_at":1,"agents":[]}"#).unwrap();
+        assert!(old.recent_event.is_none());
+        for state in ["working", "idle", "unknown"] {
+            let value = serde_json::json!({
+                "updated_at": 1, "agents": [], "recent_event": {
+                    "name": "agent", "state": state, "occurred_at": 1, "expires_at": 5001
+                }
+            });
+            assert!(serde_json::from_value::<Index>(value).is_err());
+        }
+    }
+
+    #[test]
+    fn absolute_event_expiry_rejects_future_and_unbounded_lifetimes() {
+        let mut event = RecentEvent {
+            name: "agent".into(),
+            state: EventState::Done,
+            occurred_at: 100,
+            expires_at: 5100,
+        };
+        assert!(!event.is_live(99));
+        assert!(event.is_live(100));
+        assert!(event.is_live(5099));
+        assert!(!event.is_live(5100));
+        event.expires_at = 5101;
+        assert!(!event.is_live(100));
+    }
 }

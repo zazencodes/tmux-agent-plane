@@ -1,7 +1,7 @@
 //! A narrow, always-on agent list in a pane down the side of a window.
 
 use crate::commands;
-use crate::index::{self, Agent, State};
+use crate::index::{self, Agent, RecentEvent, State};
 use crate::tmux;
 use crate::ui::{
     LAVENDER, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, counts, hints, icon,
@@ -167,6 +167,7 @@ fn alone() -> Result<bool> {
 
 struct Sidebar {
     agents: Vec<Agent>,
+    recent_event: Option<RecentEvent>,
     list: ListState,
     error: Option<String>,
     /// The name being typed for the selected agent, while renaming.
@@ -185,10 +186,12 @@ impl Sidebar {
         match index::read() {
             Ok(index) => {
                 self.agents = index.agents;
+                self.recent_event = index.recent_event;
                 self.error = None;
             }
             Err(e) => {
                 self.agents.clear();
+                self.recent_event = None;
                 self.error = Some(e.to_string());
             }
         }
@@ -255,6 +258,7 @@ impl Sidebar {
 fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
     let mut sidebar = Sidebar {
         agents: Vec::new(),
+        recent_event: None,
         list: ListState::default(),
         error: None,
         editing: None,
@@ -345,15 +349,38 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         f.render_stateful_widget(List::new(items).block(block), list_area, &mut sidebar.list);
     }
 
-    let help = match (&sidebar.notice, &sidebar.editing) {
+    f.render_widget(
+        Paragraph::new(footer(sidebar, inner + 2, index::now_ms())),
+        help_area,
+    );
+}
+
+/// Local failures and rename controls take priority; a shared event never hides them.
+fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
+    match (&sidebar.notice, &sidebar.editing) {
         (Some(notice), _) => Line::styled(
-            truncate(&format!(" {notice}"), inner + 2),
+            truncate(&format!(" {notice}"), width),
             colour(State::Blocked),
         ),
         (None, Some(_)) => hints(&[("⏎", "save"), ("esc", "cancel"), ("^w ^u", "clear")]),
-        (None, None) => hints(&[("⏎", "jump"), ("r", "rename"), ("q", "close")]),
-    };
-    f.render_widget(Paragraph::new(help), help_area);
+        (None, None) => match sidebar
+            .recent_event
+            .as_ref()
+            .filter(|event| event.is_live(now))
+        {
+            Some(event) => {
+                let state = event.state.state();
+                Line::styled(
+                    truncate(
+                        &format!(" {} {} {}", icon(state), event.name, state.as_str()),
+                        width,
+                    ),
+                    colour(state),
+                )
+            }
+            None => hints(&[("⏎", "jump"), ("r", "rename"), ("q", "close")]),
+        },
+    }
 }
 
 /// One item per agent, grouped under a heading per tmux session, with a blank line between
@@ -452,7 +479,44 @@ fn right<'a>(mut line: Line<'a>, end: Span<'a>, width: usize) -> Line<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::delete_word;
+    use super::*;
+    use crate::index::EventState;
+
+    #[test]
+    fn footer_priority_expiry_and_state_colour() {
+        let mut sidebar = Sidebar {
+            agents: Vec::new(),
+            list: ListState::default(),
+            error: None,
+            editing: None,
+            notice: None,
+            recent_event: Some(RecentEvent {
+                name: "grok-support".into(),
+                state: EventState::Done,
+                occurred_at: 100,
+                expires_at: 5100,
+            }),
+        };
+        for (event_state, state, expected) in [
+            (EventState::Done, State::Done, " ✓ grok-support done"),
+            (
+                EventState::Blocked,
+                State::Blocked,
+                " ◆ grok-support blocked",
+            ),
+        ] {
+            sidebar.recent_event.as_mut().unwrap().state = event_state;
+            let line = footer(&sidebar, 38, 100);
+            assert_eq!(line.to_string(), expected);
+            assert_eq!(line.style.fg, Some(colour(state)));
+        }
+        assert!(footer(&sidebar, 38, 5100).to_string().contains("jump"));
+        sidebar.editing = Some("rename".into());
+        assert!(footer(&sidebar, 38, 100).to_string().contains("save"));
+        sidebar.notice = Some("rename failed".into());
+        assert_eq!(footer(&sidebar, 38, 100).to_string(), " rename failed");
+        assert_eq!(footer(&sidebar, 8, 100).to_string(), " rename…");
+    }
 
     #[test]
     fn ctrl_w_deletes_one_word() {
