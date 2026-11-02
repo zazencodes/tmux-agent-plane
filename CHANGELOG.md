@@ -15,7 +15,7 @@ before 1.0, a breaking change bumps the minor version.
 ### Fixed
 
 - Point stale-index errors to `daemon start` and the persistent daemon log
-
+- Record the original tmux pane-listing error when the watcher exits, including server shutdowns and transient failures; record why duplicate workers exit
 - Refuse ordinary sends to agents waiting on a question or permission before touching buffers or keys; deliberate textual replies use `send --answer`, which requires a blocked target and follows the reply turn with `--wait`
 - Notify for a new Pi or OpenCode completion even when the agent remains unseen and already shows done
 - Start the watcher detached from tmux jobs so startup, duplicate starts, stops, failures and signals never open job output over a pane; use `daemon restart` for a targeted graceful restart, with lifecycle diagnostics in `daemon.log`
