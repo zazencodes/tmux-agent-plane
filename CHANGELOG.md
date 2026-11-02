@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Added
+
+- Track and spawn Pi agents through an optional Pi extension, including live activity, questions, turn completion and session identity
+
 ### Fixed
 
 - Use published completion counters when available so wait commands observe turns that finish between daemon polls
