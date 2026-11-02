@@ -62,6 +62,13 @@ enum Cmd {
         #[arg(required = true)]
         keys: Vec<String>,
     },
+    /// Give an agent a name
+    Rename {
+        /// Agent name or pane id (`"$TMUX_PANE"` for yourself)
+        target: String,
+        /// One word, e.g. `reviewer` or `auth-refactor`
+        name: String,
+    },
     /// Show an agent on the user's screen
     Focus {
         /// Agent name or pane id
@@ -117,6 +124,7 @@ fn main() -> anyhow::Result<()> {
             timeout,
         } => commands::send(&target, &text, wait, timeout),
         Cmd::Keys { target, keys } => commands::keys(&target, &keys),
+        Cmd::Rename { target, name } => commands::rename(&target, &name),
         Cmd::Focus { target } => commands::focus(&target),
         Cmd::Kill { target } => commands::kill(&target),
         Cmd::Wait { target, timeout } => commands::wait(&target, timeout),

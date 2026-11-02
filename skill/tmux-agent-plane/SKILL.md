@@ -14,6 +14,16 @@ Every Claude Code and Codex agent running in the user's tmux is tracked by a bac
 
 You are an agent in this list too. `list` marks you with `*` (or `"self": true` in JSON).
 
+## First: name yourself
+
+The user tells agents apart by name. When you load this skill, run `list`. If your own name (`*`) is still the default `<kind>-<number>` (`claude-154`), name yourself after your task before anything else:
+
+```bash
+tmux-agent-plane rename "$TMUX_PANE" <name>
+```
+
+A name is one short kebab-case word for the work, 2 to 3 words joined by `-`, at most 20 characters: `auth-refactor`, `billing-tests`, `release-notes`. Never rename an agent the user has already named.
+
 ## Rule: the CLI, never raw tmux
 
 Do every agent job through `tmux-agent-plane`: finding agents, reading their screens, typing into them, starting, showing and closing them. Never run `tmux list-panes`, `capture-pane`, `send-keys`, `split-window`, `new-window` or `kill-pane` against agents yourself. The daemon already indexes every agent in every session; `list` answers in one call what tmux would make you piece together, and the CLI keeps names, parents and done/seen state right. Raw tmux is fine only for panes that are not agents (a dev server, a log tail).
@@ -26,6 +36,7 @@ tmux-agent-plane list --json              # the same with every field
 tmux-agent-plane read <agent> [--lines N] # its screen, plus N lines of scrollback
 tmux-agent-plane send <agent> "<prompt>" [--wait] [--timeout S]
 tmux-agent-plane keys <agent> <key>...    # tmux key names: Enter Escape Up Down Tab 1 2 y n
+tmux-agent-plane rename <agent> <name>     # one word, unique; "$TMUX_PANE" is you
 tmux-agent-plane wait <agent> [--timeout S]
 tmux-agent-plane focus <agent>            # bring it on screen for the user
 tmux-agent-plane toggle-sidebar "$TMUX_PANE"  # open the user's agent sidebar in your window (run again to close)
@@ -46,7 +57,7 @@ tmux-agent-plane spawn claude|codex ["<task>"] [--in pane|window|session] [--cwd
 - `spawn` types the agent command into a fresh shell, so the user's aliases and flags apply, and the shell stays when the agent exits.
 - `--in pane` (default) splits your pane beside you. Use `--in window` for longer independent work, `--in session` for a separate project. Follow what the user asked for.
 - Give the full task as the prompt: the new agent has none of your context. Say which files, what done looks like, and what to report back.
-- Name agents you will talk to again (`--name reviewer`).
+- Always name agents you spawn (`--name reviewer`), following the naming rule above.
 - `spawn` prints `<name> <pane> <location>`. The spawned agent records you as its parent.
 - A folder the agent has not trusted yet stops at a trust prompt, and `spawn` reports that the agent did not start. `read <pane>`, then answer with `keys <pane> ...` only when the user asked for that folder.
 

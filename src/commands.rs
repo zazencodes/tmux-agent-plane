@@ -163,6 +163,46 @@ fn paste(pane: &str, text: &str) -> Result<()> {
     Ok(())
 }
 
+/// Names are one word, unique, and never look like a pane id.
+fn check_name(index: &Index, name: &str, pane: Option<&str>) -> Result<()> {
+    if name.is_empty() || name.chars().any(char::is_whitespace) || name.starts_with('%') {
+        bail!("agent names are one word, without spaces, not starting with %: {name:?}");
+    }
+    if let Some(other) = index
+        .agents
+        .iter()
+        .find(|a| a.name == name && Some(a.pane.as_str()) != pane)
+    {
+        bail!(
+            "{name:?} is already the name of the agent in {}",
+            other.pane
+        );
+    }
+    Ok(())
+}
+
+/// Name an agent. The name lives in its pane, so it lasts as long as the pane.
+pub fn set_name(target: &str, name: &str) -> Result<Agent> {
+    let index = index::read()?;
+    let agent = index::find(&index, target)?.clone();
+    check_name(&index, name, Some(&agent.pane))?;
+    tmux::run(&[
+        "set-option",
+        "-p",
+        "-t",
+        &agent.pane,
+        "@agent-plane-name",
+        name,
+    ])?;
+    Ok(agent)
+}
+
+pub fn rename(target: &str, name: &str) -> Result<()> {
+    let agent = set_name(target, name)?;
+    println!("{} ({}) is now {name}", agent.name, agent.pane);
+    Ok(())
+}
+
 pub fn keys(target: &str, keys: &[String]) -> Result<()> {
     let pane = pane_of(target)?;
     let mut args = vec!["send-keys", "-t", pane.as_str()];
@@ -233,10 +273,8 @@ pub struct Spawn {
 
 pub fn spawn(s: Spawn) -> Result<()> {
     let index = index::read()?;
-    if let Some(name) = &s.name
-        && index.agents.iter().any(|a| &a.name == name)
-    {
-        bail!("an agent named {name:?} already exists");
+    if let Some(name) = &s.name {
+        check_name(&index, name, None)?;
     }
     let cwd = match s.cwd {
         Some(dir) => dir,

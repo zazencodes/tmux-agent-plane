@@ -1,12 +1,13 @@
 //! A narrow, always-on agent list in a pane down the side of a window.
 
+use crate::commands;
 use crate::index::{self, Agent, State};
 use crate::tmux;
 use crate::ui::{age, colour, icon};
 use anyhow::Result;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
@@ -66,6 +67,10 @@ struct Sidebar {
     agents: Vec<Agent>,
     list: ListState,
     error: Option<String>,
+    /// The name being typed for the selected agent, while renaming.
+    editing: Option<String>,
+    /// Why the last rename failed.
+    notice: Option<String>,
 }
 
 impl Sidebar {
@@ -95,6 +100,46 @@ impl Sidebar {
         self.list.select(selected);
     }
 
+    fn selected(&self) -> Option<&Agent> {
+        self.list.selected().and_then(|i| self.agents.get(i))
+    }
+
+    /// A key while renaming: edit the name, save it, or give up.
+    fn edit_key(&mut self, key: KeyEvent) {
+        let Some(name) = self.editing.as_mut() else {
+            return;
+        };
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Esc => self.editing = None,
+            KeyCode::Enter => {
+                let name = name.clone();
+                let Some(pane) = self.selected().map(|a| a.pane.clone()) else {
+                    return;
+                };
+                match commands::set_name(&pane, &name) {
+                    Ok(_) => {
+                        // Show it now; the daemon picks it up on its next tick.
+                        if let Some(agent) = self.agents.iter_mut().find(|a| a.pane == pane) {
+                            agent.name = name;
+                        }
+                        self.editing = None;
+                        self.notice = None;
+                    }
+                    Err(e) => self.notice = Some(e.to_string()),
+                }
+            }
+            KeyCode::Char('w') if ctrl => delete_word(name),
+            KeyCode::Char('u') if ctrl => name.clear(),
+            KeyCode::Backspace => {
+                name.pop();
+            }
+            KeyCode::Char(' ') => name.push('-'),
+            KeyCode::Char(c) if !ctrl => name.push(c),
+            _ => {}
+        }
+    }
+
     fn step(&mut self, delta: isize) {
         if self.agents.is_empty() {
             return;
@@ -110,6 +155,8 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
         agents: Vec::new(),
         list: ListState::default(),
         error: None,
+        editing: None,
+        notice: None,
     };
     sidebar.refresh();
     let mut refreshed = Instant::now();
@@ -119,8 +166,14 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             && let Event::Key(key) = event::read()?
             && key.kind == KeyEventKind::Press
         {
+            if sidebar.editing.is_some() {
+                sidebar.edit_key(key);
+                continue;
+            }
+            sidebar.notice = None;
             match key.code {
                 KeyCode::Char('q') => return Ok(()),
+                KeyCode::Char('r') => sidebar.editing = sidebar.selected().map(|a| a.name.clone()),
                 KeyCode::Char('j') | KeyCode::Down => sidebar.step(1),
                 KeyCode::Char('k') | KeyCode::Up => sidebar.step(-1),
                 KeyCode::Enter => {
@@ -138,6 +191,16 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
     }
 }
 
+/// Ctrl-W: drop trailing separators, then the word before them.
+fn delete_word(name: &mut String) {
+    while name.ends_with(|c: char| !c.is_alphanumeric()) {
+        name.pop();
+    }
+    while name.ends_with(char::is_alphanumeric) {
+        name.pop();
+    }
+}
+
 fn truncate(s: &str, width: usize) -> String {
     if s.chars().count() <= width {
         return s.to_string();
@@ -152,18 +215,36 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
     let inner = list_area.width.saturating_sub(2) as usize;
     let dim = Style::default().fg(colour(State::Idle));
+    let selected = sidebar.list.selected();
 
     let items: Vec<ListItem> = sidebar
         .agents
         .iter()
-        .map(|a| {
+        .enumerate()
+        .map(|(i, a)| {
             let state = Style::default().fg(colour(a.state));
             let status = format!("{} {}", a.state.as_str(), age(a.state_since));
             let name_width = inner.saturating_sub(status.len() + 3);
-            let name = truncate(&a.name, name_width);
+            let renaming = sidebar.editing.as_ref().filter(|_| selected == Some(i));
+            let name = match renaming {
+                // Keep the end of a long name in view, where the cursor is.
+                Some(typed) => {
+                    let shown: String = typed
+                        .chars()
+                        .rev()
+                        .take(name_width.saturating_sub(1))
+                        .collect();
+                    shown.chars().rev().collect::<String>() + "▏"
+                }
+                None => truncate(&a.name, name_width),
+            };
             let pad = inner.saturating_sub(2 + name.chars().count() + status.len());
             let mut name_style = Style::default();
-            if a.visible {
+            if renaming.is_some() {
+                name_style = name_style
+                    .fg(colour(State::Done))
+                    .add_modifier(Modifier::UNDERLINED);
+            } else if a.visible {
                 name_style = name_style.add_modifier(Modifier::BOLD);
             }
             let second = match (&a.state, &a.detail) {
@@ -201,10 +282,31 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     };
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(title))
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+        .highlight_style(Style::default().bg(Color::Rgb(0x31, 0x32, 0x44)));
     f.render_stateful_widget(list, list_area, &mut sidebar.list);
-    f.render_widget(
-        Paragraph::new(Span::styled(" ⏎ jump · j/k · q close", dim)),
-        help_area,
-    );
+    let help = match (&sidebar.notice, &sidebar.editing) {
+        (Some(notice), _) => Span::styled(
+            truncate(&format!(" {notice}"), inner + 2),
+            Style::default().fg(colour(State::Blocked)),
+        ),
+        (None, Some(_)) => Span::styled(" ⏎ save · esc cancel · ^w ^u clear", dim),
+        (None, None) => Span::styled(" ⏎ jump · r rename · q close", dim),
+    };
+    f.render_widget(Paragraph::new(help), help_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::delete_word;
+
+    #[test]
+    fn ctrl_w_deletes_one_word() {
+        let mut name = "claude-154".to_string();
+        delete_word(&mut name);
+        assert_eq!(name, "claude-");
+        delete_word(&mut name);
+        assert_eq!(name, "");
+        delete_word(&mut name);
+        assert_eq!(name, "");
+    }
 }

@@ -45,6 +45,7 @@ enter jump · j/k move · q quit
 - **A sidebar of agents.** `prefix + S` opens a live list of every agent down the left of your window and puts you in it: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar stays.
 - **Peek before you jump.** `prefix + A` opens the agent list in a popup with a large live preview of the selected agent's screen.
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
+- **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`.
 - **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. Each spawned agent records its parent.
 - **Your agents, unchanged.** Spawned agents start in a normal shell, so your aliases and flags apply, and the shell stays when the agent exits.
 
@@ -123,6 +124,7 @@ Run your agents as usual. Then ask any of them things like:
 | `prefix + A` | Open the agent list popup, with a preview |
 | `j` `k` / `↓` `↑` | Move |
 | `Enter` | Jump to the agent. The sidebar stays open; the popup closes |
+| `r` | Rename the agent (sidebar), starting from its current name. `Ctrl-W` deletes a word, `Ctrl-U` clears, `Enter` saves, `Esc` cancels |
 | `q` | Close (also `Esc` in the popup) |
 
 The sidebar belongs to the window it was opened in; open one in each window you work from. The popup opens on the first blocked agent, or else the first done one. The agent you are looking at is shown in bold in the sidebar.
@@ -136,6 +138,7 @@ The sidebar belongs to the window it was opened in; open one in each window you 
 | `send <agent> "<prompt>" [--wait] [--timeout S]` | Paste a prompt and press Enter. `--wait` returns when that turn ends or the agent blocks |
 | `keys <agent> <key>...` | Press keys, by tmux key name: `Enter`, `Escape`, `Down`, `2` |
 | `wait <agent> [--timeout S]` | Wait until the agent is not working |
+| `rename <agent> <name>` | Name an agent: one word, unique. `"$TMUX_PANE"` is the caller |
 | `focus <agent>` | Show the agent on your screen |
 | `kill <agent>` | Close the agent's pane |
 | `spawn claude\|codex ["<task>"] [--in pane\|window\|session] [--cwd DIR] [--name NAME] [--wait] [--timeout S]` | Start an agent. `--in pane` (default) splits the caller's pane |
@@ -144,7 +147,7 @@ The sidebar belongs to the window it was opened in; open one in each window you 
 | `ui` | The agent list popup |
 | `daemon` | The watcher, started by the plugin |
 
-`<agent>` is an agent's name or tmux pane id. Agents are named `<kind>-<pane number>` (`claude-154`) unless spawned with `--name`. `read` and `keys` also take any pane id, so an agent stuck on a prompt before it starts can still be answered.
+`<agent>` is an agent's name or tmux pane id. An agent is `<kind>-<pane number>` (`claude-154`) until it is named with `spawn --name`, `rename`, or `r` in the sidebar. The name is stored on the agent's tmux pane. `read` and `keys` also take any pane id, so an agent stuck on a prompt before it starts can still be answered.
 
 ## How it works
 
