@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Added
+
+- Track and spawn Antigravity CLI (`agy`) from its native session data, including permission prompts, questions and background work; hand-started sessions appear after their first message
+
 ### Changed
 
 - Reject ambiguous agent identities and match Claude session processes to their tmux panes, including when separate tmux servers reuse pane IDs
