@@ -173,7 +173,7 @@ struct ProcessTable {
 impl ProcessTable {
     fn load() -> Result<Self> {
         let out = Command::new("ps")
-            .args(["-axo", "pid=,ppid=,comm="])
+            .args(["-A", "-o", "pid=,ppid=,comm="])
             .output()
             .context("failed to execute ps")?;
         if !out.status.success() {
