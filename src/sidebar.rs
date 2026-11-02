@@ -3,13 +3,16 @@
 use crate::commands;
 use crate::index::{self, Agent, State};
 use crate::tmux;
-use crate::ui::{age, colour, icon};
+use crate::ui::{
+    LAVENDER, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, counts, hints, icon,
+    message, name_style, panel, state_style,
+};
 use anyhow::Result;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
 use std::time::{Duration, Instant};
 
@@ -214,18 +217,75 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let [list_area, help_area] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
     let inner = list_area.width.saturating_sub(2) as usize;
-    let dim = Style::default().fg(colour(State::Idle));
-    let selected = sidebar.list.selected();
+    let block = panel(Line::from(" agents ")).title_top(counts(&sidebar.agents));
+    if let Some(e) = &sidebar.error {
+        message(
+            f,
+            list_area,
+            block,
+            colour(State::Blocked),
+            &["daemon not running", e],
+        );
+    } else if sidebar.agents.is_empty() {
+        message(
+            f,
+            list_area,
+            block,
+            TEXT,
+            &[
+                "no agents running",
+                "start claude or codex in any tmux pane",
+            ],
+        );
+    } else {
+        let selected = sidebar.list.selected();
+        let items = items(&sidebar.agents, selected, sidebar.editing.as_ref(), inner);
+        f.render_stateful_widget(List::new(items).block(block), list_area, &mut sidebar.list);
+    }
 
-    let items: Vec<ListItem> = sidebar
-        .agents
+    let help = match (&sidebar.notice, &sidebar.editing) {
+        (Some(notice), _) => Line::styled(
+            truncate(&format!(" {notice}"), inner + 2),
+            colour(State::Blocked),
+        ),
+        (None, Some(_)) => hints(&[("⏎", "save"), ("esc", "cancel"), ("^w ^u", "clear")]),
+        (None, None) => hints(&[("⏎", "jump"), ("r", "rename"), ("q", "close")]),
+    };
+    f.render_widget(Paragraph::new(help), help_area);
+}
+
+/// One item per agent, grouped under a heading per tmux session, with a blank line between
+/// agents. The selected agent gets an accent bar and a background; its heading does not.
+fn items<'a>(
+    agents: &'a [Agent],
+    selected: Option<usize>,
+    editing: Option<&String>,
+    width: usize,
+) -> Vec<ListItem<'a>> {
+    let mut session = None;
+    agents
         .iter()
         .enumerate()
         .map(|(i, a)| {
-            let state = Style::default().fg(colour(a.state));
-            let status = format!("{} {}", a.state.as_str(), age(a.state_since));
-            let name_width = inner.saturating_sub(status.len() + 3);
-            let renaming = sidebar.editing.as_ref().filter(|_| selected == Some(i));
+            let mut lines = Vec::new();
+            if i > 0 {
+                lines.push(Line::default());
+            }
+            if session != Some(&a.session) {
+                session = Some(&a.session);
+                let name = truncate(&a.session, width.saturating_sub(4));
+                let rule = "─".repeat(width.saturating_sub(name.chars().count() + 3));
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" {name} "), Style::default().fg(LAVENDER).bold()),
+                    Span::styled(rule, SURFACE2),
+                ]));
+            }
+            let is_selected = selected == Some(i);
+            let renaming = editing.filter(|_| is_selected);
+            let bar = Span::styled(if is_selected { "▌" } else { " " }, colour(a.state));
+
+            let status = format!("{} {} ", a.state.as_str(), age(a.state_since));
+            let name_width = width.saturating_sub(status.len() + 4);
             let name = match renaming {
                 // Keep the end of a long name in view, where the cursor is.
                 Some(typed) => {
@@ -238,61 +298,54 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
                 }
                 None => truncate(&a.name, name_width),
             };
-            let pad = inner.saturating_sub(2 + name.chars().count() + status.len());
-            let mut name_style = Style::default();
-            if renaming.is_some() {
-                name_style = name_style
+            let name_style = match renaming {
+                Some(_) => Style::default()
                     .fg(colour(State::Done))
-                    .add_modifier(Modifier::UNDERLINED);
-            } else if a.visible {
-                name_style = name_style.add_modifier(Modifier::BOLD);
-            }
-            let second = match (&a.state, &a.detail) {
-                (State::Blocked, Some(detail)) => {
-                    Span::styled(truncate(&format!("  {detail}"), inner), state)
-                }
-                _ => Span::styled(truncate(&format!("  {}", a.title), inner), dim),
+                    .add_modifier(Modifier::UNDERLINED),
+                None => name_style(a),
             };
-            ListItem::new(vec![
-                Line::from(vec![
-                    Span::styled(format!("{} ", icon(a.state)), state),
-                    Span::styled(name, name_style),
-                    Span::raw(" ".repeat(pad)),
-                    Span::styled(status, state),
-                ]),
-                Line::from(second),
-                Line::from(Span::styled(
-                    truncate(&format!("  {}", a.location), inner),
-                    dim,
-                )),
-            ])
-        })
-        .collect();
+            let first = Line::from(vec![
+                bar.clone(),
+                Span::styled(format!("{} ", icon(a.state)), colour(a.state)),
+                Span::styled(name, name_style),
+            ]);
+            let first = right(first, Span::styled(status, state_style(a.state)), width);
 
-    let count = |s: State| sidebar.agents.iter().filter(|a| a.state == s).count();
-    let title = match &sidebar.error {
-        Some(_) => " daemon not running ".to_string(),
-        None => format!(
-            " agents ◆{} ✓{} ●{} ○{} ",
-            count(State::Blocked),
-            count(State::Done),
-            count(State::Working),
-            count(State::Idle)
-        ),
-    };
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(title))
-        .highlight_style(Style::default().bg(Color::Rgb(0x31, 0x32, 0x44)));
-    f.render_stateful_widget(list, list_area, &mut sidebar.list);
-    let help = match (&sidebar.notice, &sidebar.editing) {
-        (Some(notice), _) => Span::styled(
-            truncate(&format!(" {notice}"), inner + 2),
-            Style::default().fg(colour(State::Blocked)),
-        ),
-        (None, Some(_)) => Span::styled(" ⏎ save · esc cancel · ^w ^u clear", dim),
-        (None, None) => Span::styled(" ⏎ jump · r rename · q close", dim),
-    };
-    f.render_widget(Paragraph::new(help), help_area);
+            // The window and pane: the session is in the heading.
+            let place = a
+                .location
+                .strip_prefix(&format!("{}:", a.session))
+                .unwrap_or(&a.location);
+            let (task, task_style) = match (a.state, &a.detail) {
+                (State::Blocked, Some(detail)) => (detail, Style::default().fg(colour(a.state))),
+                _ => (&a.title, Style::default().fg(SUBTEXT)),
+            };
+            let task_width = width.saturating_sub(place.chars().count() + 6);
+            let second = Line::from(vec![
+                bar,
+                Span::raw("  "),
+                Span::styled(truncate(task, task_width), task_style),
+            ]);
+            let second = right(second, Span::styled(format!("{place} "), OVERLAY), width);
+
+            for line in [first, second] {
+                lines.push(if is_selected {
+                    line.style(Style::default().bg(SURFACE0))
+                } else {
+                    line
+                });
+            }
+            ListItem::new(lines)
+        })
+        .collect()
+}
+
+/// `line` with `end` pushed to the right edge of `width` columns.
+fn right<'a>(mut line: Line<'a>, end: Span<'a>, width: usize) -> Line<'a> {
+    let pad = width.saturating_sub(line.width() + end.width());
+    line.spans.push(Span::raw(" ".repeat(pad)));
+    line.spans.push(end);
+    line
 }
 
 #[cfg(test)]

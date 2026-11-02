@@ -5,10 +5,10 @@ use crate::tmux;
 use ansi_to_tui::IntoText;
 use anyhow::Result;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::layout::{Constraint, Layout, Margin, Rect};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, BorderType, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 use std::time::{Duration, Instant};
 
@@ -150,7 +150,6 @@ fn draw(f: &mut Frame, app: &mut App) {
     ])
     .areas(f.area());
 
-    let dim = Style::default().fg(colour(State::Idle));
     let width = |f: fn(&Agent) -> &str| {
         app.agents
             .iter()
@@ -160,55 +159,176 @@ fn draw(f: &mut Frame, app: &mut App) {
     };
     let name_width = width(|a| &a.name);
     let location_width = width(|a| &a.location);
+    let row_width = list_area.width.saturating_sub(2) as usize;
+    let selected = app.list.selected();
     let items: Vec<ListItem> = app
         .agents
         .iter()
-        .map(|a| {
-            let state = Style::default().fg(colour(a.state));
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{} ", icon(a.state)), state),
-                Span::raw(format!("{:<name_width$}  ", a.name)),
+        .enumerate()
+        .map(|(i, a)| {
+            let is_selected = selected == Some(i);
+            let mut line = Line::from(vec![
+                Span::styled(if is_selected { "▌" } else { " " }, colour(a.state)),
+                Span::styled(format!("{} ", icon(a.state)), colour(a.state)),
+                Span::styled(format!("{:<name_width$}  ", a.name), name_style(a)),
                 Span::styled(
                     format!("{:<7} {:>4}  ", a.state.as_str(), age(a.state_since)),
-                    state,
+                    state_style(a.state),
                 ),
-                Span::styled(format!("{:<location_width$}  ", a.location), dim),
-                Span::raw(a.title.clone()),
-            ]))
+                Span::styled(format!("{:<location_width$}  ", a.location), OVERLAY),
+                Span::styled(a.title.clone(), SUBTEXT),
+            ]);
+            if is_selected {
+                line = fill(line, row_width).style(Style::default().bg(SURFACE0));
+            }
+            ListItem::new(line)
         })
         .collect();
-    let title = match &app.error {
-        Some(e) => format!(" {e} "),
-        None if app.agents.is_empty() => " no agents running ".to_string(),
-        None => format!(" agents · {} ", app.agents.len()),
-    };
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(title))
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    let list = List::new(items).block(panel(Line::from(" agents ")).title_top(counts(&app.agents)));
     f.render_stateful_widget(list, list_area, &mut app.list);
 
-    let preview_title = match app.selected() {
-        Some(a) => match &a.detail {
-            Some(detail) if a.state == State::Blocked => {
-                format!(" {} · {} · {} ", a.name, detail, a.cwd)
+    let block = match app.selected() {
+        Some(a) => {
+            let mut title = vec![
+                Span::raw(" "),
+                Span::styled(a.name.clone(), Style::default().fg(colour(a.state)).bold()),
+            ];
+            if let (State::Blocked, Some(detail)) = (a.state, &a.detail) {
+                title.push(Span::styled(format!(" · {detail}"), colour(State::Blocked)));
             }
-            _ => format!(" {} · {} ", a.name, a.cwd),
-        },
-        None => String::new(),
+            title.push(Span::raw(" "));
+            panel(Line::from(title))
+                .title_top(Line::styled(format!(" {} ", a.cwd), OVERLAY).right_aligned())
+        }
+        None => panel(Line::from(" preview ")),
     };
-    // Show the bottom of the screen, where the agent's prompt and status live.
-    let mut lines = app.preview.lines.clone();
-    while lines.last().is_some_and(|l| l.width() == 0) {
-        lines.pop();
+    match (&app.error, app.selected()) {
+        (Some(e), _) => message(
+            f,
+            preview_area,
+            block,
+            colour(State::Blocked),
+            &["daemon not running", e],
+        ),
+        (None, None) => message(
+            f,
+            preview_area,
+            block,
+            TEXT,
+            &[
+                "no agents running",
+                "start claude or codex in any tmux pane",
+            ],
+        ),
+        (None, Some(_)) => {
+            // Show the bottom of the screen, where the agent's prompt and status live.
+            let mut lines = app.preview.lines.clone();
+            while lines.last().is_some_and(|l| l.width() == 0) {
+                lines.pop();
+            }
+            let inner_height = preview_area.height.saturating_sub(2) as usize;
+            let start = lines.len().saturating_sub(inner_height);
+            let preview = Paragraph::new(Text::from(lines[start..].to_vec())).block(block);
+            f.render_widget(preview, preview_area);
+        }
     }
-    let inner_height = preview_area.height.saturating_sub(2) as usize;
-    let start = lines.len().saturating_sub(inner_height);
-    let preview = Paragraph::new(Text::from(lines[start..].to_vec()))
-        .block(Block::default().borders(Borders::ALL).title(preview_title));
-    f.render_widget(preview, preview_area);
 
     f.render_widget(
-        Paragraph::new(Span::styled("enter jump · j/k move · q quit", dim)),
+        Paragraph::new(hints(&[("⏎", "jump"), ("j/k", "move"), ("q", "quit")])),
         help_area,
     );
+}
+
+// Catppuccin mocha.
+pub(crate) const SUBTEXT: Color = Color::Rgb(0xa6, 0xad, 0xc8);
+pub(crate) const TEXT: Color = Color::Rgb(0xcd, 0xd6, 0xf4);
+pub(crate) const OVERLAY: Color = Color::Rgb(0x6c, 0x70, 0x86);
+pub(crate) const SURFACE2: Color = Color::Rgb(0x58, 0x5b, 0x70);
+pub(crate) const SURFACE0: Color = Color::Rgb(0x31, 0x32, 0x44);
+pub(crate) const LAVENDER: Color = Color::Rgb(0xb4, 0xbe, 0xfe);
+
+/// A rounded, quiet frame with a bold title.
+pub(crate) fn panel(title: Line<'_>) -> Block<'_> {
+    Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(SURFACE2)
+        .title(title.style(Style::default().fg(TEXT).bold()))
+}
+
+/// The state style for an agent's status: blocked and done are bold, they want you.
+pub(crate) fn state_style(state: State) -> Style {
+    let style = Style::default().fg(colour(state));
+    match state {
+        State::Blocked | State::Done => style.bold(),
+        State::Working | State::Idle => style,
+    }
+}
+
+/// An agent's name: bold while it is on screen, faded when idle.
+pub(crate) fn name_style(agent: &Agent) -> Style {
+    let style = Style::default().fg(if agent.state == State::Idle {
+        SUBTEXT
+    } else {
+        TEXT
+    });
+    if agent.visible { style.bold() } else { style }
+}
+
+/// Agent counts by state, right-aligned for a title bar; states with none are left out.
+pub(crate) fn counts(agents: &[Agent]) -> Line<'static> {
+    let mut spans = Vec::new();
+    for state in [State::Blocked, State::Done, State::Working, State::Idle] {
+        let n = agents.iter().filter(|a| a.state == state).count();
+        if n > 0 {
+            spans.push(Span::styled(format!(" {} {n}", icon(state)), colour(state)));
+        }
+    }
+    if !spans.is_empty() {
+        spans.push(Span::raw(" "));
+    }
+    Line::from(spans).right_aligned()
+}
+
+/// Key hints for a footer: keys bright, actions dim.
+pub(crate) fn hints(keys: &[(&str, &str)]) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (key, action) in keys {
+        spans.push(Span::styled(format!(" {key} "), SUBTEXT));
+        spans.push(Span::styled(format!("{action} "), OVERLAY));
+    }
+    Line::from(spans)
+}
+
+/// Pad a line with spaces to `width`, so a background covers the whole row.
+pub(crate) fn fill(mut line: Line<'_>, width: usize) -> Line<'_> {
+    let pad = width.saturating_sub(line.width());
+    line.spans.push(Span::raw(" ".repeat(pad)));
+    line
+}
+
+/// A short message in the middle of a panel: a heading and an explanation.
+pub(crate) fn message(
+    f: &mut Frame,
+    area: Rect,
+    block: Block,
+    heading_colour: Color,
+    text: &[&str; 2],
+) {
+    let inner = block.inner(area).inner(Margin::new(1, 0));
+    f.render_widget(block, area);
+    let [heading, body] = text;
+    let paragraph = Paragraph::new(vec![
+        Line::styled(
+            heading.to_string(),
+            Style::default().fg(heading_colour).bold(),
+        ),
+        Line::default(),
+        Line::styled(body.to_string(), OVERLAY),
+    ])
+    .centered()
+    .wrap(Wrap { trim: true });
+    // A third of the way down reads as centred, and leaves room for a long message to wrap.
+    let [_, middle] =
+        Layout::vertical([Constraint::Length(inner.height / 3), Constraint::Fill(1)]).areas(inner);
+    f.render_widget(paragraph, middle);
 }
