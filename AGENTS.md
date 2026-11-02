@@ -22,9 +22,29 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 
 ```bash
 cargo test
-cargo clippy --release
-cargo build --release   # ~/.local/bin/tmux-agent-plane links to target/release on Alex's machine
+cargo clippy --all-targets -- -D warnings
+cargo install --path . --force               # reinstall the binary after a change so the user can test it
 pkill -f 'tmux-agent-plane daemon'; tmux source-file ~/.tmux.conf   # restart the daemon on the new build
 ```
 
-Test changes against live agents: spawn throwaway agents with `tmux-agent-plane spawn ... --in window` in a scratch folder, and kill their windows afterwards.
+Test changes against live agents: spawn throwaway agents with `tmux-agent-plane spawn ... --in window` in a scratch folder, and kill them with `tmux-agent-plane kill` afterwards.
+
+## Changelog
+
+Every commit with a user-facing change adds its entry under `## Unreleased` in that commit, grouped under `### Added`, `### Changed`, `### Fixed` or `### Removed`. Write for users, not as a commit list.
+
+## Releases
+
+A release is a `vX.Y.Z` tag on `main`; pushing it runs `.github/workflows/release.yml`, which checks the tag against `Cargo.toml`, then creates the GitHub release with the tag's `CHANGELOG.md` section (`scripts/release-notes.sh`) as its notes. Never create a release by hand.
+
+1. Make sure `main` is clean and CI is green.
+2. Pick the version from `## Unreleased` (SemVer; before 1.0 a breaking change bumps the minor, anything else the patch).
+3. In one commit, `Release vX.Y.Z`:
+   - rename `## Unreleased` to `## X.Y.Z - YYYY-MM-DD` and add a new empty `## Unreleased` above it;
+   - set `version` in `Cargo.toml` and run `cargo build` to update `Cargo.lock`.
+4. Check the notes with `scripts/release-notes.sh X.Y.Z`.
+5. `git tag -a vX.Y.Z -m vX.Y.Z`, then `git push origin main vX.Y.Z`.
+6. Publish to crates.io: `cargo publish`.
+7. Watch the workflow (`gh run watch`), then check with `gh release view vX.Y.Z` that the release exists and carries the changelog section.
+
+If the workflow fails, fix the cause on `main`, delete the tag locally and on `origin`, and tag again.

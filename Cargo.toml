@@ -2,6 +2,14 @@
 name = "tmux-agent-plane"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
+description = "See and steer every coding agent (Claude Code, Codex) running in your tmux"
+license = "GPL-3.0-only"
+repository = "https://github.com/zazencodes/tmux-agent-plane"
+readme = "README.md"
+keywords = ["tmux", "claude-code", "codex", "ai-agents", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = ["docs/assets"]
 
 [dependencies]
 ansi-to-tui = "8.0.1"
