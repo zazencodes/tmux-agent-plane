@@ -13,15 +13,20 @@ const STALE_AFTER_MS: u64 = 5_000;
 pub enum Kind {
     Claude,
     Codex,
+    Pi,
 }
 
 impl Kind {
     pub fn adapter(self) -> crate::agents::Adapter {
-        use crate::agents::{Adapter, claude, codex};
+        use crate::agents::{Adapter, claude, codex, pi};
         match self {
             Self::Claude => Adapter {
                 scan: claude::scan,
                 launch: claude::launch,
+            },
+            Self::Pi => Adapter {
+                scan: pi::scan,
+                launch: pi::launch,
             },
             Self::Codex => Adapter {
                 scan: codex::scan,
@@ -34,6 +39,7 @@ impl Kind {
         match self {
             Kind::Claude => "claude",
             Kind::Codex => "codex",
+            Kind::Pi => "pi",
         }
     }
 }
