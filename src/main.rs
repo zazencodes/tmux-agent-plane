@@ -1,3 +1,4 @@
+mod agents;
 mod commands;
 mod daemon;
 mod detect;

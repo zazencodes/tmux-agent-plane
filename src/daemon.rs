@@ -1,8 +1,9 @@
 //! The watcher: once a second, detect agents, track done/seen, write the index,
 //! update the status bar and notify on transitions.
 
+use crate::agents::RawState;
 use crate::detect::{self, Detected};
-use crate::index::{self, Agent, Index, Kind, State};
+use crate::index::{self, Agent, Index, State};
 use crate::tmux;
 use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
@@ -80,16 +81,16 @@ pub fn run() -> Result<()> {
 /// pane is on screen.
 fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Agent {
     let was_working = before.is_some_and(|a| a.state == State::Working);
-    let finished = was_working && d.state == State::Idle;
+    let finished = was_working && d.state == RawState::Idle;
     let completions = before.map_or(0, |a| a.completions) + u64::from(finished);
     let unseen = before.is_some_and(|a| a.state == State::Done) || finished;
-    let state = match d.state {
+    let state = match State::from(d.state) {
         State::Idle if unseen && !d.pane.visible => State::Done,
         other => other,
     };
-    // Codex replaces its task title with "Action Required" while it waits; keep the task.
+    // Some agents temporarily replace their task title while waiting.
     let title = match before {
-        Some(a) if d.kind == Kind::Codex && d.state == State::Blocked => a.title.clone(),
+        Some(a) if d.preserve_title => a.title.clone(),
         _ => d.title,
     };
     let name = if d.pane.name.is_empty() {
@@ -199,9 +200,10 @@ pub fn status_segment(agents: &[Agent]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::index::Kind;
     use crate::tmux::Pane;
 
-    fn tick(before: Option<&Agent>, state: State, visible: bool) -> Agent {
+    fn tick(before: Option<&Agent>, state: RawState, visible: bool) -> Agent {
         let pane = Pane {
             id: "%1".into(),
             pid: 1,
@@ -222,44 +224,72 @@ mod tests {
             detail: None,
             title: "Task".into(),
             session_id: None,
+            preserve_title: false,
         };
         advance(before, d, 0)
     }
 
     #[test]
     fn unseen_finish_is_done_until_viewed() {
-        let a = tick(None, State::Working, false);
-        let a = tick(Some(&a), State::Idle, false);
+        let a = tick(None, RawState::Working, false);
+        let a = tick(Some(&a), RawState::Idle, false);
         assert_eq!((a.state, a.completions), (State::Done, 1));
-        let a = tick(Some(&a), State::Idle, false);
+        let a = tick(Some(&a), RawState::Idle, false);
         assert_eq!(a.state, State::Done);
-        let a = tick(Some(&a), State::Idle, true);
+        let a = tick(Some(&a), RawState::Idle, true);
         assert_eq!(a.state, State::Idle);
-        let a = tick(Some(&a), State::Idle, false);
+        let a = tick(Some(&a), RawState::Idle, false);
         assert_eq!((a.state, a.completions), (State::Idle, 1));
     }
 
     #[test]
     fn finish_while_watched_is_idle() {
-        let a = tick(None, State::Working, true);
-        let a = tick(Some(&a), State::Idle, true);
+        let a = tick(None, RawState::Working, true);
+        let a = tick(Some(&a), RawState::Idle, true);
         assert_eq!((a.state, a.completions), (State::Idle, 1));
     }
 
     #[test]
     fn startup_idle_is_not_a_completion() {
-        let a = tick(None, State::Idle, false);
+        let a = tick(None, RawState::Idle, false);
         assert_eq!((a.state, a.completions), (State::Idle, 0));
     }
 
     #[test]
     fn notifies_on_done_and_blocked_only_when_unseen() {
-        let working = tick(None, State::Working, false);
-        let done = tick(Some(&working), State::Idle, false);
+        let working = tick(None, RawState::Working, false);
+        let done = tick(Some(&working), RawState::Idle, false);
         assert!(transition_message(Some(&working), &done).is_some());
-        let blocked = tick(Some(&working), State::Blocked, false);
+        let blocked = tick(Some(&working), RawState::Blocked, false);
         assert!(transition_message(Some(&working), &blocked).is_some());
-        let watched = tick(Some(&working), State::Blocked, true);
+        let watched = tick(Some(&working), RawState::Blocked, true);
         assert!(transition_message(Some(&working), &watched).is_none());
+    }
+    #[test]
+    fn temporary_titles_preserve_previous_task_for_any_kind() {
+        let before = tick(None, RawState::Working, false);
+        let observation = || Detected {
+            pane: Pane {
+                id: before.pane.clone(),
+                pid: 1,
+                session: "s".into(),
+                window: "@1".into(),
+                window_index: 1,
+                pane_index: 1,
+                cwd: "/tmp".into(),
+                title: "Action Required".into(),
+                visible: false,
+                name: String::new(),
+                parent: String::new(),
+            },
+            kind: Kind::Claude,
+            state: RawState::Blocked,
+            detail: None,
+            title: "Action Required".into(),
+            session_id: None,
+            preserve_title: true,
+        };
+        assert_eq!(advance(Some(&before), observation(), 1).title, "Task");
+        assert_eq!(advance(None, observation(), 1).title, "Action Required");
     }
 }

@@ -16,6 +16,20 @@ pub enum Kind {
 }
 
 impl Kind {
+    pub fn adapter(self) -> crate::agents::Adapter {
+        use crate::agents::{Adapter, claude, codex};
+        match self {
+            Self::Claude => Adapter {
+                scan: claude::scan,
+                launch: claude::launch,
+            },
+            Self::Codex => Adapter {
+                scan: codex::scan,
+                launch: codex::launch,
+            },
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Kind::Claude => "claude",
@@ -67,7 +81,7 @@ pub struct Agent {
     pub cwd: String,
     /// Pane id of the agent that spawned this one.
     pub parent: Option<String>,
-    /// Claude Code session id, for `claude --resume`.
+    /// Session identifier published by the agent, when available.
     pub session_id: Option<String>,
     /// Unix ms when `state` last changed.
     pub state_since: u64,

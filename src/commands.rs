@@ -338,10 +338,11 @@ pub fn spawn(s: Spawn) -> Result<()> {
 
     // Typed into the pane's shell, so the user's aliases and wrappers apply and the shell
     // stays when the agent exits.
-    let mut command = s.kind.as_str().to_string();
-    if let Some(task) = &s.task {
+    let launch = (s.kind.adapter().launch)(s.task.as_deref());
+    let mut command = launch.command.to_string();
+    for arg in &launch.args {
         command.push(' ');
-        command.push_str(&shell_quote(task));
+        command.push_str(&shell_quote(arg));
     }
     tmux::run(&["send-keys", "-t", &pane, "-l", &command])?;
     tmux::run(&["send-keys", "-t", &pane, "Enter"])?;
