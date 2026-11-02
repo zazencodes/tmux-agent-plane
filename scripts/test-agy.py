@@ -143,10 +143,13 @@ def main():
         hook_path.write_text(json.dumps({"plane-integration-probe": {"PreToolUse": [{"matcher": "run_command", "hooks": [{"type": "command", "command": command, "timeout": 5}]}]}}, indent=2) + "\n")
 
         started.append("agy-live-a")
-        output = plane("spawn", "agy", "Use ask_question to ask me to choose Alpha or Beta, then wait. After my answer reply CHOSEN. Do not use any other tools.", "--in", "window", "--cwd", str(cwd), "--name", started[0], "--wait", "--timeout", "40")
+        output = plane("spawn", "agy", "Call ask_question exactly once, with exactly one single-select question and options Alpha and Beta, then wait. After my answer reply CHOSEN. Do not use any further tools or questions.", "--in", "window", "--cwd", str(cwd), "--name", started[0], "--wait", "--timeout", "40")
         results["question_spawn_wait"] = output.strip()
         row = named(state(started[0], "blocked"), started[0])
         assert row["detail"] == "question", row
+        # Native WAITING can precede installation of the TUI input handler.
+        # This pause only settles key delivery; native index data still supplies state.
+        stop.wait(1.0)
         plane("keys", started[0], "Enter")
         state(started[0], "done")
         plane("focus", started[0])
