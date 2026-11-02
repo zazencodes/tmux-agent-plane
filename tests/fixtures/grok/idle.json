@@ -1,0 +1,25 @@
+{
+  "jsonrpc": "2.0",
+  "id": "tmux-agent-plane-roster",
+  "result": {
+    "result": {
+      "sessions": [
+        {
+          "sessionId": "grok-live",
+          "title": "Grok test",
+          "cwd": "/scratch/shared",
+          "isWorktree": false,
+          "modelId": "grok-4.7",
+          "reasoningEffort": "high",
+          "yolo": false,
+          "activity": "idle",
+          "resident": true,
+          "lastChangeUnixMs": 1793651724443,
+          "origin": {
+            "kind": "local"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -7,6 +7,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
+- Track and spawn Grok Build on macOS through its opt-in official leader mode, including permissions and questions
+
 - Track and spawn OpenCode through an opt-in TUI plugin, including permission/question waits and durable turn completion counters
 
 - Track and spawn Pi through its opt-in official extension, including UI prompts and durable turn completion counters
