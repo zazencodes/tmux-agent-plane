@@ -2,6 +2,7 @@
 
 <p align="center">
   <a href="https://github.com/zazencodes/tmux-agent-plane/actions/workflows/ci.yml"><img src="https://github.com/zazencodes/tmux-agent-plane/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/tmux-agent-plane"><img src="https://img.shields.io/crates/v/tmux-agent-plane" alt="crates.io"></a>
   <a href="https://github.com/zazencodes/tmux-agent-plane/releases/latest"><img src="https://img.shields.io/github/v/release/zazencodes/tmux-agent-plane" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue" alt="License: GPLv3"></a>
   <img src="https://img.shields.io/badge/tmux-3.3%2B-1BB91F?logo=tmux&logoColor=white" alt="tmux 3.3+">
@@ -70,7 +71,7 @@ enter jump · j/k move · q quit
 **1. The binary.**
 
 ```sh
-cargo install --locked --git https://github.com/zazencodes/tmux-agent-plane
+cargo install --locked tmux-agent-plane
 ```
 
 **2. The tmux plugin.** With [TPM](https://github.com/tmux-plugins/tpm), add to `~/.tmux.conf` and press `prefix + I`:
