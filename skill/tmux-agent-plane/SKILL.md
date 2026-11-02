@@ -16,7 +16,7 @@ You are an agent in this list too. `list` marks you with `*` (or `"self": true` 
 
 ## First: name yourself
 
-The user tells agents apart by name. When you load this skill, run `list` (`list --no-self` from Codex tool shells; see Caller identity below). If your own name (`*`) is still the default `<kind>-<number>` (`claude-154`), name yourself after your task before anything else:
+The user tells agents apart by name. When you load this skill, run `list` (see Caller identity below for Codex). If your own name (`*`) is still the default `<kind>-<number>` (`claude-154`), name yourself after your task before anything else:
 
 ```bash
 tmux-agent-plane rename self <name>
@@ -26,7 +26,7 @@ A name is one short kebab-case word for the work, 2 to 3 words joined by `-`, at
 
 ## Caller identity
 
-Codex tool shells can inherit `TMUX_PANE` from a shared app-server. Their `CODEX_THREAD_ID`/`CODEX_SESSION_ID` identifies a thread, but current published files do not reliably associate that thread with its TUI pane. Never use `$TMUX_PANE` from a Codex tool shell. Use `list --no-self` and explicit agent names supplied in your task. If your own name is unknown, ask the lead to identify/name you. The CLI fails on Codex self references (including the inherited pane value) and spawning, since it cannot safely choose a caller pane or record the parent. Do not unset Codex identity variables to bypass this error. Other callers may use `self`.
+Codex tool shells can inherit `TMUX_PANE` from a shared app-server. Their `CODEX_THREAD_ID`/`CODEX_SESSION_ID` identifies a thread, but current published files do not reliably associate that thread with its TUI pane. Never use `$TMUX_PANE` from a Codex tool shell. `list` works and marks no caller row for Codex. Use explicit agent names supplied in your task. If your own name is unknown, ask the lead to identify/name you. The CLI fails on Codex self references (including the inherited pane value) and `spawn --in pane`, since it cannot safely choose a caller pane. Use `spawn --in window` or `spawn --in session`; these work and record no parent (`parent: null`). Do not unset Codex identity variables to bypass this error. Other callers may use `self`.
 
 ## Rule: the CLI, never raw tmux
 

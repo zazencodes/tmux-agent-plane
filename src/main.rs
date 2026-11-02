@@ -40,9 +40,6 @@ enum Cmd {
     List {
         #[arg(long)]
         json: bool,
-        /// List without trying to identify or mark the caller
-        #[arg(long)]
-        no_self: bool,
     },
     /// Print an agent's recent screen
     Read {
@@ -125,7 +122,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Sidebar => sidebar::run(),
         Cmd::ToggleSidebar { window } => sidebar::toggle(&commands::target_pane(&window)?),
         Cmd::FollowSidebar { window } => sidebar::follow(&commands::target_pane(&window)?),
-        Cmd::List { json, no_self } => commands::list(json, no_self),
+        Cmd::List { json } => commands::list(json),
         Cmd::Read { target, lines } => commands::read(&target, lines),
         Cmd::Send {
             target,

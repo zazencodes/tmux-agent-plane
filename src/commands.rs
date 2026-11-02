@@ -28,7 +28,7 @@ fn codex_caller() -> bool {
 fn resolve_caller(codex: bool, pane: Option<String>) -> Result<Option<String>> {
     if codex {
         bail!(
-            "cannot identify the Codex caller: CODEX_THREAD_ID/CODEX_SESSION_ID have no reliable published association to a tmux pane; Codex tool shells may inherit a stale TMUX_PANE. Use explicit agent names for targets and `list --no-self` to list agents. Self references and spawning require a caller whose pane can be identified"
+            "cannot identify the Codex caller: CODEX_THREAD_ID/CODEX_SESSION_ID have no reliable published association to a tmux pane; Codex tool shells may inherit a stale TMUX_PANE. Use explicit agent names for targets. Self references require a caller whose pane can be identified"
         );
     }
     Ok(pane)
@@ -78,9 +78,9 @@ fn state_label(agent: &Agent) -> String {
     }
 }
 
-pub fn list(json: bool, no_self: bool) -> Result<()> {
+pub fn list(json: bool) -> Result<()> {
     let index = index::read()?;
-    let me = if no_self { None } else { self_pane()? };
+    let me = if codex_caller() { None } else { self_pane()? };
     if json {
         let agents: Vec<serde_json::Value> = index
             .agents
@@ -313,7 +313,16 @@ pub fn spawn(s: Spawn) -> Result<()> {
     };
     let cwd = cwd.canonicalize()?;
     let cwd = cwd.to_str().expect("cwd is UTF-8");
-    let me = self_pane()?;
+    let me = if codex_caller() {
+        if matches!(s.placement, Placement::Pane) {
+            bail!(
+                "cannot identify the Codex caller's pane for --in pane; use --in window or --in session"
+            );
+        }
+        None
+    } else {
+        self_pane()?
+    };
 
     let pane = match (s.placement, &me) {
         (Placement::Pane, None) => {
