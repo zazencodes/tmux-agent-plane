@@ -12,6 +12,7 @@ server and its invisible terminal client. A temporary workspace hook forces a
 real permission request even when the user's settings allow all commands.
 """
 import argparse
+import atexit
 import hashlib
 import json
 import os
@@ -66,6 +67,8 @@ def run():
     (runtime_root / "s").mkdir()
     (run_dir / "state").symlink_to(runtime_root / "s", target_is_directory=True)
     source = original_home / ".gemini/antigravity-cli"
+    # Also remove the copied credential if setup fails before the main cleanup block.
+    atexit.register((private_data / "antigravity-oauth-token").unlink, missing_ok=True)
     for relative in ("antigravity-oauth-token", "cache/onboarding.json"):
         shutil.copy2(source / relative, private_data / relative)
     settings = json.loads((source / "settings.json").read_text())
@@ -181,7 +184,7 @@ def run():
         env["TMUX_PANE"] = pane
         (run_dir / "environment.json").write_text(json.dumps({key: env[key] for key in ("TMUX", "TMUX_PANE", "XDG_STATE_HOME", "PATH", "HOME")}))
         with open(run_dir / "daemon.log", "w") as log:
-            daemon = subprocess.Popen([str(binary), "daemon"], env=env, stdout=log, stderr=log)
+            daemon = subprocess.Popen([str(binary), "daemon", "serve"], env=env, stdout=log, stderr=log)
         deadline = time.monotonic() + 10
         index_path = run_dir / "state/tmux-agent-plane/agents.json"
         while not index_path.exists() and time.monotonic() < deadline:
