@@ -1,0 +1,4 @@
+# Merge this setting into the existing [cli] table in ~/.grok/config.toml
+# (or $GROK_HOME/config.toml). Restart Grok sessions after changing it.
+[cli]
+use_leader = true
