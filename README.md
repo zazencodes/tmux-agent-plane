@@ -16,9 +16,9 @@
 
 See and steer every coding agent running in your tmux.
 
-Start Claude Code or Codex in any tmux pane, the way you already do. tmux-agent-plane finds it, tracks whether it is working, waiting on you, or done, and shows that in your status bar and in an agent list. Your agents get the same view through a CLI and an agent skill, so any agent can check on, message, wait for or start other agents, and one agent can run the rest as a super agent.
+Start Claude Code, Codex or Antigravity (`agy`) in any tmux pane, the way you already do. Add Pi, OpenCode or Grok Build with the opt-in integrations below. tmux-agent-plane finds it, tracks whether it is working, waiting on you, or done, and shows that in your status bar and in an agent list. Your agents get the same view through a CLI and an agent skill, so any agent can check on, message, wait for or start other agents, and one agent can run the rest as a super agent.
 
-No hooks, no wrappers, nothing to configure in your agents.
+Claude Code, Codex and Antigravity use native signals. Pi and OpenCode use publishers built on their official extension APIs; Grok Build uses its official leader mode. Each optional integration has one setup step under [More agents](#more-agents).
 
 ```text
  tmux status bar                                    ◆ 1 ✓ 1 ● 2 ○ 1   ~/pro/app
@@ -46,7 +46,7 @@ enter jump · j/k move · q quit
 - **Peek before you jump.** `prefix + A` opens the agent list in a popup with a large live preview of the selected agent's screen.
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
 - **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`.
-- **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. Each spawned agent records its parent.
+- **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. A spawned agent records its parent when caller identity is known.
 - **Your agents, unchanged.** Spawned agents start in a normal shell, so your aliases and flags apply, and the shell stays when the agent exits.
 
 ## States
@@ -61,8 +61,9 @@ enter jump · j/k move · q quit
 ## Requirements
 
 - tmux 3.3 or newer
-- Claude Code and/or Codex CLI
-- Rust, to build it
+- At least one supported agent CLI: Claude Code, Codex, Antigravity, Pi, OpenCode or Grok Build
+- `lsof` for Antigravity process/session association (included with macOS; install it on Linux when using agy)
+- Rust and a C compiler, to build it (SQLite is bundled)
 - macOS or Linux. Desktop notifications use `osascript` on macOS and `notify-send` on Linux.
 
 ## Install
@@ -106,6 +107,28 @@ ln -s ~/.tmux/plugins/tmux-agent-plane/skill/tmux-agent-plane ~/.agents/skills/t
 - Coding agents in my tmux are indexed by `tmux-agent-plane`. Whenever a task touches another agent (checking on, reading, messaging, waiting for, showing, closing or spawning one), load the `tmux-agent-plane` skill first and use its CLI; never drive agent panes with raw tmux commands.
 ```
 
+## More agents
+
+Tested with Pi 1.0.2, OpenCode 1.19.3 and Grok Build 1.0.70. Pi/OpenCode must inherit the daemon's `XDG_STATE_HOME`.
+
+These integrations are independent. Install only the ones you use; absent publisher files or a Grok leader socket leave that kind untracked. The paths below assume a TPM checkout at `~/.tmux/plugins/tmux-agent-plane`.
+
+- **Pi:** symlink its publisher into Pi's extension directory, then restart Pi:
+
+  ```sh
+  mkdir -p "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/extensions"
+  ln -s "$HOME/.tmux/plugins/tmux-agent-plane/extensions/pi" "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/extensions/tmux-agent-plane"
+  ```
+
+- **OpenCode:** symlink the TUI publisher plugin and add `"./tmux-agent-plane.js"` to the `plugin` array in `~/.config/opencode/tui.json` (or your `$XDG_CONFIG_HOME/opencode/tui.json`), preserving existing entries. Restart OpenCode. [Example configuration](extensions/opencode/tui.example.json).
+
+  ```sh
+  mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+  ln -s "$HOME/.tmux/plugins/tmux-agent-plane/extensions/opencode/tmux-agent-plane.js" "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/tmux-agent-plane.js"
+  ```
+
+- **Grok Build (macOS):** add `use_leader = true` to the existing `[cli]` table in `~/.grok/config.toml` (or `$GROK_HOME/config.toml`), then restart Grok sessions. [Example configuration](extensions/grok/config.toml.example). The daemon uses the same `GROK_HOME` and `GROK_LEADER_SOCKET` overrides as Grok; its default socket is `~/.grok/leader.sock`.
+
 ## Usage
 
 Run your agents as usual. Then ask any of them things like:
@@ -129,36 +152,59 @@ Run your agents as usual. Then ask any of them things like:
 
 While the sidebar is open, every window has one, including windows and sessions you create later; each scrolls on its own. The popup opens on the first blocked agent, or else the first done one. The agent you are looking at is shown in bold in the sidebar.
 
+### Agent launch syntax
+
+`spawn` starts a persistent interactive session. It types the literal command name into your shell so aliases apply, and quotes each argument separately.
+
+| Kind | Command sent to the shell with a task |
+| --- | --- |
+| `claude` | `claude '<task>'` |
+| `codex` | `codex '<task>'` |
+| `pi` | `pi -- '<task>'` |
+| `opencode` | `opencode --prompt '<task>'` |
+| `agy` | `agy --prompt-interactive '<task>'` |
+| `grok` | `grok -- '<task>'` |
+
+All kinds except agy can be spawned without a task. `spawn agy` requires a task and fails immediately if it is missing: agy publishes no state until its first turn. An agy started by hand appears once you send its first message; before then, use `read <pane-id>` and `keys <pane-id> ...`. Pi and OpenCode need their opt-in publisher installed before `spawn` can detect them; Grok needs leader mode.
+
 ### CLI
 
 | Command | Action |
 | --- | --- |
-| `list [--json]` | All agents. `*` (or `"self": true`) marks the caller |
+| `list [--json]` | All agents. `*` (or `"self": true`) marks a known caller |
 | `read <agent> [--lines N]` | The agent's screen, plus N lines of scrollback |
 | `send <agent> "<prompt>" [--wait] [--timeout S]` | Paste a prompt and press Enter. `--wait` returns when that turn ends or the agent blocks |
 | `keys <agent> <key>...` | Press keys, by tmux key name: `Enter`, `Escape`, `Down`, `2` |
 | `wait <agent> [--timeout S]` | Wait until the agent is not working |
-| `rename <agent> <name>` | Name an agent: one word, unique. `"$TMUX_PANE"` is the caller |
+| `rename <agent> <name>` | Name an agent: one word, unique. `self` requires a known caller |
 | `focus <agent>` | Show the agent on your screen |
 | `kill <agent>` | Close the agent's pane |
-| `spawn claude\|codex ["<task>"] [--in pane\|window\|session] [--cwd DIR] [--name NAME] [--wait] [--timeout S]` | Start an agent. `--in pane` (default) splits the caller's pane |
+| `spawn claude\|codex\|pi\|opencode\|agy\|grok ["<task>"] [--in pane\|window\|session] [--cwd DIR] [--name NAME] [--wait] [--timeout S]` | Start an agent. `--in pane` (default) splits the caller's pane |
 | `toggle-sidebar <window>` | What the sidebar key does, from a window (a window or pane id) |
 | `follow-sidebar <window>` | Add the sidebar to a window while it is open. The plugin runs it when a window comes on screen |
 | `sidebar` | The sidebar's agent list, run in the sidebar pane |
 | `ui` | The agent list popup |
 | `daemon` | The watcher, started by the plugin |
 
-`<agent>` is an agent's name or tmux pane id. An agent is `<kind>-<pane number>` (`claude-154`) until it is named with `spawn --name`, `rename`, or `r` in the sidebar. The name is stored on the agent's tmux pane. `read` and `keys` also take any pane id, so an agent stuck on a prompt before it starts can still be answered.
+`<agent>` is an agent's name, tmux pane id, or `self` when the caller can be identified. An agent is `<kind>-<pane number>` (`claude-154`) until it is named with `spawn --name`, `rename`, or `r` in the sidebar. The name is stored on the agent's tmux pane. `read` and `keys` also take any pane id, so an agent stuck on a prompt before it starts can still be answered.
 
 ## How it works
 
 - **Claude Code** keeps `~/.claude/sessions/<pid>.json` for each running session, with its tmux pane and a `status`: `busy`, `waiting` (with `waitingFor`, such as `input needed`), `idle`, or `shell` (the turn is over and a background shell runs on).
 - **Codex** sets the terminal title: a braille spinner in front while a turn runs, `[ ! ] Action Required` while an approval or question waits. A pane is a Codex agent when a `codex` process runs under it.
-- **The daemon** reads both once a second for every pane on the tmux server. It marks a turn that ends off screen as `done` until the pane is on screen, writes the index to `~/.local/state/tmux-agent-plane/agents.json`, sets the `@agent_plane_status` tmux option, and sends notifications. It exits with the tmux server, and a second copy exits at once.
+- **Antigravity** publishes its active conversation through the process's open presence file. Live SQLite summaries and their background-task flag distinguish working from fully idle; current-turn pending interactions take priority and distinguish permission and question waits. The reader includes SQLite so it reads active WAL data correctly.
+- **Pi** publishes PID, pane, native session, live activity, UI prompts, and completed-turn counts through the opt-in extension in `extensions/pi/`.
+- **OpenCode** publishes its active TUI session and native status, permission and question snapshots through the opt-in TUI publisher plugin in `extensions/opencode/`. Its default TUI has no external HTTP listener.
+- **Grok Build** uses the official leader roster's `working`, `needs_input` and `idle` states. Native active-session records tie each local resident session to its live TUI process. The blinking terminal title is not used for state.
+- **The daemon** scans all enabled kinds once a second for every pane on the tmux server. It marks a turn that ends off screen as `done` until the pane is on screen, writes the index to `~/.local/state/tmux-agent-plane/agents.json`, sets the `@agent_plane_status` tmux option, and sends notifications. It exits with the tmux server, and a second copy exits at once.
 - **The CLI and the agent list** read the index. They fail with a clear error when the daemon is not running.
 - **`send`** pastes with bracketed paste, then presses Enter, so a multi-line prompt arrives as one message.
 
 ## Notes
+
+- Pi and OpenCode are opt-in. Without their publisher status files, those kinds remain untracked and require no setup. A live opted-in publisher with malformed, unknown or stale status fails loudly; dead process files are ignored.
+- Pi and OpenCode publish durable completion counters, so waits observe turns that finish between daemon polls. Claude Code, Codex, agy and Grok are sampled: a turn entirely between polls can be missed by `send --wait` or `spawn --wait`.
+- Codex tool shells may inherit a stale `TMUX_PANE` from a shared app-server. `list` works and marks no caller; `spawn --in window` and `--in session` work with `parent: null`. Self references, inherited-pane targets and `spawn --in pane` fail with a clear error. Use explicit agent names and window/session spawning.
 
 - A Claude Code session is detected once it writes its session file, after the folder trust prompt. When `spawn` reports that an agent did not start, read its pane and answer the prompt with `keys`.
 - Codex detection relies on its default terminal title. A `tui.terminal_title` setting that drops the activity spinner hides the `working` state.

@@ -1,22 +1,22 @@
 ---
 name: tmux-agent-plane
-description: The system-wide index of the user's coding agents (Claude Code, Codex) across every tmux session, and the only way to work with them, through the `tmux-agent-plane` CLI. Load it first, before any tmux command, whenever a task touches another agent: the user names an agent (`claude-154`, `codex-26`, `reviewer`) or a pane, asks how an agent is doing or what agents are running, wants to check on, read, message, answer, wait for, show, close, start or spawn an agent (in a pane, window or session), wants work delegated to another agent, or wants a super agent that coordinates others.
+description: The system-wide index of the user's coding agents (Claude Code, Codex, Pi, OpenCode, Antigravity, Grok Build) across every tmux session, and the only way to work with them, through the `tmux-agent-plane` CLI. Load it first, before any tmux command, whenever a task touches another agent: the user names an agent (`claude-154`, `codex-26`, `reviewer`) or a pane, asks how an agent is doing or what agents are running, wants to check on, read, message, answer, wait for, show, close, start or spawn an agent (in a pane, window or session), wants work delegated to another agent, or wants a super agent that coordinates others.
 ---
 
 # tmux-agent-plane
 
-Every Claude Code and Codex agent running in the user's tmux is tracked by a background daemon. Each agent has a name (`claude-154`, or one given at spawn), a tmux pane id (`%154`) and a state:
+A background daemon tracks Claude Code, Codex and Antigravity in the user's tmux. Pi and OpenCode require their opt-in publishers; Grok Build requires official leader mode and is currently supported on macOS. See the repository README More agents for installation. Without an optional integration, that kind stays untracked. Each agent has a name (`claude-154`, or one given at spawn), a tmux pane id (`%154`) and a state:
 
 - `working`: running a turn.
 - `blocked`: waiting on a person: a question, a permission prompt, a dialog. `detail` says what, when the agent reports it.
 - `done`: finished a turn nobody has looked at yet.
 - `idle`: ready for input, already seen.
 
-You are an agent in this list too. `list` marks you with `*` (or `"self": true` in JSON).
+You appear in this list when your kind's tracking requirements are met. `list` marks you with `*` (or `"self": true` in JSON) when caller identity is reliable.
 
 ## First: name yourself
 
-The user tells agents apart by name. When you load this skill, run `list` (see Caller identity below for Codex). If your own name (`*`) is still the default `<kind>-<number>` (`claude-154`), name yourself after your task before anything else:
+The user tells agents apart by name. Preserve a name already assigned in your task. When you load this skill, run `list`. Codex callers have no self marker: use an explicit name supplied in your task, and never run `rename self` or use `$TMUX_PANE`. Other callers whose own marked name is still the default `<kind>-<number>` (`claude-154`) name themselves after their task:
 
 ```bash
 tmux-agent-plane rename self <name>
@@ -43,12 +43,12 @@ tmux-agent-plane keys <agent> <key>...    # tmux key names: Enter Escape Up Down
 tmux-agent-plane rename <agent> <name>     # one word, unique; `self` requires reliable caller identity
 tmux-agent-plane wait <agent> [--timeout S]
 tmux-agent-plane focus <agent>            # bring it on screen for the user
-tmux-agent-plane toggle-sidebar self  # open the user's agent sidebar in every window (run again to close)
+tmux-agent-plane toggle-sidebar self  # requires known caller identity; opens/closes every sidebar
 tmux-agent-plane kill <agent>             # close its pane, ending it
-tmux-agent-plane spawn claude|codex ["<task>"] [--in pane|window|session] [--cwd DIR] [--name NAME] [--wait] [--timeout S]
+tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|window|session] [--cwd DIR] [--name NAME] [--wait] [--timeout S]
 ```
 
-`<agent>` is a name or pane id. `read` and `keys` also take any pane id, including a pane whose agent has not started yet.
+`<agent>` is a name, pane id, or `self` when caller identity is reliable. `read` and `keys` also take any pane id, including a pane whose agent has not started yet.
 
 ## Checking on an agent
 
@@ -59,18 +59,24 @@ tmux-agent-plane spawn claude|codex ["<task>"] [--in pane|window|session] [--cwd
 ## Starting an agent
 
 - `spawn` types the agent command into a fresh shell, so the user's aliases and flags apply, and the shell stays when the agent exits.
-- `--in pane` (default) splits your pane beside you. Use `--in window` for longer independent work, `--in session` for a separate project. Follow what the user asked for.
+- `--in pane` (default) splits a known caller's pane. Codex callers must use `--in window` or `--in session`. Use a window for independent work or a session for a separate project; follow the requested placement when caller identity permits it.
 - Give the full task as the prompt: the new agent has none of your context. Say which files, what done looks like, and what to report back.
 - Always name agents you spawn (`--name reviewer`), following the naming rule above.
-- `spawn` prints `<name> <pane> <location>`. The spawned agent records you as its parent.
+- `spawn` prints `<name> <pane> <location>`. The spawned agent records you as its parent when caller identity is known; Codex window/session spawns record `parent: null`.
 - A folder the agent has not trusted yet stops at a trust prompt, and `spawn` reports that the agent did not start. `read <pane>`, then answer with `keys <pane> ...` only when the user asked for that folder.
+
+## Launch requirements
+
+`spawn` chooses each kind's interactive syntax: positional tasks for Claude/Codex, `grok -- <task>`, `pi -- <task>`, `opencode --prompt <task>`, and `agy --prompt-interactive <task>`. Install the Pi/OpenCode publishers or enable Grok leader mode before spawning those kinds. `spawn agy` requires a task and fails immediately without one. An agy started by hand appears after its first message; before then, address its pane ID with `read` or `keys`. A spawn timeout can mean an optional integration is missing; read the pane and check the documented opt-in setup.
+
+Pi/OpenCode publish durable completion counters. Other kinds are sampled once per second, so `send --wait` and task-bearing `spawn --wait` can time out if an entire turn finishes between polls. Do not report such a timeout as a successful test.
 
 ## Talking to an agent and waiting
 
 - `send <agent> "<prompt>" --wait` pastes the prompt, presses Enter, and returns when that turn ends or the agent blocks. It prints `<name> <state>: <task>`.
 - `spawn ... "<task>" --wait` returns when the first turn ends or the agent blocks.
 - `wait <agent>` returns as soon as the agent is not `working`, so it returns at once for an idle agent. Use it to wait for work already running; use `send --wait` for work you start.
-- Waits block until done. Pass `--timeout` shorter than your own shell tool limit, or run the wait in the background, then `read` the agent for its answer.
+- A turn wait returns when the turn ends or blocks; plain `wait` also returns immediately for an already idle/done agent. Sampled kinds have the fast-turn limitation above. Pass `--timeout` shorter than your shell tool limit, or run the wait in the background, then `read` the result.
 - A command fails loudly on a timeout, when the agent exits, or when the daemon is not running.
 
 ## Blocked agents

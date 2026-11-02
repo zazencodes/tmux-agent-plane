@@ -15,7 +15,7 @@ const SPAWN_DETECT_TIMEOUT: Duration = Duration::from_secs(30);
 pub enum Placement {
     /// Split the caller's pane.
     Pane,
-    /// A new window in the caller's session.
+    /// A new window (in the caller's session when its pane is known).
     Window,
     /// A new detached session.
     Session,

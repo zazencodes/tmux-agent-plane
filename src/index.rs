@@ -23,29 +23,29 @@ impl Kind {
     pub fn adapter(self) -> crate::agents::Adapter {
         use crate::agents::{Adapter, agy, claude, codex, grok, opencode, pi};
         match self {
-            Self::Agy => Adapter {
-                scan: agy::scan,
-                launch: agy::launch,
-            },
             Self::Claude => Adapter {
                 scan: claude::scan,
                 launch: claude::launch,
             },
-            Self::Grok => Adapter {
-                scan: grok::scan,
-                launch: grok::launch,
-            },
-            Self::Opencode => Adapter {
-                scan: opencode::scan,
-                launch: opencode::launch,
+            Self::Codex => Adapter {
+                scan: codex::scan,
+                launch: codex::launch,
             },
             Self::Pi => Adapter {
                 scan: pi::scan,
                 launch: pi::launch,
             },
-            Self::Codex => Adapter {
-                scan: codex::scan,
-                launch: codex::launch,
+            Self::Opencode => Adapter {
+                scan: opencode::scan,
+                launch: opencode::launch,
+            },
+            Self::Agy => Adapter {
+                scan: agy::scan,
+                launch: agy::launch,
+            },
+            Self::Grok => Adapter {
+                scan: grok::scan,
+                launch: grok::launch,
             },
         }
     }
