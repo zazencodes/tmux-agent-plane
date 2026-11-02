@@ -16,13 +16,17 @@ You are an agent in this list too. `list` marks you with `*` (or `"self": true` 
 
 ## First: name yourself
 
-The user tells agents apart by name. When you load this skill, run `list`. If your own name (`*`) is still the default `<kind>-<number>` (`claude-154`), name yourself after your task before anything else:
+The user tells agents apart by name. When you load this skill, run `list` (`list --no-self` from Codex tool shells; see Caller identity below). If your own name (`*`) is still the default `<kind>-<number>` (`claude-154`), name yourself after your task before anything else:
 
 ```bash
-tmux-agent-plane rename "$TMUX_PANE" <name>
+tmux-agent-plane rename self <name>
 ```
 
 A name is one short kebab-case word for the work, 2 to 3 words joined by `-`, at most 20 characters: `auth-refactor`, `billing-tests`, `release-notes`. Never rename an agent the user has already named.
+
+## Caller identity
+
+Codex tool shells can inherit `TMUX_PANE` from a shared app-server. Their `CODEX_THREAD_ID`/`CODEX_SESSION_ID` identifies a thread, but current published files do not reliably associate that thread with its TUI pane. Never use `$TMUX_PANE` from a Codex tool shell. Use `list --no-self` and explicit agent names supplied in your task. If your own name is unknown, ask the lead to identify/name you. The CLI fails on Codex self references (including the inherited pane value) and spawning, since it cannot safely choose a caller pane or record the parent. Do not unset Codex identity variables to bypass this error. Other callers may use `self`.
 
 ## Rule: the CLI, never raw tmux
 
@@ -36,10 +40,10 @@ tmux-agent-plane list --json              # the same with every field
 tmux-agent-plane read <agent> [--lines N] # its screen, plus N lines of scrollback
 tmux-agent-plane send <agent> "<prompt>" [--wait] [--timeout S]
 tmux-agent-plane keys <agent> <key>...    # tmux key names: Enter Escape Up Down Tab 1 2 y n
-tmux-agent-plane rename <agent> <name>     # one word, unique; "$TMUX_PANE" is you
+tmux-agent-plane rename <agent> <name>     # one word, unique; `self` requires reliable caller identity
 tmux-agent-plane wait <agent> [--timeout S]
 tmux-agent-plane focus <agent>            # bring it on screen for the user
-tmux-agent-plane toggle-sidebar "$TMUX_PANE"  # open the user's agent sidebar in every window (run again to close)
+tmux-agent-plane toggle-sidebar self  # open the user's agent sidebar in every window (run again to close)
 tmux-agent-plane kill <agent>             # close its pane, ending it
 tmux-agent-plane spawn claude|codex ["<task>"] [--in pane|window|session] [--cwd DIR] [--name NAME] [--wait] [--timeout S]
 ```

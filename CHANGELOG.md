@@ -7,6 +7,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Reject unsafe Codex caller references and spawning when a shared app-server supplies a stale `TMUX_PANE`; `list --no-self` and explicit agent names remain available
+
 - Use published completion counters when available so wait commands observe turns that finish between daemon polls
 
 ### Changed

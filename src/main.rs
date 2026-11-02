@@ -40,6 +40,9 @@ enum Cmd {
     List {
         #[arg(long)]
         json: bool,
+        /// List without trying to identify or mark the caller
+        #[arg(long)]
+        no_self: bool,
     },
     /// Print an agent's recent screen
     Read {
@@ -70,7 +73,7 @@ enum Cmd {
     },
     /// Give an agent a name
     Rename {
-        /// Agent name or pane id (`"$TMUX_PANE"` for yourself)
+        /// Agent name, pane id, or `self` when caller identity is available
         target: String,
         /// One word, e.g. `reviewer` or `auth-refactor`
         name: String,
@@ -120,9 +123,9 @@ fn main() -> anyhow::Result<()> {
         Cmd::Daemon => daemon::run(),
         Cmd::Ui => ui::run(),
         Cmd::Sidebar => sidebar::run(),
-        Cmd::ToggleSidebar { window } => sidebar::toggle(&window),
-        Cmd::FollowSidebar { window } => sidebar::follow(&window),
-        Cmd::List { json } => commands::list(json),
+        Cmd::ToggleSidebar { window } => sidebar::toggle(&commands::target_pane(&window)?),
+        Cmd::FollowSidebar { window } => sidebar::follow(&commands::target_pane(&window)?),
+        Cmd::List { json, no_self } => commands::list(json, no_self),
         Cmd::Read { target, lines } => commands::read(&target, lines),
         Cmd::Send {
             target,

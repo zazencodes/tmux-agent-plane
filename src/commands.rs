@@ -3,6 +3,7 @@
 use crate::index::{self, Agent, Index, Kind, State};
 use crate::tmux;
 use anyhow::{Result, bail};
+use std::borrow::Cow;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -20,8 +21,36 @@ pub enum Placement {
     Session,
 }
 
-fn self_pane() -> Option<String> {
-    std::env::var("TMUX_PANE").ok()
+fn codex_caller() -> bool {
+    std::env::var_os("CODEX_THREAD_ID").is_some() || std::env::var_os("CODEX_SESSION_ID").is_some()
+}
+
+fn resolve_caller(codex: bool, pane: Option<String>) -> Result<Option<String>> {
+    if codex {
+        bail!(
+            "cannot identify the Codex caller: CODEX_THREAD_ID/CODEX_SESSION_ID have no reliable published association to a tmux pane; Codex tool shells may inherit a stale TMUX_PANE. Use explicit agent names for targets and `list --no-self` to list agents. Self references and spawning require a caller whose pane can be identified"
+        );
+    }
+    Ok(pane)
+}
+
+fn self_pane() -> Result<Option<String>> {
+    resolve_caller(codex_caller(), std::env::var("TMUX_PANE").ok())
+}
+
+/// Resolve an explicit self reference, rejecting Codex's inherited pane value as well.
+pub fn target_pane(target: &str) -> Result<Cow<'_, str>> {
+    let inherited = std::env::var("TMUX_PANE").ok();
+    if target == "self" || (codex_caller() && inherited.as_deref() == Some(target)) {
+        let pane =
+            self_pane()?.ok_or_else(|| anyhow::anyhow!("self requires a caller inside tmux"))?;
+        return Ok(Cow::Owned(pane));
+    }
+    Ok(Cow::Borrowed(target))
+}
+
+fn find_agent<'a>(index: &'a Index, target: &str) -> Result<&'a Agent> {
+    index::find(index, &target_pane(target)?)
 }
 
 fn display_parent(index: &Index, parent: &Option<String>) -> String {
@@ -49,9 +78,9 @@ fn state_label(agent: &Agent) -> String {
     }
 }
 
-pub fn list(json: bool) -> Result<()> {
+pub fn list(json: bool, no_self: bool) -> Result<()> {
     let index = index::read()?;
-    let me = self_pane();
+    let me = if no_self { None } else { self_pane()? };
     if json {
         let agents: Vec<serde_json::Value> = index
             .agents
@@ -117,8 +146,10 @@ pub fn list(json: bool) -> Result<()> {
 /// An agent's pane, or any pane by id: an agent that has not started yet (a trust prompt,
 /// say) is not in the index but can still be read and answered.
 fn pane_of(target: &str) -> Result<String> {
+    let resolved = target_pane(target)?;
+    let target = resolved.as_ref();
     let index = index::read()?;
-    match index::find(&index, target) {
+    match find_agent(&index, target) {
         Ok(agent) => Ok(agent.pane.clone()),
         Err(_) if target.starts_with('%') => {
             Ok(
@@ -139,7 +170,7 @@ pub fn read(target: &str, lines: u32) -> Result<()> {
 
 pub fn send(target: &str, text: &str, wait: bool, timeout: Option<u64>) -> Result<()> {
     let index = index::read()?;
-    let agent = index::find(&index, target)?.clone();
+    let agent = find_agent(&index, target)?.clone();
     let before = agent.completions;
     let sent_at = index::now_ms();
     paste(&agent.pane, text)?;
@@ -184,7 +215,7 @@ fn check_name(index: &Index, name: &str, pane: Option<&str>) -> Result<()> {
 /// Name an agent. The name lives in its pane, so it lasts as long as the pane.
 pub fn set_name(target: &str, name: &str) -> Result<Agent> {
     let index = index::read()?;
-    let agent = index::find(&index, target)?.clone();
+    let agent = find_agent(&index, target)?.clone();
     check_name(&index, name, Some(&agent.pane))?;
     tmux::run(&[
         "set-option",
@@ -214,14 +245,14 @@ pub fn keys(target: &str, keys: &[String]) -> Result<()> {
 /// Show an agent on the user's screen. Viewing it marks a `done` agent seen.
 pub fn focus(target: &str) -> Result<()> {
     let index = index::read()?;
-    let agent = index::find(&index, target)?;
+    let agent = find_agent(&index, target)?;
     tmux::jump(&agent.session, &agent.window, &agent.pane)
 }
 
 /// Close an agent's pane, ending the agent and its shell.
 pub fn kill(target: &str) -> Result<()> {
     let index = index::read()?;
-    let agent = index::find(&index, target)?;
+    let agent = find_agent(&index, target)?;
     tmux::run(&["kill-pane", "-t", &agent.pane])?;
     println!("killed {} ({})", agent.name, agent.pane);
     Ok(())
@@ -229,7 +260,7 @@ pub fn kill(target: &str) -> Result<()> {
 
 pub fn wait(target: &str, timeout: Option<u64>) -> Result<()> {
     let index = index::read()?;
-    let pane = index::find(&index, target)?.pane.clone();
+    let pane = find_agent(&index, target)?.pane.clone();
     let done = wait_for(&pane, timeout, |a| a.state != State::Working)?;
     print_settled(&done);
     Ok(())
@@ -282,7 +313,7 @@ pub fn spawn(s: Spawn) -> Result<()> {
     };
     let cwd = cwd.canonicalize()?;
     let cwd = cwd.to_str().expect("cwd is UTF-8");
-    let me = self_pane();
+    let me = self_pane()?;
 
     let pane = match (s.placement, &me) {
         (Placement::Pane, None) => {
@@ -381,4 +412,19 @@ pub fn spawn(s: Spawn) -> Result<()> {
 
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn codex_never_uses_inherited_tmux_pane() {
+        assert!(resolve_caller(true, Some("%14".into())).is_err());
+        assert!(resolve_caller(true, None).is_err());
+        assert_eq!(
+            resolve_caller(false, Some("%7".into())).unwrap(),
+            Some("%7".into())
+        );
+        assert_eq!(resolve_caller(false, None).unwrap(), None);
+    }
 }
