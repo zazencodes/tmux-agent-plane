@@ -14,48 +14,138 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
+use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
 
 const WIDTH: &str = "38";
 const REFRESH: Duration = Duration::from_millis(500);
 /// Pane option marking a sidebar pane, so the toggle finds it.
 const MARK: &str = "@agent-plane-sidebar";
+/// Global option set while the sidebar is open, in every window of every session.
+const OPEN: &str = "@agent-plane-sidebar-open";
 
-/// The sidebar key: open the window's sidebar and move into it, move into it when it is
-/// already open, or close it when you are in it.
+/// The sidebar key. Outside the sidebar: open it everywhere if it is closed, and move into
+/// this window's. Inside it: close it everywhere.
 pub fn toggle(window: &str) -> Result<()> {
+    let active = tmux::run(&["display-message", "-p", "-t", window, "#{pane_id}"])?;
+    if is_sidebar(active.trim())? {
+        return close();
+    }
+    if !is_open()? {
+        tmux::run(&["set-option", "-g", OPEN, "1"])?;
+        add_everywhere()?;
+    }
+    let pane = add(window)?;
+    tmux::run(&["select-pane", "-t", &pane]).map(drop)
+}
+
+/// Run by the plugin's hooks when a window comes on screen: add the sidebar to it while open.
+pub fn follow(window: &str) -> Result<()> {
+    if is_open()? {
+        add(window)?;
+    }
+    Ok(())
+}
+
+fn is_open() -> Result<bool> {
+    Ok(tmux::run(&["show-option", "-gqv", OPEN])?.trim() == "1")
+}
+
+fn is_sidebar(pane: &str) -> Result<bool> {
+    let mark = tmux::run(&["display-message", "-p", "-t", pane, &format!("#{{{MARK}}}")])?;
+    Ok(mark.trim() == "1")
+}
+
+fn add_everywhere() -> Result<()> {
+    let windows = tmux::run(&["list-windows", "-a", "-F", "#{window_id}"])?;
+    let mut done = Vec::new();
+    // A window linked into several sessions is listed once per session.
+    for window in windows.lines() {
+        if !done.contains(&window) {
+            add(window)?;
+            done.push(window);
+        }
+    }
+    Ok(())
+}
+
+/// The window's sidebar pane, added without moving you when the window has none.
+fn add(window: &str) -> Result<String> {
+    // Hooks fire in bursts (a jump changes session and window at once); one at a time, so a
+    // window never gets two sidebars.
+    let _lock = Lock::take()?;
     let panes = tmux::run(&[
         "list-panes",
         "-t",
         window,
         "-F",
-        &format!("#{{pane_id}} #{{pane_active}} #{{{MARK}}}"),
+        &format!("#{{pane_id}} #{{{MARK}}}"),
     ])?;
-    let sidebar = panes.lines().find_map(|line| {
-        let mut fields = line.split(' ');
-        let (pane, active, mark) = (fields.next()?, fields.next()?, fields.next()?);
-        (mark == "1").then(|| (pane.to_string(), active == "1"))
-    });
-    match sidebar {
-        Some((pane, true)) => tmux::run(&["kill-pane", "-t", &pane]).map(drop),
-        Some((pane, false)) => tmux::run(&["select-pane", "-t", &pane]).map(drop),
-        None => {
-            let pane = tmux::run(&[
-                "split-window",
-                "-h",
-                "-b",
-                "-f",
-                "-l",
-                WIDTH,
-                "-t",
-                window,
-                "-P",
-                "-F",
-                "#{pane_id}",
-                "tmux-agent-plane sidebar",
-            ])?;
-            tmux::run(&["set-option", "-p", "-t", pane.trim(), MARK, "1"]).map(drop)
+    if let Some(pane) = panes.lines().find_map(|line| line.strip_suffix(" 1")) {
+        return Ok(pane.to_string());
+    }
+    let pane = tmux::run(&[
+        "split-window",
+        "-h",
+        "-b",
+        "-f",
+        "-d",
+        "-l",
+        WIDTH,
+        "-t",
+        window,
+        "-P",
+        "-F",
+        "#{pane_id}",
+        "tmux-agent-plane sidebar",
+    ])?;
+    let pane = pane.trim().to_string();
+    tmux::run(&["set-option", "-p", "-t", &pane, MARK, "1"])?;
+    Ok(pane)
+}
+
+/// Close the sidebar in every window.
+fn close() -> Result<()> {
+    tmux::run(&["set-option", "-gu", OPEN])?;
+    let panes = tmux::run(&[
+        "list-panes",
+        "-a",
+        "-F",
+        &format!("#{{pane_id}} #{{{MARK}}}"),
+    ])?;
+    let mut panes: Vec<&str> = panes
+        .lines()
+        .filter_map(|line| line.strip_suffix(" 1"))
+        .collect();
+    // From `q`, this process runs in one of them: kill that pane last, or it dies halfway.
+    let own = std::env::var("TMUX_PANE").ok();
+    panes.sort_by_key(|pane| Some(*pane) == own.as_deref());
+    for pane in panes {
+        tmux::run(&["kill-pane", "-t", pane])?;
+    }
+    Ok(())
+}
+
+/// An exclusive lock on a file in the state directory, released on drop.
+struct Lock(std::fs::File);
+
+impl Lock {
+    fn take() -> Result<Lock> {
+        let dir = index::state_dir()?;
+        std::fs::create_dir_all(&dir)?;
+        let file = std::fs::File::create(dir.join("sidebar.lock"))?;
+        // SAFETY: flock on a file descriptor we own.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+            return Err(std::io::Error::last_os_error().into());
         }
+        Ok(Lock(file))
+    }
+}
+
+impl Drop for Lock {
+    fn drop(&mut self) {
+        // SAFETY: as above.
+        unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
     }
 }
 
@@ -63,7 +153,9 @@ pub fn run() -> Result<()> {
     let mut terminal = ratatui::init();
     let result = event_loop(&mut terminal);
     ratatui::restore();
-    result
+    // `q` closes the sidebar everywhere, this pane included.
+    result?;
+    close()
 }
 
 struct Sidebar {

@@ -25,9 +25,14 @@ enum Cmd {
     Ui,
     /// Run the always-on agent list (shown in the sidebar pane)
     Sidebar,
-    /// Open a window's sidebar and move into it; move into it if open; close it if you are in it
+    /// Open the sidebar in every window and move into it; close it everywhere if you are in it
     ToggleSidebar {
         /// tmux window id or target, e.g. `@104` or `work:2`
+        window: String,
+    },
+    /// Add the sidebar to a window while it is open (run by the plugin when a window comes on screen)
+    FollowSidebar {
+        /// tmux window id or target
         window: String,
     },
     /// List running agents (`*` marks the caller)
@@ -115,6 +120,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Ui => ui::run(),
         Cmd::Sidebar => sidebar::run(),
         Cmd::ToggleSidebar { window } => sidebar::toggle(&window),
+        Cmd::FollowSidebar { window } => sidebar::follow(&window),
         Cmd::List { json } => commands::list(json),
         Cmd::Read { target, lines } => commands::read(&target, lines),
         Cmd::Send {

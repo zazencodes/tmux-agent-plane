@@ -39,7 +39,7 @@ tmux-agent-plane keys <agent> <key>...    # tmux key names: Enter Escape Up Down
 tmux-agent-plane rename <agent> <name>     # one word, unique; "$TMUX_PANE" is you
 tmux-agent-plane wait <agent> [--timeout S]
 tmux-agent-plane focus <agent>            # bring it on screen for the user
-tmux-agent-plane toggle-sidebar "$TMUX_PANE"  # open the user's agent sidebar in your window (run again to close)
+tmux-agent-plane toggle-sidebar "$TMUX_PANE"  # open the user's agent sidebar in every window (run again to close)
 tmux-agent-plane kill <agent>             # close its pane, ending it
 tmux-agent-plane spawn claude|codex ["<task>"] [--in pane|window|session] [--cwd DIR] [--name NAME] [--wait] [--timeout S]
 ```
