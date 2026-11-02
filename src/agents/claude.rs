@@ -3,7 +3,7 @@ use super::{Launch, Observation, RawState, ScanContext};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub fn launch(task: Option<&str>) -> Launch {
     Launch {
@@ -70,9 +70,15 @@ fn claude_dir() -> Result<PathBuf> {
 
 /// Live interactive Claude Code sessions, keyed by tmux pane id.
 fn claude_sessions(context: &ScanContext<'_>) -> Result<HashMap<String, ClaudeSession>> {
-    let dir = claude_dir()?.join("sessions");
+    claude_sessions_in(&claude_dir()?.join("sessions"), context)
+}
+
+fn claude_sessions_in(
+    dir: &Path,
+    context: &ScanContext<'_>,
+) -> Result<HashMap<String, ClaudeSession>> {
     let mut sessions: HashMap<String, ClaudeSession> = HashMap::new();
-    let entries = match std::fs::read_dir(&dir) {
+    let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(sessions),
         Err(e) => return Err(e).with_context(|| format!("reading {}", dir.display())),
@@ -135,4 +141,87 @@ fn process_alive(pid: i32) -> bool {
     // Signal 0 checks existence; EPERM means it exists under another user.
     let exists = unsafe { libc::kill(pid, 0) } == 0;
     exists || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agents::{Process, ProcessTable};
+    use crate::tmux::Pane;
+    use serde_json::json;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn published_files_preserve_newest_session_and_transient_rewrites() {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "plane-claude-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let pid = std::process::id() as i32;
+        let panes = [Pane {
+            id: "%1".into(),
+            pid,
+            session: "s".into(),
+            window: "@1".into(),
+            window_index: 1,
+            pane_index: 1,
+            cwd: "/tmp".into(),
+            title: "Task".into(),
+            visible: false,
+            name: String::new(),
+            parent: String::new(),
+        }];
+        let processes = ProcessTable {
+            processes: HashMap::from([(
+                pid,
+                Process {
+                    pid,
+                    parent: 0,
+                    executable: "claude".into(),
+                    argv: "claude".into(),
+                },
+            )]),
+        };
+        let context = ScanContext {
+            panes: &panes,
+            processes: &processes,
+        };
+        assert!(claude_sessions_in(&dir, &context).unwrap().is_empty());
+        std::fs::create_dir(&dir).unwrap();
+        let write = |name: &str, status: &str, started: u64| {
+            std::fs::write(
+                dir.join(name),
+                json!({"pid":pid,"kind":"interactive","sessionId":name,
+                "startedAt":started,"tmux":"s:@1.%1","status":status,"waitingFor":"input needed"})
+                .to_string(),
+            )
+            .unwrap();
+        };
+        write("older.json", "busy", 1);
+        write("newer.json", "waiting", 2);
+        std::fs::write(dir.join("rewriting.json"), "{").unwrap();
+        let found = claude_sessions_in(&dir, &context).unwrap();
+        assert_eq!(found["%1"].session_id, "newer.json");
+        assert_eq!(found["%1"].state, RawState::Blocked);
+        assert_eq!(found["%1"].detail.as_deref(), Some("input needed"));
+        write("newer.json", "shell", 2);
+        assert_eq!(
+            claude_sessions_in(&dir, &context).unwrap()["%1"].state,
+            RawState::Idle
+        );
+        write("newer.json", "unknown", 2);
+        assert!(claude_sessions_in(&dir, &context).is_err());
+        // A pane on a different server cannot claim this PID, even with the same ID.
+        let mut unrelated = panes[0].clone();
+        unrelated.pid = pid + 1;
+        let other_panes = [unrelated];
+        let other = ScanContext {
+            panes: &other_panes,
+            processes: &processes,
+        };
+        assert!(claude_sessions_in(&dir, &other).unwrap().is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
