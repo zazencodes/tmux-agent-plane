@@ -163,8 +163,10 @@ pub fn read_any() -> Result<Option<Index>> {
 
 /// The current index. Fails when the daemon is not keeping it fresh.
 pub fn read() -> Result<Index> {
-    let not_running = "the tmux-agent-plane daemon is not running. It starts with tmux via \
-        the tmux-agent-plane.tmux plugin, or run `tmux-agent-plane daemon` inside tmux";
+    let not_running = format!(
+        "the tmux-agent-plane daemon is not running. Run `tmux-agent-plane daemon start` inside tmux; diagnostics: {}",
+        state_dir()?.join("daemon.log").display()
+    );
     let Some(index) = read_any()? else {
         bail!(not_running)
     };
