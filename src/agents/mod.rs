@@ -1,6 +1,7 @@
 //! Agent adapters own their published signals and interactive launch syntax.
 pub mod claude;
 pub mod codex;
+pub mod opencode;
 pub mod pi;
 
 use crate::index::State;
