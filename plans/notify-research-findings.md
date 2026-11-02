@@ -10,15 +10,15 @@
 
 | Choice | Behavior and cost |
 | --- | --- |
-| Keep current status-line + desktop notifications | Existing behavior; messages follow `status-position`. No layout or configuration changes. Recommended until the user chooses a different trade-off. |
+| Keep current status-line + desktop notifications | Existing behavior; messages follow `status-position`. No layout or configuration changes. Considered during research; the user chose the sidebar footer. |
 | Desktop-only, if desired | Omit the tmux message in a future approved change. Keeps the top bar and pane input intact, but removes the in-terminal message. Desktop delivery still depends on the OS. This is an option for the lead, not an implemented setting. |
-| Existing sidebar footer | Put a notice at the bottom of the existing sidebar UI. This requires the sidebar to be open and reaches only its width; it is not an independent full-screen bottom strip. Requires a product choice and coordinated sidebar work. No implementation was built. |
+| Existing sidebar footer — CHOSEN | Put normal done/blocked notices at the bottom of the existing sidebar UI, with desktop notifications unchanged. This requires the sidebar to be open and reaches only its width; it is not an independent full-screen bottom strip. Implementation belongs to `sidebar-events`; none was built in this research worktree. |
 | Dedicated bottom pane | A detached split can retain the active pane, but reserves rows, resizes applications, adds a pane/process, and needs lifecycle handling across windows, zoom, resize, close and sidebar layouts. A real pane is selectable and cannot promise to never take input. No split implementation was built. |
 | Bottom pane border | Smaller native alternative to an extra pane: `pane-border-status bottom` plus `pane-border-format`. Live proof preserves input and top status, but reserves a row and changes window-wide border configuration. Labels belong to panes, not an independent client notification area; no built-in notification timeout. Requires explicit acceptance of those costs. |
 
 Changing `status-position bottom` moves the whole bar and its messages. Multiple status rows stay together at the configured edge. Temporarily relocating or disabling the bar would change the user's chosen layout. Those do not satisfy this task's constraints. [Status options][status-doc]
 
-Both leads received the preliminary options before any feature work. The later correction from plane-lead makes clear that nobody confirmed findings-only as the product outcome: committing research is authorized, but the user's notification choice is pending and item 4 remains open.
+Both leads received the preliminary options before any feature work. Research-only delivery was not the product outcome: the subsequent user decision chose the sidebar footer, and item 4 implementation continues separately under `sidebar-events`.
 
 ## Native facilities and limits
 
@@ -50,7 +50,7 @@ Successful run: `target/notify-live-4_htoari/` (raw PTY bytes, text snapshots, b
 
 Validated installed `/opt/homebrew/bin/tmux`, version `tmux 3.7c`, SHA-256 `6a9a68532c31a72ac822481da8879ae413f158d7a2b07c50d96126012336afe0`. Primary upstream tag `3.7c` resolves to commit `e476c1230b958df0cb12977517d24b3dc931375b`; its manpage matches the installed manpage except Homebrew's system-config-directory substitution. Citations below pin that commit.
 
-Repository checks passed: `cargo fmt --check`, `cargo test` (49 passed), `cargo clippy --all-targets -- -D warnings`. No user-facing change means no changelog entry. Remaining limits: live proof is macOS/tmux 3.7c, not every supported tmux version or terminal; dedicated splits were assessed as a layout trade-off, not implemented/tested. OS notification delivery was deliberately suppressed. The decision about retaining tmux messages versus desktop-only belongs to the lead/user.
+Repository checks passed: `cargo fmt --check`, `cargo test` (49 passed), `cargo clippy --all-targets -- -D warnings`. No user-facing change means no changelog entry. Remaining limits: live proof is macOS/tmux 3.7c, not every supported tmux version or terminal; dedicated splits were assessed as a layout trade-off, not implemented/tested. OS notification delivery was deliberately suppressed. Sidebar footer behavior requires the owning worker's implementation and proof.
 
 [manual]: https://github.com/tmux/tmux/blob/e476c1230b958df0cb12977517d24b3dc931375b/tmux.1
 [status-doc]: https://github.com/tmux/tmux/blob/e476c1230b958df0cb12977517d24b3dc931375b/tmux.1#L5011-L5110
