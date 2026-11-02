@@ -14,6 +14,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Start the watcher detached from tmux jobs so startup, duplicate starts, stops, failures and signals never open job output over a pane; use `daemon restart` for a targeted graceful restart, with lifecycle diagnostics in `daemon.log`
 - Keep healthy agents tracking through kind scan, completion counter and notification failures; withdraw faulty observations, show degraded/recovered status, and persist full errors and fatal exit reasons in the state directory’s `daemon.log`
 - Keep tracking agents when a Grok process exits during detection
 - Publish OpenCode completion counts together with fresh native state, preserving done notifications when a turn ends between polls
@@ -23,6 +24,10 @@ before 1.0, a breaking change bumps the minor version.
 ### Changed
 
 - Reject ambiguous agent identities and match Claude session processes to their tmux panes, including when separate tmux servers reuse pane IDs
+
+### Upgrade notes
+
+- A running 0.1.x watcher must be stopped once during this upgrade; it has no lifecycle control socket. Start the new watcher with `tmux-agent-plane daemon start`. Future upgrades use `tmux-agent-plane daemon restart`.
 
 ## 0.1.1 - 2026-11-02
 

@@ -27,7 +27,7 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo install --path . --force               # reinstall the binary after a change so the user can test it
-pkill -f 'tmux-agent-plane daemon'; tmux source-file ~/.tmux.conf   # restart the daemon on the new build
+tmux-agent-plane daemon restart              # gracefully restart on the new build
 ```
 
 Test changes against live agents: spawn throwaway agents with `tmux-agent-plane spawn ... --in window` in a scratch folder, and kill them with `tmux-agent-plane kill` afterwards.

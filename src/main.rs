@@ -4,6 +4,7 @@ mod daemon;
 mod detect;
 mod diagnostics;
 mod index;
+mod lifecycle;
 mod sidebar;
 mod tmux;
 mod ui;
@@ -21,8 +22,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Watch tmux and keep the agent index current (started by the tmux plugin)
-    Daemon,
+    /// Start, restart or stop the detached tmux watcher
+    Daemon {
+        #[command(subcommand)]
+        action: lifecycle::Action,
+    },
     /// Open the agent list with a live preview; Enter jumps to the agent
     Ui,
     /// Run the always-on agent list (shown in the sidebar pane)
@@ -118,7 +122,7 @@ enum Cmd {
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
-        Cmd::Daemon => daemon::run(),
+        Cmd::Daemon { action } => lifecycle::run(action),
         Cmd::Ui => ui::run(),
         Cmd::Sidebar => sidebar::run(),
         Cmd::ToggleSidebar { window } => sidebar::toggle(&commands::target_pane(&window)?),

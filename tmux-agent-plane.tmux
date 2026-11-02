@@ -5,7 +5,9 @@ set -eu
 
 if ! command -v tmux-agent-plane >/dev/null; then
   tmux display-message "tmux-agent-plane: the tmux-agent-plane binary is not on tmux's PATH"
-  exit 1
+  # The explicit message reports the installation error; a failed plugin job
+  # would also open tmux view mode over the current pane.
+  exit 0
 fi
 
 # prefix + S (or @agent-plane-sidebar-key): open the agent sidebar on the left of every window
@@ -20,5 +22,8 @@ tmux set-hook -g 'client-session-changed[90]' "$follow"
 # prefix + A: the agent list with a large preview, in a popup.
 tmux bind-key A display-popup -E -w 90% -h 85% -T " agents " "tmux-agent-plane ui"
 
-# The daemon exits when the tmux server does; a second copy exits at once.
-tmux run-shell -b "tmux-agent-plane daemon"
+# Start is a short control command. The watcher detaches its session and output
+# before this plugin's tmux job exits. Lifecycle failures are recorded in daemon.log.
+if ! tmux-agent-plane daemon start >/dev/null 2>&1; then
+  tmux display-message "tmux-agent-plane: daemon start failed; run 'tmux-agent-plane daemon start' for diagnostics"
+fi

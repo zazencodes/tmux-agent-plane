@@ -22,7 +22,6 @@ const STATUS_OPTION: &str = "@agent_plane_status";
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
 /// Called by the lifecycle worker's signal/control handlers.
-#[allow(dead_code)] // Used by the lifecycle worker once its separate change is integrated.
 pub fn request_shutdown() {
     SHUTDOWN.store(true, Ordering::Relaxed);
 }
