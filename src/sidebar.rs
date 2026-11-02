@@ -24,17 +24,14 @@ const MARK: &str = "@agent-plane-sidebar";
 /// Global option set while the sidebar is open, in every window of every session.
 const OPEN: &str = "@agent-plane-sidebar-open";
 
-/// The sidebar key. Outside the sidebar: open it everywhere if it is closed, and move into
-/// this window's. Inside it: close it everywhere.
+/// The sidebar key: close the sidebar everywhere when it is open, wherever you are; otherwise
+/// open it everywhere and move into this window's.
 pub fn toggle(window: &str) -> Result<()> {
-    let active = tmux::run(&["display-message", "-p", "-t", window, "#{pane_id}"])?;
-    if is_sidebar(active.trim())? {
+    if is_open()? {
         return close();
     }
-    if !is_open()? {
-        tmux::run(&["set-option", "-g", OPEN, "1"])?;
-        add_everywhere()?;
-    }
+    tmux::run(&["set-option", "-g", OPEN, "1"])?;
+    add_everywhere()?;
     let pane = add(window)?;
     tmux::run(&["select-pane", "-t", &pane]).map(drop)
 }
@@ -49,11 +46,6 @@ pub fn follow(window: &str) -> Result<()> {
 
 fn is_open() -> Result<bool> {
     Ok(tmux::run(&["show-option", "-gqv", OPEN])?.trim() == "1")
-}
-
-fn is_sidebar(pane: &str) -> Result<bool> {
-    let mark = tmux::run(&["display-message", "-p", "-t", pane, &format!("#{{{MARK}}}")])?;
-    Ok(mark.trim() == "1")
 }
 
 fn add_everywhere() -> Result<()> {
@@ -153,9 +145,24 @@ pub fn run() -> Result<()> {
     let mut terminal = ratatui::init();
     let result = event_loop(&mut terminal);
     ratatui::restore();
-    // `q` closes the sidebar everywhere, this pane included.
-    result?;
-    close()
+    match result? {
+        // `q` closes the sidebar everywhere, this pane included.
+        Exit::Quit => close(),
+        // The window's other panes are gone; leaving lets tmux close the window.
+        Exit::Alone => Ok(()),
+    }
+}
+
+enum Exit {
+    Quit,
+    Alone,
+}
+
+/// The sidebar is the last pane left in its window.
+fn alone() -> Result<bool> {
+    let pane = std::env::var("TMUX_PANE")?;
+    let panes = tmux::run(&["display-message", "-p", "-t", &pane, "#{window_panes}"])?;
+    Ok(panes.trim() == "1")
 }
 
 struct Sidebar {
@@ -245,7 +252,7 @@ impl Sidebar {
     }
 }
 
-fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
+fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
     let mut sidebar = Sidebar {
         agents: Vec::new(),
         list: ListState::default(),
@@ -267,7 +274,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             }
             sidebar.notice = None;
             match key.code {
-                KeyCode::Char('q') => return Ok(()),
+                KeyCode::Char('q') => return Ok(Exit::Quit),
                 KeyCode::Char('r') => sidebar.editing = sidebar.selected().map(|a| a.name.clone()),
                 KeyCode::Char('j') | KeyCode::Down => sidebar.step(1),
                 KeyCode::Char('k') | KeyCode::Up => sidebar.step(-1),
@@ -280,6 +287,9 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             }
         }
         if refreshed.elapsed() >= REFRESH {
+            if alone()? {
+                return Ok(Exit::Alone);
+            }
             sidebar.refresh();
             refreshed = Instant::now();
         }

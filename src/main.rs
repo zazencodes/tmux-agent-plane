@@ -25,7 +25,7 @@ enum Cmd {
     Ui,
     /// Run the always-on agent list (shown in the sidebar pane)
     Sidebar,
-    /// Open the sidebar in every window and move into it; close it everywhere if you are in it
+    /// Open the sidebar in every window and move into it; close it everywhere if it is open
     ToggleSidebar {
         /// tmux window id or target, e.g. `@104` or `work:2`
         window: String,

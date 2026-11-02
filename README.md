@@ -121,14 +121,14 @@ Run your agents as usual. Then ask any of them things like:
 
 | Key | Action |
 | --- | --- |
-| `prefix + S` | Open the sidebar in every window and move into it; move into it when open; close it everywhere when you are in it |
+| `prefix + S` | Open the sidebar in every window and move into it; close it everywhere when it is open |
 | `prefix + A` | Open the agent list popup, with a preview |
 | `j` `k` / `↓` `↑` | Move |
 | `Enter` | Jump to the agent. The sidebar stays open; the popup closes |
 | `r` | Rename the agent (sidebar), starting from its current name. `Ctrl-W` deletes a word, `Ctrl-U` clears, `Enter` saves, `Esc` cancels |
 | `q` | Close: the sidebar everywhere, or the popup (also `Esc`) |
 
-While the sidebar is open, every window has one, including windows and sessions you create later; each scrolls on its own. The popup opens on the first blocked agent, or else the first done one. The agent you are looking at is shown in bold in the sidebar.
+While the sidebar is open, every window has one, including windows and sessions you create later; each scrolls on its own. A window's sidebar closes with the window: when its other panes are gone, it goes too. The popup opens on the first blocked agent, or else the first done one. The agent you are looking at is shown in bold in the sidebar.
 
 ### CLI
 
