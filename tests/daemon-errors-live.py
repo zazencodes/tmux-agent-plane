@@ -23,7 +23,7 @@ args = parser.parse_args()
 binary = args.binary.resolve()
 real_tmux = shutil.which("tmux")
 assert real_tmux, "tmux required"
-root = Path(tempfile.mkdtemp(prefix="plane-daemon-errors-"))
+root = Path(tempfile.mkdtemp(prefix="plane-daemon-errors-", dir="/tmp"))
 print(f"Evidence: {root}", flush=True)
 server = f"plane-errors-{os.getpid()}"
 bin_dir = root / "bin"
@@ -45,7 +45,12 @@ for tool in ("osascript", "notify-send"):
                     "echo delivered >> " + shlex.quote(str(root / "desktop.delivered")) + "\n")
     path.chmod(0o755)
 wrapper = bin_dir / "tmux"
-wrapper.write_text(f"#!/bin/sh\nexec {shlex.quote(real_tmux)} -L {shlex.quote(server)} \"$@\"\n")
+wrapper.write_text(
+    "#!/bin/sh\n"
+    f'if [ "$1" = refresh-client ] && [ -e {shlex.quote(str(root / "refresh.fail"))} ]; then\n'
+    "  echo 'injected refresh-client failure' >&2; exit 29\nfi\n"
+    f"exec {shlex.quote(real_tmux)} -L {shlex.quote(server)} \"$@\"\n"
+)
 wrapper.chmod(0o755)
 fixture = root / "agent"
 subprocess.run(["cc", "-Wall", "-Wextra", "-Werror", str(Path(__file__).parent / "fixtures/daemon/agent.c"), "-o", str(fixture)], check=True)
@@ -129,11 +134,27 @@ try:
     client = subprocess.Popen([str(wrapper), "attach-session", "-t", "scratch"], env=env, stdin=slave, stdout=slave, stderr=slave)
     threading.Thread(target=drain, args=(master,), daemon=True).start()
     wait_for("private client", lambda: tmux("list-clients", "-F", "#{client_name}"))
+    (root / "refresh.fail").touch()
     daemon = start_daemon()
     wait_for("initial index", lambda: (state / "agents.json").exists())
     for kind in ("claude", "pi"):
         plane("spawn", kind, "--in", "window", "--cwd", str(root), "--name", f"fixture-{kind}")
     wait_for("both working", lambda: len(agents()) == 2 and all(a["state"] == "working" for a in agents().values()))
+
+    wait_for("refresh failure visible", lambda: "presentation:refresh:" in status())
+    assert "injected refresh-client failure" in log()
+    assert daemon.poll() is None
+    refresh_fault_tick = snapshot()["updated_at"]
+    time.sleep(2.2)
+    assert snapshot()["updated_at"] > refresh_fault_tick
+    assert len(agents()) == 2
+    assert log().count("] ERROR: tmux refresh-client") == 1
+    (root / "refresh.fail").unlink()
+    wait_for("refresh recovery", lambda: "presentation:refresh:" not in status() and
+             any("[presentation:refresh:" in line and "] recovered" in line for line in log().splitlines()))
+    assert daemon.poll() is None
+    assert "[fatal]" not in log()
+    print("PASS refresh-client failure remains degraded without stopping either agent/index; retry recovers", flush=True)
 
     change("claude", "unknown-fixture-state 0")
     wait_for("kind isolation", lambda: set(agents()) == {"fixture-pi"} and "scan:claude" in status())

@@ -74,7 +74,7 @@ fn run_inner() -> Result<()> {
     let mut prev: HashMap<String, Agent> = index::read_any()?
         .map(|i| i.agents.into_iter().map(|a| (a.pane.clone(), a)).collect())
         .unwrap_or_default();
-    let mut status = None;
+    let mut presentation = Presentation::default();
     let mut active = Active::default();
     let mut notifications = Notifications::default();
     // Diagnostic announcements use only tmux and are never sent through notification retry.
@@ -112,6 +112,16 @@ fn run_inner() -> Result<()> {
                 }
             }
         }
+        // Index persistence remains fatal and independent of status presentation.
+        index::write(&Index {
+            updated_at: now,
+            agents: agents.clone(),
+        })
+        .context("writing agent index")?;
+        // Use the last diagnostic snapshot for presentation, then fold this attempt's issues
+        // exactly once. A new fault/recovery reaches the status on the next tick.
+        let segment = active.status() + &status_segment(&agents);
+        issues.extend(presentation.update(&segment));
         let changes = active.update(&issues)?;
         let announcements: Vec<_> = changes
             .into_iter()
@@ -124,21 +134,53 @@ fn run_inner() -> Result<()> {
                 diagnostics::log_path()?.display()
             ));
         }
-        // Publish the index before touching presentation, including on notification failure.
-        index::write(&Index {
-            updated_at: now,
-            agents: agents.clone(),
-        })
-        .context("writing agent index")?;
-        let segment = active.status() + &status_segment(&agents);
-        if status.as_ref() != Some(&segment) {
-            tmux::run(&["set-option", "-g", STATUS_OPTION, &segment])?;
-            for client in tmux::clients()? {
-                tmux::run(&["refresh-client", "-S", "-t", &client])?;
-            }
-            status = Some(segment);
-        }
         std::thread::sleep(TICK);
+    }
+}
+
+/// Status writes and client refreshes are presentation; none can invalidate tracking.
+#[derive(Default)]
+struct Presentation {
+    completed: Option<String>,
+}
+
+impl Presentation {
+    fn update(&mut self, segment: &str) -> Vec<Issue> {
+        self.update_with(
+            segment,
+            |segment| tmux::run(&["set-option", "-g", STATUS_OPTION, segment]).map(|_| ()),
+            tmux::clients,
+            |client| tmux::run(&["refresh-client", "-S", "-t", client]).map(|_| ()),
+        )
+    }
+
+    fn update_with(
+        &mut self,
+        segment: &str,
+        mut set_status: impl FnMut(&str) -> Result<()>,
+        mut clients: impl FnMut() -> Result<Vec<String>>,
+        mut refresh: impl FnMut(&str) -> Result<()>,
+    ) -> Vec<Issue> {
+        if self.completed.as_deref() == Some(segment) {
+            return Vec::new();
+        }
+        let mut issues = Vec::new();
+        if let Err(error) = set_status(segment) {
+            issues.push(Issue::new("presentation:status", error));
+        }
+        match clients() {
+            Ok(clients) => {
+                for client in clients {
+                    if let Err(error) = refresh(&client) {
+                        issues.push(Issue::new(format!("presentation:refresh:{client}"), error));
+                    }
+                }
+            }
+            Err(error) => issues.push(Issue::new("presentation:clients", error)),
+        }
+        // An incomplete attempt is retried even when the requested segment stays unchanged.
+        self.completed = issues.is_empty().then(|| segment.to_owned());
+        issues
     }
 }
 
@@ -459,6 +501,83 @@ mod tests {
 
     fn tick(before: Option<&Agent>, state: RawState, visible: bool) -> Agent {
         advance(before, observation(state, visible), 0).unwrap()
+    }
+
+    #[test]
+    fn refresh_failure_is_scoped_retried_and_recovers_without_replaying_completed_presentation() {
+        let mut presentation = Presentation::default();
+        let mut attempts = Vec::new();
+        let issues = presentation.update_with(
+            "segment",
+            |_| Ok(()),
+            || Ok(vec!["bad".into(), "good".into()]),
+            |client| {
+                attempts.push(client.to_owned());
+                if client == "bad" {
+                    anyhow::bail!("client disappeared");
+                }
+                Ok(())
+            },
+        );
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].component, "presentation:refresh:bad");
+        assert_eq!(attempts, ["bad", "good"]);
+        assert!(presentation.completed.is_none());
+        let issues = presentation.update_with(
+            "segment",
+            |_| Ok(()),
+            || Ok(vec!["good".into()]),
+            |_| Ok(()),
+        );
+        assert!(issues.is_empty());
+        assert_eq!(presentation.completed.as_deref(), Some("segment"));
+        assert!(
+            presentation
+                .update_with(
+                    "segment",
+                    |_| panic!("already completed"),
+                    || panic!("already completed"),
+                    |_| panic!("already completed")
+                )
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn status_and_roster_failures_remain_visible_until_successful_presentation() {
+        let mut presentation = Presentation::default();
+        let issues = presentation.update_with(
+            "segment",
+            |_| anyhow::bail!("status write failed"),
+            || anyhow::bail!("client roster failed"),
+            |_| unreachable!(),
+        );
+        assert_eq!(
+            issues
+                .iter()
+                .map(|e| e.component.as_str())
+                .collect::<Vec<_>>(),
+            ["presentation:status", "presentation:clients"]
+        );
+        assert!(presentation.completed.is_none());
+        // A fresh roster/refresh is still attempted when the status write fails.
+        let mut refreshed = false;
+        let issues = presentation.update_with(
+            "segment",
+            |_| anyhow::bail!("status write failed"),
+            || Ok(vec!["client".into()]),
+            |_| {
+                refreshed = true;
+                Ok(())
+            },
+        );
+        assert!(refreshed);
+        assert_eq!(issues.len(), 1);
+        assert!(
+            presentation
+                .update_with("segment", |_| Ok(()), || Ok(Vec::new()), |_| unreachable!())
+                .is_empty()
+        );
     }
 
     fn batch(values: Vec<Detected>, issues: Vec<Issue>) -> Batch<Detected> {
