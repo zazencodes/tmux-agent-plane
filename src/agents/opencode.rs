@@ -5,13 +5,13 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::Path;
 
-pub fn launch(task: Option<&str>) -> Launch {
-    Launch {
+pub fn launch(task: Option<&str>) -> Result<Launch> {
+    Ok(Launch {
         command: "opencode",
         args: task
             .map(|task| vec!["--prompt".to_string(), task.to_string()])
             .unwrap_or_default(),
-    }
+    })
 }
 
 #[derive(Deserialize)]
@@ -337,10 +337,10 @@ mod tests {
 
     #[test]
     fn launch_uses_interactive_prompt_flag() {
-        assert_eq!(launch(None).command, "opencode");
-        assert!(launch(None).args.is_empty());
+        assert_eq!(launch(None).unwrap().command, "opencode");
+        assert!(launch(None).unwrap().args.is_empty());
         assert_eq!(
-            launch(Some("task with 'quotes'")).args,
+            launch(Some("task with 'quotes'")).unwrap().args,
             ["--prompt", "task with 'quotes'"]
         );
     }

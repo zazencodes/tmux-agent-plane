@@ -13,13 +13,13 @@ const RPC_ID: &str = "tmux-agent-plane-roster";
 const MAX_FRAME: usize = 16 * 1024 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 
-pub fn launch(task: Option<&str>) -> Launch {
-    Launch {
+pub fn launch(task: Option<&str>) -> Result<Launch> {
+    Ok(Launch {
         command: "grok",
         args: task
             .map(|task| vec!["--".to_string(), task.to_string()])
             .unwrap_or_default(),
-    }
+    })
 }
 
 pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
@@ -649,10 +649,10 @@ mod tests {
     }
     #[test]
     fn interactive_prompt_stays_one_argument() {
-        assert_eq!(launch(None).command, "grok");
-        assert!(launch(None).args.is_empty());
+        assert_eq!(launch(None).unwrap().command, "grok");
+        assert!(launch(None).unwrap().args.is_empty());
         assert_eq!(
-            launch(Some("quote ' and\nnewline")).args,
+            launch(Some("quote ' and\nnewline")).unwrap().args,
             ["--", "quote ' and\nnewline"]
         );
     }

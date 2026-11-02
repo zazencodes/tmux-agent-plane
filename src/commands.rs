@@ -303,6 +303,8 @@ pub struct Spawn {
 }
 
 pub fn spawn(s: Spawn) -> Result<()> {
+    // Validate the interactive launch before creating a pane or contacting tmux.
+    let launch = (s.kind.adapter().launch)(s.task.as_deref())?;
     let index = index::read()?;
     if let Some(name) = &s.name {
         check_name(&index, name, None)?;
@@ -378,7 +380,6 @@ pub fn spawn(s: Spawn) -> Result<()> {
 
     // Typed into the pane's shell, so the user's aliases and wrappers apply and the shell
     // stays when the agent exits.
-    let launch = (s.kind.adapter().launch)(s.task.as_deref());
     let mut command = launch.command.to_string();
     for arg in &launch.args {
         command.push(' ');

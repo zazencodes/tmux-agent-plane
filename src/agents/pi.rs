@@ -8,15 +8,15 @@ use std::path::Path;
 /// The publisher refreshes each second. Expiry is an error, never an idle signal.
 const STALE_AFTER_MS: u64 = 5_000;
 
-pub fn launch(task: Option<&str>) -> Launch {
-    Launch {
+pub fn launch(task: Option<&str>) -> Result<Launch> {
+    Ok(Launch {
         command: "pi",
         // End option parsing so tasks beginning with '-' remain interactive messages.
         args: task
             .into_iter()
             .flat_map(|s| ["--".into(), s.into()])
             .collect(),
-    }
+    })
 }
 
 pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
@@ -349,8 +349,8 @@ mod tests {
 
     #[test]
     fn interactive_launch_protects_option_like_tasks() {
-        assert_eq!(launch(None).command, "pi");
-        assert!(launch(None).args.is_empty());
-        assert_eq!(launch(Some("-task")).args, ["--", "-task"]);
+        assert_eq!(launch(None).unwrap().command, "pi");
+        assert!(launch(None).unwrap().args.is_empty());
+        assert_eq!(launch(Some("-task")).unwrap().args, ["--", "-task"]);
     }
 }

@@ -2,11 +2,11 @@
 use super::{Launch, Observation, RawState, ScanContext};
 use anyhow::{Result, bail};
 
-pub fn launch(task: Option<&str>) -> Launch {
-    Launch {
+pub fn launch(task: Option<&str>) -> Result<Launch> {
+    Ok(Launch {
         command: "codex",
         args: task.into_iter().map(str::to_owned).collect(),
-    }
+    })
 }
 
 pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {

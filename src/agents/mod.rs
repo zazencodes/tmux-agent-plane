@@ -46,7 +46,7 @@ pub struct Launch {
 }
 pub struct Adapter {
     pub scan: fn(&ScanContext<'_>) -> Result<Vec<Observation>>,
-    pub launch: fn(Option<&str>) -> Launch,
+    pub launch: fn(Option<&str>) -> Result<Launch>,
 }
 pub struct ScanContext<'a> {
     pub panes: &'a [Pane],

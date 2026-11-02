@@ -5,11 +5,11 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-pub fn launch(task: Option<&str>) -> Launch {
-    Launch {
+pub fn launch(task: Option<&str>) -> Result<Launch> {
+    Ok(Launch {
         command: "claude",
         args: task.into_iter().map(str::to_owned).collect(),
-    }
+    })
 }
 
 pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
