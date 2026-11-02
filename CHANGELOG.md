@@ -23,6 +23,10 @@ before 1.0, a breaking change bumps the minor version.
 
 - Use published completion counters when available so wait commands observe turns that finish between daemon polls, without recounting turns when navigating between sessions
 
+### Fixed
+
+- Keep tracking agents when a Grok process exits during detection
+
 ### Changed
 
 - Reject ambiguous agent identities and match Claude session processes to their tmux panes, including when separate tmux servers reuse pane IDs
