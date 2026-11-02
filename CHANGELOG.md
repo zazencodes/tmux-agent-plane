@@ -17,15 +17,13 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Keep tracking agents when a Grok process exits during detection
+
 - Publish OpenCode completion counts together with fresh native state, preserving done notifications when a turn ends between polls
 
 - Reject unsafe Codex self references and pane splits when a shared app-server supplies a stale `TMUX_PANE`. Listing works without a caller marker; window/session spawning works with no parent
 
 - Use published completion counters when available so wait commands observe turns that finish between daemon polls, without recounting turns when navigating between sessions
-
-### Fixed
-
-- Keep tracking agents when a Grok process exits during detection
 
 ### Changed
 

@@ -96,7 +96,7 @@ enum Cmd {
     /// Start an agent in a new pane, window or session
     Spawn {
         kind: index::Kind,
-        /// The first prompt
+        /// The first prompt (required for agy)
         task: Option<String>,
         #[arg(long = "in", value_enum, default_value = "pane")]
         placement: commands::Placement,
