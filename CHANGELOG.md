@@ -15,6 +15,7 @@ before 1.0, a breaking change bumps the minor version.
 ### Fixed
 
 - Start the watcher detached from tmux jobs so startup, duplicate starts, stops, failures and signals never open job output over a pane; use `daemon restart` for a targeted graceful restart, with lifecycle diagnostics in `daemon.log`
+- Keep the index updating when tmux status writes or client refreshes fail; retry presentation and report the fault and recovery
 - Keep healthy agents tracking through kind scan, completion counter and notification failures; withdraw faulty observations, show degraded/recovered status, and persist full errors and fatal exit reasons in the state directory’s `daemon.log`
 - Keep tracking agents when a Grok process exits during detection
 - Publish OpenCode completion counts together with fresh native state, preserving done notifications when a turn ends between polls
