@@ -1,3 +1,4 @@
+mod agents;
 mod commands;
 mod daemon;
 mod detect;
@@ -69,7 +70,7 @@ enum Cmd {
     },
     /// Give an agent a name
     Rename {
-        /// Agent name or pane id (`"$TMUX_PANE"` for yourself)
+        /// Agent name, pane id, or `self` when caller identity is available
         target: String,
         /// One word, e.g. `reviewer` or `auth-refactor`
         name: String,
@@ -95,7 +96,7 @@ enum Cmd {
     /// Start an agent in a new pane, window or session
     Spawn {
         kind: index::Kind,
-        /// The first prompt
+        /// The first prompt (required for agy)
         task: Option<String>,
         #[arg(long = "in", value_enum, default_value = "pane")]
         placement: commands::Placement,
@@ -119,8 +120,8 @@ fn main() -> anyhow::Result<()> {
         Cmd::Daemon => daemon::run(),
         Cmd::Ui => ui::run(),
         Cmd::Sidebar => sidebar::run(),
-        Cmd::ToggleSidebar { window } => sidebar::toggle(&window),
-        Cmd::FollowSidebar { window } => sidebar::follow(&window),
+        Cmd::ToggleSidebar { window } => sidebar::toggle(&commands::target_pane(&window)?),
+        Cmd::FollowSidebar { window } => sidebar::follow(&commands::target_pane(&window)?),
         Cmd::List { json } => commands::list(json),
         Cmd::Read { target, lines } => commands::read(&target, lines),
         Cmd::Send {

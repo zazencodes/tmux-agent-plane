@@ -1,10 +1,12 @@
 # AGENTS.md
 
-tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer Claude Code and Codex agents running in tmux. See README.md for behaviour.
+tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer Claude Code, Codex, Pi, OpenCode, Antigravity and Grok Build agents running in tmux. See README.md for behaviour.
 
 ## Layout
 
-- `src/detect.rs`: finds agents and reads their raw state. Claude from `~/.claude/sessions/<pid>.json`, Codex from the pane title plus the process tree.
+- `src/agents/`: one adapter per kind owns live state signals, title parsing and interactive launch syntax; `mod.rs` holds scan/process/observation types.
+- `src/detect.rs`: takes one process-table snapshot, joins adapter observations to tmux panes and rejects ambiguous identities.
+- `extensions/`: opt-in Pi/OpenCode publishers and Grok leader configuration. Keep install instructions in README More agents.
 - `src/daemon.rs`: one-second loop. Folds detection into `Done`/seen state, writes the index, sets the `@agent_plane_status` tmux option, notifies.
 - `src/index.rs`: the index file (`~/.local/state/tmux-agent-plane/agents.json`) and its types. The daemon is its only writer.
 - `src/commands.rs`: `list`, `read`, `send`, `keys`, `focus`, `kill`, `wait`, `spawn`. Agents are told never to use raw tmux on agent panes, so every agent job needs a command here.
@@ -15,7 +17,7 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 
 ## Rules
 
-- Detection reads what agents publish (session files, titles). Do not add hooks or agent-side config.
+- Prefer reliable native live signals without configuration (session/state files, titles, process tree or local APIs). An official mode such as Grok leader may be opt-in. When native signals are insufficient, use the official hook/plugin/extension API to publish per-session state. Ship publishers/configuration examples under `extensions/<kind>/`; install publishers by symlink plus required host configuration, documented in README More agents. Missing optional publisher files or leader socket leaves that kind untracked without errors or extra setup. Use one canonical method per kind; no fallback paths or screen scraping.
 - Fail loudly: unknown agent states, tmux errors and a stale index are errors.
 - One canonical way per job; no fallbacks.
 

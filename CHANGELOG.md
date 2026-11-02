@@ -5,6 +5,24 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Added
+
+- Track Antigravity CLI (`agy`) from its first turn, including permissions, questions and background work; spawning requires a task and rejects omission before creating a pane
+- Track and spawn Grok Build on macOS through its opt-in official leader mode, including permissions and questions
+- Track and spawn OpenCode through an opt-in TUI plugin, including permission/question waits and durable turn completion counters
+- Track and spawn Pi through its opt-in official extension, including UI prompts and durable turn completion counters
+
+### Fixed
+
+- Keep tracking agents when a Grok process exits during detection
+- Publish OpenCode completion counts together with fresh native state, preserving done notifications when a turn ends between polls
+- Reject unsafe Codex self references and pane splits when a shared app-server supplies a stale `TMUX_PANE`. Listing works without a caller marker; window/session spawning works with no parent
+- Use published completion counters when available so wait commands observe turns that finish between daemon polls, without recounting turns when navigating between sessions
+
+### Changed
+
+- Reject ambiguous agent identities and match Claude session processes to their tmux panes, including when separate tmux servers reuse pane IDs
+
 ## 0.1.1 - 2026-11-02
 
 ### Changed

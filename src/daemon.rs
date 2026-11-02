@@ -1,8 +1,9 @@
 //! The watcher: once a second, detect agents, track done/seen, write the index,
 //! update the status bar and notify on transitions.
 
+use crate::agents::RawState;
 use crate::detect::{self, Detected};
-use crate::index::{self, Agent, Index, Kind, State};
+use crate::index::{self, Agent, Index, State};
 use crate::tmux;
 use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
@@ -49,7 +50,7 @@ pub fn run() -> Result<()> {
         let mut agents = Vec::with_capacity(detected.len());
         for d in detected {
             let before = prev.get(&d.pane.id).filter(|a| a.kind == d.kind);
-            let agent = advance(before, d, now);
+            let agent = advance(before, d, now)?;
             if let Some(message) = transition_message(before, &agent) {
                 notify(&agent.name, &message)?;
             }
@@ -78,18 +79,30 @@ pub fn run() -> Result<()> {
 ///
 /// A turn that ends while nobody is looking makes the agent `Done`; it becomes `Idle` once its
 /// pane is on screen.
-fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Agent {
+fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Result<Agent> {
     let was_working = before.is_some_and(|a| a.state == State::Working);
-    let finished = was_working && d.state == State::Idle;
-    let completions = before.map_or(0, |a| a.completions) + u64::from(finished);
-    let unseen = before.is_some_and(|a| a.state == State::Done) || finished;
-    let state = match d.state {
+    let completed = match (d.completed_turns, d.completion_epoch.as_deref()) {
+        (Some(current), Some(epoch)) if !epoch.is_empty() => match before
+            .filter(|a| a.completion_epoch == d.completion_epoch)
+            .and_then(|a| a.reported_completions)
+        {
+            Some(previous) => current
+                .checked_sub(previous)
+                .context("agent completion counter regressed within a publisher lifetime")?,
+            None => current,
+        },
+        (None, None) => u64::from(was_working && d.state == RawState::Idle),
+        _ => bail!("agent completion counter requires a nonempty publisher epoch"),
+    };
+    let completions = before.map_or(0, |a| a.completions) + completed;
+    let unseen = before.is_some_and(|a| a.state == State::Done) || completed > 0;
+    let state = match State::from(d.state) {
         State::Idle if unseen && !d.pane.visible => State::Done,
         other => other,
     };
-    // Codex replaces its task title with "Action Required" while it waits; keep the task.
+    // Some agents temporarily replace their task title while waiting.
     let title = match before {
-        Some(a) if d.kind == Kind::Codex && d.state == State::Blocked => a.title.clone(),
+        Some(a) if d.preserve_title => a.title.clone(),
         _ => d.title,
     };
     let name = if d.pane.name.is_empty() {
@@ -97,7 +110,7 @@ fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Agent {
     } else {
         d.pane.name.clone()
     };
-    Agent {
+    Ok(Agent {
         name,
         location: d.pane.location(),
         pane: d.pane.id,
@@ -115,8 +128,10 @@ fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Agent {
             _ => now,
         },
         completions,
+        reported_completions: d.completed_turns,
+        completion_epoch: d.completion_epoch,
         visible: d.pane.visible,
-    }
+    })
 }
 
 fn transition_message(before: Option<&Agent>, agent: &Agent) -> Option<String> {
@@ -199,9 +214,10 @@ pub fn status_segment(agents: &[Agent]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::index::Kind;
     use crate::tmux::Pane;
 
-    fn tick(before: Option<&Agent>, state: State, visible: bool) -> Agent {
+    fn observation(state: RawState, visible: bool) -> Detected {
         let pane = Pane {
             id: "%1".into(),
             pid: 1,
@@ -215,51 +231,156 @@ mod tests {
             name: String::new(),
             parent: String::new(),
         };
-        let d = Detected {
+        Detected {
             pane,
             kind: Kind::Claude,
             state,
             detail: None,
             title: "Task".into(),
             session_id: None,
-        };
-        advance(before, d, 0)
+            preserve_title: false,
+            completed_turns: None,
+            completion_epoch: None,
+        }
+    }
+
+    fn tick(before: Option<&Agent>, state: RawState, visible: bool) -> Agent {
+        advance(before, observation(state, visible), 0).unwrap()
     }
 
     #[test]
     fn unseen_finish_is_done_until_viewed() {
-        let a = tick(None, State::Working, false);
-        let a = tick(Some(&a), State::Idle, false);
+        let a = tick(None, RawState::Working, false);
+        let a = tick(Some(&a), RawState::Idle, false);
         assert_eq!((a.state, a.completions), (State::Done, 1));
-        let a = tick(Some(&a), State::Idle, false);
+        let a = tick(Some(&a), RawState::Idle, false);
         assert_eq!(a.state, State::Done);
-        let a = tick(Some(&a), State::Idle, true);
+        let a = tick(Some(&a), RawState::Idle, true);
         assert_eq!(a.state, State::Idle);
-        let a = tick(Some(&a), State::Idle, false);
+        let a = tick(Some(&a), RawState::Idle, false);
         assert_eq!((a.state, a.completions), (State::Idle, 1));
     }
 
     #[test]
     fn finish_while_watched_is_idle() {
-        let a = tick(None, State::Working, true);
-        let a = tick(Some(&a), State::Idle, true);
+        let a = tick(None, RawState::Working, true);
+        let a = tick(Some(&a), RawState::Idle, true);
         assert_eq!((a.state, a.completions), (State::Idle, 1));
     }
 
     #[test]
     fn startup_idle_is_not_a_completion() {
-        let a = tick(None, State::Idle, false);
+        let a = tick(None, RawState::Idle, false);
         assert_eq!((a.state, a.completions), (State::Idle, 0));
     }
 
     #[test]
     fn notifies_on_done_and_blocked_only_when_unseen() {
-        let working = tick(None, State::Working, false);
-        let done = tick(Some(&working), State::Idle, false);
+        let working = tick(None, RawState::Working, false);
+        let done = tick(Some(&working), RawState::Idle, false);
         assert!(transition_message(Some(&working), &done).is_some());
-        let blocked = tick(Some(&working), State::Blocked, false);
+        let blocked = tick(Some(&working), RawState::Blocked, false);
         assert!(transition_message(Some(&working), &blocked).is_some());
-        let watched = tick(Some(&working), State::Blocked, true);
+        let watched = tick(Some(&working), RawState::Blocked, true);
         assert!(transition_message(Some(&working), &watched).is_none());
+    }
+    #[test]
+    fn temporary_titles_preserve_previous_task_for_any_kind() {
+        let before = tick(None, RawState::Working, false);
+        let observation = || Detected {
+            pane: Pane {
+                id: before.pane.clone(),
+                pid: 1,
+                session: "s".into(),
+                window: "@1".into(),
+                window_index: 1,
+                pane_index: 1,
+                cwd: "/tmp".into(),
+                title: "Action Required".into(),
+                visible: false,
+                name: String::new(),
+                parent: String::new(),
+            },
+            kind: Kind::Claude,
+            state: RawState::Blocked,
+            detail: None,
+            title: "Action Required".into(),
+            session_id: None,
+            preserve_title: true,
+            completed_turns: None,
+            completion_epoch: None,
+        };
+        assert_eq!(
+            advance(Some(&before), observation(), 1).unwrap().title,
+            "Task"
+        );
+        assert_eq!(
+            advance(None, observation(), 1).unwrap().title,
+            "Action Required"
+        );
+    }
+    #[test]
+    fn durable_completion_counts_fast_first_turn_without_working_tick() {
+        let mut d = observation(RawState::Idle, false);
+        d.session_id = Some("session".into());
+        d.completion_epoch = Some("launch".into());
+        d.completed_turns = Some(1);
+        let a = advance(None, d, 0).unwrap();
+        assert_eq!((a.state, a.completions), (State::Done, 1));
+        let mut d = observation(RawState::Idle, false);
+        d.session_id = a.session_id.clone();
+        d.completion_epoch = a.completion_epoch.clone();
+        d.completed_turns = Some(1);
+        d.completion_epoch = Some("launch".into());
+        let a = advance(Some(&a), d, 1).unwrap();
+        assert_eq!(a.completions, 1);
+        let mut d = observation(RawState::Idle, false);
+        d.session_id = a.session_id.clone();
+        d.completion_epoch = a.completion_epoch.clone();
+        d.completed_turns = Some(3);
+        let a = advance(Some(&a), d, 2).unwrap();
+        assert_eq!(a.completions, 3);
+        let mut d = observation(RawState::Idle, false);
+        d.session_id = a.session_id.clone();
+        d.completion_epoch = a.completion_epoch.clone();
+        d.completed_turns = Some(2);
+        assert!(advance(Some(&a), d, 3).is_err());
+        let mut d = observation(RawState::Idle, false);
+        d.session_id = Some("new/session".into());
+        d.completion_epoch = Some("new-launch".into());
+        d.completed_turns = Some(0);
+        assert_eq!(advance(Some(&a), d, 4).unwrap().completions, 3);
+    }
+
+    #[test]
+    fn durable_counter_does_not_double_count_observed_working_to_idle() {
+        let mut d = observation(RawState::Working, false);
+        d.completed_turns = Some(0);
+        d.completion_epoch = Some("launch".into());
+        let a = advance(None, d, 0).unwrap();
+        let mut d = observation(RawState::Idle, false);
+        d.completed_turns = Some(1);
+        d.completion_epoch = Some("launch".into());
+        let a = advance(Some(&a), d, 1).unwrap();
+        assert_eq!((a.state, a.completions), (State::Done, 1));
+    }
+    #[test]
+    fn native_session_navigation_does_not_replay_completions() {
+        let mut d = observation(RawState::Idle, false);
+        d.session_id = Some("first".into());
+        d.completion_epoch = Some("launch".into());
+        d.completed_turns = Some(2);
+        let a = advance(None, d, 0).unwrap();
+        for session in ["home", "second", "first"] {
+            let mut d = observation(RawState::Idle, false);
+            d.session_id = Some(session.into());
+            d.completion_epoch = a.completion_epoch.clone();
+            d.completed_turns = Some(2);
+            let next = advance(Some(&a), d, 1).unwrap();
+            assert_eq!(next.completions, 2);
+        }
+        let mut d = observation(RawState::Idle, false);
+        d.completed_turns = Some(2);
+        assert!(advance(None, d, 0).is_err());
     }
 }

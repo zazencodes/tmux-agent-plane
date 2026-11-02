@@ -13,13 +13,51 @@ const STALE_AFTER_MS: u64 = 5_000;
 pub enum Kind {
     Claude,
     Codex,
+    Pi,
+    Opencode,
+    Agy,
+    Grok,
 }
 
 impl Kind {
+    pub fn adapter(self) -> crate::agents::Adapter {
+        use crate::agents::{Adapter, agy, claude, codex, grok, opencode, pi};
+        match self {
+            Self::Claude => Adapter {
+                scan: claude::scan,
+                launch: claude::launch,
+            },
+            Self::Codex => Adapter {
+                scan: codex::scan,
+                launch: codex::launch,
+            },
+            Self::Pi => Adapter {
+                scan: pi::scan,
+                launch: pi::launch,
+            },
+            Self::Opencode => Adapter {
+                scan: opencode::scan,
+                launch: opencode::launch,
+            },
+            Self::Agy => Adapter {
+                scan: agy::scan,
+                launch: agy::launch,
+            },
+            Self::Grok => Adapter {
+                scan: grok::scan,
+                launch: grok::launch,
+            },
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Kind::Claude => "claude",
             Kind::Codex => "codex",
+            Kind::Pi => "pi",
+            Kind::Opencode => "opencode",
+            Kind::Agy => "agy",
+            Kind::Grok => "grok",
         }
     }
 }
@@ -67,12 +105,18 @@ pub struct Agent {
     pub cwd: String,
     /// Pane id of the agent that spawned this one.
     pub parent: Option<String>,
-    /// Claude Code session id, for `claude --resume`.
+    /// Session identifier published by the agent, when available.
     pub session_id: Option<String>,
     /// Unix ms when `state` last changed.
     pub state_since: u64,
     /// Number of finished turns seen by the daemon.
     pub completions: u64,
+    /// Last durable completion counter from the publisher.
+    #[serde(default)]
+    pub reported_completions: Option<u64>,
+    /// Stable publisher lifetime, independent of the selected native session.
+    #[serde(default)]
+    pub completion_epoch: Option<String>,
     /// The pane is on screen right now.
     pub visible: bool,
 }
