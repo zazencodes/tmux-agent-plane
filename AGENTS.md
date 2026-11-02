@@ -23,6 +23,10 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 - Fail loudly: withdraw faulty kinds/observations, keep healthy tracking, and persist errors/recovery in daemon.log with degraded status. Process/pane snapshot, index and log failures remain fatal; stale index reads fail.
 - One canonical way per job; no fallbacks.
 
+## Next steps
+
+If `.agents/TODO.md` exists, read it before starting work: it is the maintainer's local list of what to do next. It is not in git. Keep it current: tick or remove items as they land, and add follow-ups as they come up.
+
 ## Development
 
 ```bash
