@@ -31,6 +31,8 @@ pub struct Observation {
     pub title: String,
     pub session_id: Option<String>,
     pub preserve_title: bool,
+    /// Durable completed turns in the published session, when available.
+    pub completed_turns: Option<u64>,
 }
 
 pub struct Launch {

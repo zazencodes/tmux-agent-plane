@@ -50,7 +50,7 @@ pub fn run() -> Result<()> {
         let mut agents = Vec::with_capacity(detected.len());
         for d in detected {
             let before = prev.get(&d.pane.id).filter(|a| a.kind == d.kind);
-            let agent = advance(before, d, now);
+            let agent = advance(before, d, now)?;
             if let Some(message) = transition_message(before, &agent) {
                 notify(&agent.name, &message)?;
             }
@@ -79,11 +79,22 @@ pub fn run() -> Result<()> {
 ///
 /// A turn that ends while nobody is looking makes the agent `Done`; it becomes `Idle` once its
 /// pane is on screen.
-fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Agent {
+fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Result<Agent> {
     let was_working = before.is_some_and(|a| a.state == State::Working);
-    let finished = was_working && d.state == RawState::Idle;
-    let completions = before.map_or(0, |a| a.completions) + u64::from(finished);
-    let unseen = before.is_some_and(|a| a.state == State::Done) || finished;
+    let completed = match d.completed_turns {
+        Some(current) => match before
+            .filter(|a| a.session_id == d.session_id)
+            .and_then(|a| a.reported_completions)
+        {
+            Some(previous) => current
+                .checked_sub(previous)
+                .context("agent completion counter regressed within a session")?,
+            None => current,
+        },
+        None => u64::from(was_working && d.state == RawState::Idle),
+    };
+    let completions = before.map_or(0, |a| a.completions) + completed;
+    let unseen = before.is_some_and(|a| a.state == State::Done) || completed > 0;
     let state = match State::from(d.state) {
         State::Idle if unseen && !d.pane.visible => State::Done,
         other => other,
@@ -98,7 +109,7 @@ fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Agent {
     } else {
         d.pane.name.clone()
     };
-    Agent {
+    Ok(Agent {
         name,
         location: d.pane.location(),
         pane: d.pane.id,
@@ -116,8 +127,9 @@ fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Agent {
             _ => now,
         },
         completions,
+        reported_completions: d.completed_turns,
         visible: d.pane.visible,
-    }
+    })
 }
 
 fn transition_message(before: Option<&Agent>, agent: &Agent) -> Option<String> {
@@ -203,7 +215,7 @@ mod tests {
     use crate::index::Kind;
     use crate::tmux::Pane;
 
-    fn tick(before: Option<&Agent>, state: RawState, visible: bool) -> Agent {
+    fn observation(state: RawState, visible: bool) -> Detected {
         let pane = Pane {
             id: "%1".into(),
             pid: 1,
@@ -217,7 +229,7 @@ mod tests {
             name: String::new(),
             parent: String::new(),
         };
-        let d = Detected {
+        Detected {
             pane,
             kind: Kind::Claude,
             state,
@@ -225,8 +237,12 @@ mod tests {
             title: "Task".into(),
             session_id: None,
             preserve_title: false,
-        };
-        advance(before, d, 0)
+            completed_turns: None,
+        }
+    }
+
+    fn tick(before: Option<&Agent>, state: RawState, visible: bool) -> Agent {
+        advance(before, observation(state, visible), 0).unwrap()
     }
 
     #[test]
@@ -288,8 +304,52 @@ mod tests {
             title: "Action Required".into(),
             session_id: None,
             preserve_title: true,
+            completed_turns: None,
         };
-        assert_eq!(advance(Some(&before), observation(), 1).title, "Task");
-        assert_eq!(advance(None, observation(), 1).title, "Action Required");
+        assert_eq!(
+            advance(Some(&before), observation(), 1).unwrap().title,
+            "Task"
+        );
+        assert_eq!(
+            advance(None, observation(), 1).unwrap().title,
+            "Action Required"
+        );
+    }
+    #[test]
+    fn durable_completion_counts_fast_first_turn_without_working_tick() {
+        let mut d = observation(RawState::Idle, false);
+        d.session_id = Some("launch/session".into());
+        d.completed_turns = Some(1);
+        let a = advance(None, d, 0).unwrap();
+        assert_eq!((a.state, a.completions), (State::Done, 1));
+        let mut d = observation(RawState::Idle, false);
+        d.session_id = a.session_id.clone();
+        d.completed_turns = Some(1);
+        let a = advance(Some(&a), d, 1).unwrap();
+        assert_eq!(a.completions, 1);
+        let mut d = observation(RawState::Idle, false);
+        d.session_id = a.session_id.clone();
+        d.completed_turns = Some(3);
+        let a = advance(Some(&a), d, 2).unwrap();
+        assert_eq!(a.completions, 3);
+        let mut d = observation(RawState::Idle, false);
+        d.session_id = a.session_id.clone();
+        d.completed_turns = Some(2);
+        assert!(advance(Some(&a), d, 3).is_err());
+        let mut d = observation(RawState::Idle, false);
+        d.session_id = Some("new/session".into());
+        d.completed_turns = Some(0);
+        assert_eq!(advance(Some(&a), d, 4).unwrap().completions, 3);
+    }
+
+    #[test]
+    fn durable_counter_does_not_double_count_observed_working_to_idle() {
+        let mut d = observation(RawState::Working, false);
+        d.completed_turns = Some(0);
+        let a = advance(None, d, 0).unwrap();
+        let mut d = observation(RawState::Idle, false);
+        d.completed_turns = Some(1);
+        let a = advance(Some(&a), d, 1).unwrap();
+        assert_eq!((a.state, a.completions), (State::Done, 1));
     }
 }

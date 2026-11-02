@@ -27,6 +27,7 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
             title: clean_title(&pane.title),
             session_id: None,
             preserve_title: state == RawState::Blocked,
+            completed_turns: None,
         });
     }
     Ok(found)
