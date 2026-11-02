@@ -15,7 +15,7 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 
 ## Rules
 
-- Detection reads what agents publish (session files, titles). Do not add hooks or agent-side config.
+- Detection first uses reliable live state an agent publishes without configuration (session/state files, titles, process tree, or local APIs). If Pi or OpenCode has no reliable native signal, use its official extension/plugin system to publish session state. Ship that integration under `extensions/<kind>/`, install it by symlink, and document it in README Install. Use one canonical method per kind; no fallback paths or screen scraping.
 - Fail loudly: unknown agent states, tmux errors and a stale index are errors.
 - One canonical way per job; no fallbacks.
 
