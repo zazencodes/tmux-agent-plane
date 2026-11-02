@@ -2,7 +2,7 @@
 
 2026-11-02 · brief item 4 · base `9c8085c`
 
-**Status: OPEN — user choice pending.** Plane-lead has offered a sidebar footer, keeping the top status message, or desktop-only notifications, and will relay the choice. This research commit does not settle item 4. Do not build a feature until that choice arrives; report this proof/commit to agents-lead only and do not message plane-lead again about item 4 before the choice.
+**Status: IMPLEMENTED — user chose the existing sidebar footer.** The later explicit direction replaces normal done/blocked tmux messages with a shared five-second sidebar event. See [implementation and private-client proof](sidebar-events-findings.md). The options and investigation below record the earlier research; the choice is settled.
 
 **tmux 3.7c has no clean independent bottom message area while the status remains at the top.** Its message facility uses the status area; positioned overlays take input; pane-based alternatives change the layout. This conclusion combines the native command/option surface, source routing and private-client checks below. No product UI, daemon code, installed binary, user configuration or running user server was changed. Desktop notifications remain unchanged.
 

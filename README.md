@@ -28,7 +28,7 @@ Claude Code, Codex and Antigravity use native signals. Pi and OpenCode use publi
 ## Features
 
 - **Every agent, every session.** One daemon watches every pane in every tmux session and keeps a single index of the agents in them: name, state, task, location and working directory.
-- **Know what needs you.** The status bar counts agents by state. An agent that finishes or blocks while you are looking elsewhere sends a tmux message and a desktop notification, and stays `done` until you look at it.
+- **Know what needs you.** The status bar counts agents by state. An agent that finishes or blocks while you are looking elsewhere shows a five-second notice in every open sidebar footer and sends a desktop notification, and stays `done` until you look at it.
 - **A sidebar of agents.** `prefix + S` opens a live list of every agent down the left of every window, in every session, and puts you in it: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar is there too. Close it once and it closes everywhere.
 - **Peek before you jump.** `prefix + A` opens the agent list in a popup with a large live preview of the selected agent's screen.
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
@@ -138,6 +138,14 @@ Run your agents as usual. Then ask any of them things like:
 | `q` | Close: the sidebar everywhere, or the popup (also `Esc`) |
 
 While the sidebar is open, every window has one, including windows and sessions you create later; each scrolls on its own. A window's sidebar closes with the window: when its other panes are gone, it goes too. The popup opens on the first blocked agent, or else the first done one. The agent you are looking at is shown in bold in the sidebar.
+
+### Notifications
+
+When an agent finishes or blocks off screen, every open sidebar shows the latest transition on its bottom line for five seconds: `✓ grok-support done` in green or `◆ grok-support blocked` in red. Sidebars in other windows and sessions receive the same event. Rename errors and active rename controls take priority; normal key hints return when the notice expires. A notice never opens a closed sidebar, changes focus or intercepts pane input. Expired notices are discarded, and restarting the daemon clears the previous notice.
+
+Pi and OpenCode completion counters also report a new finished turn when it completes between polls while the agent still shows `done`. Each new completion follows the same footer and desktop policy.
+
+Desktop notifications keep the task or blocked detail and work with the sidebar closed. Daemon faults and recoveries still use tmux diagnostic messages; active faults remain in the status bar and full reasons are recorded in `daemon.log`.
 
 ### Agent launch syntax
 
