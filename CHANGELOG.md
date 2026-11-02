@@ -22,7 +22,6 @@ before 1.0, a breaking change bumps the minor version.
 - Keep the index updating when tmux status writes or client refreshes fail; retry presentation and report the fault and recovery
 - Keep healthy agents tracking through kind scan, completion counter and notification failures; withdraw faulty observations, show degraded/recovered status, and persist full errors and fatal exit reasons in the state directory’s `daemon.log`
 - Keep Antigravity untracked until native folder trust is established; selected projects and session overrides that force trust stay untracked when live trust cannot be proven
-
 - Keep tracking agents when a Grok process exits during detection
 - Publish OpenCode completion counts together with fresh native state, preserving done notifications when a turn ends between polls
 - Reject unsafe Codex self references and pane splits when a shared app-server supplies a stale `TMUX_PANE`. Listing works without a caller marker; window/session spawning works with no parent
@@ -30,6 +29,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Document Antigravity trust limits and persistent fault diagnostics, and keep live checks isolated from user settings
 - Show off-screen done and blocked notifications for five seconds in every open sidebar footer, preserving pane input and focus; desktop notifications keep their existing delivery channel
 - Reject ambiguous agent identities and match Claude session processes to their tmux panes, including when separate tmux servers reuse pane IDs
 
