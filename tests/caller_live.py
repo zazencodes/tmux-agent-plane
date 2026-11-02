@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check Codex caller guards with idle TUIs on an isolated tmux server.
+"""Check launch and Codex caller guards on an isolated tmux server.
 
 Run after cargo build: python3 tests/caller_live.py. Requires Codex and tmux.
 No prompt is submitted. Agent jobs use the branch CLI; raw tmux only manages
@@ -60,6 +60,13 @@ try:
             break
         time.sleep(0.1)
     plane("list")
+    for task in (None, "", "  "):
+        arguments = ["spawn", "agy", "--in", "window", "--cwd", str(SCRATCH)]
+        if task is not None:
+            arguments.extend(["--", task])
+        result = plane(*arguments, check=False)
+        assert result.returncode and "agy publishes no state until its first turn; give spawn a task" in result.stderr, result
+    assert json.loads(plane("list", "--json").stdout) == [], "launch preflight must create no agent"
     for target in ("self", ENV["TMUX_PANE"]):
         result = plane("rename", target, "never-applied", check=False)
         assert result.returncode and "cannot identify" in result.stderr, result
@@ -74,7 +81,7 @@ try:
         item = next(agent for agent in rows if agent["name"] == name)
         assert item["parent"] is None and all(not agent["self"] for agent in rows), item
         assert item["kind"] == "codex"
-    print("PASS: list/JSON, self/inherited target guards, pane split guard, window/session "
+    print("PASS: agy task preflight, list/JSON, self/inherited target guards, pane split guard, window/session "
           "spawns with null parent", flush=True)
 finally:
     for name in owned:

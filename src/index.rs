@@ -15,13 +15,18 @@ pub enum Kind {
     Codex,
     Pi,
     Opencode,
+    Agy,
     Grok,
 }
 
 impl Kind {
     pub fn adapter(self) -> crate::agents::Adapter {
-        use crate::agents::{Adapter, claude, codex, grok, opencode, pi};
+        use crate::agents::{Adapter, agy, claude, codex, grok, opencode, pi};
         match self {
+            Self::Agy => Adapter {
+                scan: agy::scan,
+                launch: agy::launch,
+            },
             Self::Claude => Adapter {
                 scan: claude::scan,
                 launch: claude::launch,
@@ -51,6 +56,7 @@ impl Kind {
             Kind::Codex => "codex",
             Kind::Pi => "pi",
             Kind::Opencode => "opencode",
+            Kind::Agy => "agy",
             Kind::Grok => "grok",
         }
     }
