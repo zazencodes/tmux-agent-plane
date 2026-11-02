@@ -5,6 +5,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+## 0.3.0 - 2026-11-02
+
 ### Added
 
 - Add sidebar view mode (`V`), incremental search (`\`) that pauses preview until accepted, and state filters (`F`); carry navigation between sidebars and refuse ambiguous/shared-client switches
