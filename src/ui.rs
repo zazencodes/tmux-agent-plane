@@ -18,7 +18,7 @@ pub(crate) fn colour(state: State) -> Color {
     match state {
         State::Blocked => Color::Rgb(0xf3, 0x8b, 0xa8),
         State::Done => Color::Rgb(0xa6, 0xe3, 0xa1),
-        State::Working => Color::Rgb(0x89, 0xb4, 0xfa),
+        State::Working => Color::Rgb(0xcb, 0xa6, 0xf7),
         State::Idle => Color::Rgb(0x6c, 0x70, 0x86),
     }
 }

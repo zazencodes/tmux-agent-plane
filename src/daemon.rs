@@ -183,7 +183,7 @@ pub fn status_segment(agents: &[Agent]) -> String {
     [
         (State::Blocked, "#f38ba8", "◆"),
         (State::Done, "#a6e3a1", "✓"),
-        (State::Working, "#89b4fa", "●"),
+        (State::Working, "#cba6f7", "●"),
         (State::Idle, "#6c7086", "○"),
     ]
     .iter()
