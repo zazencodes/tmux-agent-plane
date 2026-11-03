@@ -168,7 +168,14 @@ def assert_footer(label, text, colour):
         assert client.screen.buffer[27][1].fg == colour, client.screen.buffer[27][1]
 
 
+def popup_open():
+    # The daemon's display-popup job lives exactly as long as the popup on screen.
+    rows = subprocess.run(["ps", "-A", "-ww", "-o", "args="], check=True, text=True, capture_output=True).stdout
+    return any("display-popup" in row and str(ROOT) in row for row in rows.splitlines())
+
+
 def round_trip(key, layout):
+    wait("no popup holding the keyboard", lambda: not popup_open())
     before = input_bytes()
     os.write(CLIENTS[0].master, key)
     wait("original client input", lambda: input_bytes() == before + key)
@@ -242,14 +249,10 @@ try:
     (ROOT / "desktop.fail").unlink()
     wait("desktop retry recovery", lambda: (ROOT / "desktop.delivered").read_text().count("delivered") == 3 and
          "[notification:desktop] recovered" in (STATE / "daemon.log").read_text())
-    # Diagnostic recovery announcements intentionally retain their tmux message channel.
-    # Let its next-tick announcement finish before checking the next coloured footer.
-    until = time.monotonic() + 1.5
-    while time.monotonic() < until:
-        for c in CLIENTS:
-            c.drain()
-        time.sleep(0.05)
-    wait("recovery announcement completed", lambda: all(c.screen.display[0].startswith("TOP-STATUS") for c in CLIENTS))
+    # Diagnostic announcements are popups that hold the keyboard, opened per client once it is idle.
+    wait("recovery popups opened", lambda: sum(line.startswith("display-popup ") and "notification:desktop: recovered" in line
+         for line in (ROOT / "tmux.calls").read_text().splitlines()) == 2)
+    wait("recovery popups closed", lambda: not popup_open())
     change("working", 3)
     wait("working before block", lambda: agent("footer-source")["state"] == "working")
     change("blocked", 3)
@@ -263,18 +266,25 @@ try:
     wait("restart clears event", lambda: index()["updated_at"] > blocked["occurred_at"] and
          index()["recent_event"] is None and all("jump" in c.footer() for c in CLIENTS))
     assert geometry() == layout
-    assert input_bytes() == notification_input + b"bc", "notification changed fixture focus/input"
+    wait("restart popups closed", lambda: not popup_open())
     calls = (ROOT / "tmux.calls").read_text().splitlines()
+    # Only diagnostic popups move focus, once per popup; agent notifications never do.
+    original_client = next(line.split()[1] for line in tmux("list-clients", "-F", "#{client_pid} #{client_name}").splitlines()
+                           if line.split()[0] == str(CLIENTS[0].process.pid))
+    popups = sum(line.startswith(f"display-popup -c {original_client} ") for line in calls)
+    observed = input_bytes()[len(notification_input):]
+    assert popups >= 2 and observed.count(b"\x1b[O") == observed.count(b"\x1b[I") == popups, (popups, observed)
+    assert observed.replace(b"\x1b[O", b"").replace(b"\x1b[I", b"") == b"bc", observed
     normal = [line for line in calls if line.startswith("display-message ") and "-p" not in line.split()
               and ("footer-source finished" in line or "footer-source needs you" in line)]
     assert not normal, normal
     # Both diagnostic paths are still active while desktop errors are injected.
     assert "[notification:desktop] ERROR:" in (STATE / "daemon.log").read_text()
-    assert any(line.startswith("display-message -c ") and "notification:desktop" in line for line in calls)
+    assert any(line.startswith("display-popup -c ") and "notification:desktop" in line for line in calls)
     RESULTS = {"passed": True, "done": done, "fast_done": fast_done, "blocked": blocked, "two_sessions": True,
                "footer_row": 28, "done_colour": "a6e3a1", "blocked_colour": "f38ba8",
                "expiry_returns_hints": True, "restart_clears_event": True,
-               "closed_sidebars_stay_closed": True, "pane_input": "abc", "focus_and_layout_unchanged": True,
+               "closed_sidebars_stay_closed": True, "pane_input": "abc", "focus_moves_only_for_diagnostic_popups": True, "layout_unchanged": True,
                "desktop_failure_does_not_stop_events": True, "normal_display_messages": normal}
 finally:
     for name in SPAWNED:
