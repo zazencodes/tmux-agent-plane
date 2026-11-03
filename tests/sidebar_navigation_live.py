@@ -204,11 +204,11 @@ def previewed(client, name):
     wait("preview " + name, arrived)
 
 
-def frames_after(client, key, seconds=1.0):
+def frames_after(client, action, seconds=1.0):
     """Every screen the terminal is left on, as (window, selected). A frame ends when tmux pauses."""
     client.drain()
     frames = []
-    client.key(key)
+    action() if callable(action) else client.key(action)
     start = time.monotonic()
     while time.monotonic() < start + seconds:
         if not select.select([client.master], [], [], 0.05)[0]:
@@ -219,6 +219,26 @@ def frames_after(client, key, seconds=1.0):
         if not frames or frames[-1][1] != frame:
             frames.append((round(time.monotonic() - start, 3), frame))
     return frames
+
+
+def assert_sidebars_agree_on_arrival(client, names):
+    # Moving with plain tmux lands on other sidebars: same rows, current agent, in every frame.
+    settle(0.7)
+    rows = shown_names(client)
+    trace = []
+    for name in names:
+        window = agent(name)["window"]
+        session = agent(name)["session"]
+        client_name = client.context()[0]
+        frames = frames_after(client, lambda: tmux("switch-client", "-c", client_name, "-t",
+                                                   f"={session}:{window}.{agent(name)['pane']}"))
+        trace.append({"name": name, "window": window, "rows": shown_names(client),
+                      "frames": [[at, *frame] for at, frame in frames]})
+        (ROOT / "arrival-frames.json").write_text(json.dumps(trace, indent=2) + "\n")
+        for _, (shown_window, shown) in frames:
+            assert shown_window != window or shown == name, (name, frames)
+        assert frames[-1][1] == (window, name), frames
+        assert shown_names(client) == rows, (rows, shown_names(client))
 
 
 def assert_no_stale_preview_frame(client):
@@ -561,7 +581,13 @@ try:
     wait("states", lambda: agent("nav-done")["state"] == "done" and agent("nav-away")["state"] == "blocked")
     plane("toggle-sidebar", agent("nav-work")["window"])
     wait("sidebar controls", lambda: "v off" in client.text() and "f all" in client.text())
-    selected(client, "nav-away")  # blocked first
+    selected(client, "nav-work")  # the agent it was opened from
+    start_sidebar = client.context()[1]
+    client.key(b"s")
+    wait("attention order", lambda: shown_names(client) == ranked_names())
+    assert_sidebars_agree_on_arrival(client, ["nav-work", "nav-idle", "nav-away"])
+    tmux("switch-client", "-c", client.context()[0], "-t", start_sidebar)
+    selected(client, "nav-away")  # the last agent used
     original = client.context()
     client.key(b"j")
     wait("normal move", lambda: client.selected() != "nav-away")

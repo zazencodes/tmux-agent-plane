@@ -20,11 +20,16 @@ use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
 
 const WIDTH: &str = "38";
+/// How often a sidebar no client is viewing, and one a client is viewing, checks tmux.
 const REFRESH: Duration = Duration::from_millis(500);
+const REFRESH_VIEWED: Duration = Duration::from_millis(100);
 /// Pane option marking a sidebar pane, so the toggle finds it.
 const MARK: &str = "@agent-plane-sidebar";
 /// Global option set while the sidebar is open, in every window of every session.
 const OPEN: &str = "@agent-plane-sidebar-open";
+/// Global options every sidebar shares: pane IDs in row order, and the agent last used.
+const ORDER: &str = "@agent-plane-sidebar-order";
+const LAST_AGENT: &str = "@agent-plane-last-agent";
 
 /// The sidebar key: close the sidebar everywhere when it is open, wherever you are; otherwise
 /// open it everywhere and move into this window's.
@@ -33,6 +38,9 @@ pub fn toggle(window: &str) -> Result<()> {
         return close();
     }
     tmux::run(&["set-option", "-g", OPEN, "1"])?;
+    // The pane you open it from is the one the new sidebars should highlight.
+    let active = tmux::run(&["display-message", "-p", "-t", window, "#{pane_id}"])?;
+    tmux::run(&["set-option", "-g", LAST_AGENT, active.trim()])?;
     add_everywhere()?;
     let pane = add(window)?;
     tmux::run(&["select-pane", "-t", &pane]).map(drop)
@@ -160,11 +168,36 @@ enum Exit {
     Alone,
 }
 
-/// The sidebar is the last pane left in its window.
-fn alone() -> Result<bool> {
-    let pane = std::env::var("TMUX_PANE")?;
-    let panes = tmux::run(&["display-message", "-p", "-t", &pane, "#{window_panes}"])?;
-    Ok(panes.trim() == "1")
+/// What a sidebar reads from tmux on each check, in one command.
+struct Observation {
+    alone: bool,
+    viewed: bool,
+    active: String,
+    order: Vec<String>,
+    last_agent: String,
+}
+
+fn parse_observation(output: &str) -> Result<Observation> {
+    let line = output.trim_end_matches('\n');
+    let fields: Vec<_> = line.split('\x1f').collect();
+    let [panes, viewed, active, order, last_agent] = fields.as_slice() else {
+        bail!("unexpected sidebar context: {line:?}");
+    };
+    Ok(Observation {
+        alone: *panes == "1",
+        viewed: *viewed == "1",
+        active: active.to_string(),
+        order: order.split_whitespace().map(String::from).collect(),
+        last_agent: last_agent.to_string(),
+    })
+}
+
+fn observe(own: &str) -> Result<Observation> {
+    let format = format!(
+        "#{{window_panes}}\x1f#{{&&:#{{window_active}},#{{session_attached}}}}\x1f\
+         #{{P:#{{?pane_active,#{{pane_id}},}}}}\x1f#{{{ORDER}}}\x1f#{{{LAST_AGENT}}}"
+    );
+    parse_observation(&tmux::run(&["display-message", "-p", "-t", own, &format])?)
 }
 
 #[derive(Default)]
@@ -356,6 +389,13 @@ struct Sidebar {
     killing: Option<KillConfirmation>,
     /// Hide successfully closed panes until the daemon has removed them from the index.
     closed: HashSet<String>,
+    /// The order as last read from or written to tmux.
+    shared_order: Vec<String>,
+    /// A client is viewing this sidebar with the keyboard in it: its selection is theirs.
+    steering: bool,
+    /// The agent a client is viewing here, once announced as the last one used.
+    used: Option<String>,
+    viewed: bool,
 }
 
 impl Navigation {
@@ -413,43 +453,70 @@ impl Sidebar {
         self.navigation.order = agents.into_iter().map(|a| a.pane.clone()).collect();
     }
 
-    /// Keep existing rows in place; append arrivals within their existing session group.
+    /// Rows never move: arrivals append. A pane that leaves keeps its place, so an agent
+    /// withdrawn by a brief scan fault returns to the same row. Only s rewrites the list.
     fn sync_order(&mut self) {
         if self.navigation.order.is_empty() {
             self.rank_order();
             return;
         }
-        let mut sessions: Vec<String> = Vec::new();
-        for pane in &self.navigation.order {
-            if let Some(agent) = self.all_agents.iter().find(|a| &a.pane == pane)
-                && !sessions.contains(&agent.session)
-            {
-                sessions.push(agent.session.clone());
-            }
-        }
         for agent in &self.all_agents {
-            if !sessions.contains(&agent.session) {
-                sessions.push(agent.session.clone());
+            if !self.navigation.order.contains(&agent.pane) {
+                self.navigation.order.push(agent.pane.clone());
             }
         }
-        let mut order = Vec::new();
-        for session in sessions {
-            for pane in &self.navigation.order {
-                if self
-                    .all_agents
-                    .iter()
-                    .any(|a| &a.pane == pane && a.session == session)
-                {
-                    order.push(pane.clone());
-                }
-            }
-            for agent in &self.all_agents {
-                if agent.session == session && !order.contains(&agent.pane) {
-                    order.push(agent.pane.clone());
-                }
-            }
+    }
+
+    /// Share one order across sidebars and show the agent in use, ahead of any client arriving.
+    fn apply(&mut self, observation: &Observation, own: &str) {
+        if !observation.order.is_empty() {
+            self.navigation.order = observation.order.clone();
+            self.shared_order = observation.order.clone();
         }
-        self.navigation.order = order;
+        self.refresh();
+        self.follow(observation, own);
+    }
+
+    /// Highlight the agent in use. A client steering this sidebar owns its selection, which
+    /// starts from the last agent used.
+    fn follow(&mut self, observation: &Observation, own: &str) {
+        let in_use = observation.active != own
+            && self.all_agents.iter().any(|a| a.pane == observation.active);
+        let steering = observation.viewed && observation.active == own;
+        let target = if in_use {
+            Some(&observation.active)
+        } else if steering && self.steering {
+            None
+        } else {
+            Some(&observation.last_agent)
+        };
+        self.steering = steering;
+        self.viewed = observation.viewed;
+        let position = target.and_then(|pane| self.agents.iter().position(|a| &a.pane == pane));
+        if position.is_some() {
+            self.select(position);
+        }
+    }
+
+    /// The pane to announce as last used, once per visit so that clients never contend.
+    fn newly_used(&mut self, observation: &Observation, own: &str) -> Option<String> {
+        let used = (observation.viewed
+            && observation.active != own
+            && self.all_agents.iter().any(|a| a.pane == observation.active))
+        .then(|| observation.active.clone());
+        if used == self.used {
+            return None;
+        }
+        self.used = used.clone();
+        used
+    }
+
+    fn publish_order(&mut self) -> Result<()> {
+        if self.navigation.order != self.shared_order {
+            tmux::run(&["set-option", "-g", ORDER, &self.navigation.order.join(" ")])?;
+            self.shared_order = self.navigation.order.clone();
+        }
+        Ok(())
     }
 
     fn resort(&mut self) {
@@ -492,6 +559,8 @@ impl Sidebar {
             })
             .cloned()
             .collect();
+        // Sessions by name: a stable sort keeps the list's order within each.
+        self.agents.sort_by(|a, b| a.session.cmp(&b.session));
         let selected = self
             .navigation
             .pane
@@ -877,9 +946,26 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
     // This is the native sidebar process's own pane, never a caller inferred by the CLI.
     let own = std::env::var("TMUX_PANE")?;
     let mut sidebar = Sidebar::default();
-    sidebar.refresh();
-    let mut refreshed = Instant::now();
+    let mut refreshed = None;
     loop {
+        let interval = if sidebar.viewed {
+            REFRESH_VIEWED
+        } else {
+            REFRESH
+        };
+        if refreshed.is_none_or(|at: Instant| at.elapsed() >= interval) {
+            // Refresh may change selection when an agent vanishes. Only input triggers preview.
+            let observation = observe(&own)?;
+            if observation.alone {
+                return Ok(Exit::Alone);
+            }
+            sidebar.apply(&observation, &own);
+            sidebar.publish_order()?;
+            if let Some(pane) = sidebar.newly_used(&observation, &own) {
+                tmux::run(&["set-option", "-g", LAST_AGENT, &pane])?;
+            }
+            refreshed = Some(Instant::now());
+        }
         // tmux rescales panes proportionally when the window or a client resizes, and a
         // dragged border moves them: every sidebar is always exactly WIDTH columns.
         if terminal.size()?.width != WIDTH.parse::<u16>()? {
@@ -921,6 +1007,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
                     break;
                 }
             }
+            sidebar.publish_order()?;
             if focus || (preview && sidebar.navigation.view && sidebar.navigation.search.is_none())
             {
                 match switch_command(&sidebar, &own, focus) {
@@ -936,14 +1023,6 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
                     Err(error) => sidebar.notice = Some(error.to_string()),
                 }
             }
-        }
-        if refreshed.elapsed() >= REFRESH {
-            if alone()? {
-                return Ok(Exit::Alone);
-            }
-            // Refresh may change selection when an agent vanishes. Only input triggers preview.
-            sidebar.refresh();
-            refreshed = Instant::now();
         }
     }
 }
@@ -1409,6 +1488,109 @@ mod tests {
         sidebar.rebuild();
         assert_eq!(order(&sidebar), ["%1", "%5", "%3", "%4"]);
         assert_eq!(sidebar.selected().unwrap().pane, "%3");
+    }
+
+    fn observed(viewed: bool, active: &str, order: &[&str], last_agent: &str) -> Observation {
+        Observation {
+            alone: false,
+            viewed,
+            active: active.into(),
+            order: order.iter().map(|pane| pane.to_string()).collect(),
+            last_agent: last_agent.into(),
+        }
+    }
+
+    #[test]
+    fn departed_panes_keep_their_place_and_sessions_stay_sorted() {
+        let mut sidebar = Sidebar {
+            all_agents: vec![agent("%1", State::Idle), agent("%2", State::Idle)],
+            ..Sidebar::default()
+        };
+        let mut other = agent("%3", State::Idle);
+        other.session = "alpha".into();
+        sidebar.navigation.order = vec!["%2".into(), "%1".into(), "%3".into()];
+        sidebar.all_agents.push(other);
+        sidebar.rebuild();
+        assert_eq!(order(&sidebar), ["%3", "%2", "%1"]);
+        let withdrawn = sidebar.all_agents.remove(1);
+        sidebar.rebuild();
+        assert_eq!(order(&sidebar), ["%3", "%1"]);
+        sidebar.all_agents.push(withdrawn);
+        sidebar.rebuild();
+        assert_eq!(order(&sidebar), ["%3", "%2", "%1"]);
+    }
+
+    #[test]
+    fn observation_parses_all_fields_and_fails_loudly() {
+        let parsed = parse_observation("2\x1f1\x1f%4\x1f%1 %2\x1f%9\n").unwrap();
+        assert!(!parsed.alone && parsed.viewed);
+        assert_eq!(parsed.active, "%4");
+        assert_eq!(parsed.order, ["%1", "%2"]);
+        assert_eq!(parsed.last_agent, "%9");
+        assert!(parse_observation("1\x1f0\x1f%4\x1f\x1f\n").unwrap().alone);
+        assert!(parse_observation("2\x1f1\n").is_err());
+    }
+
+    #[test]
+    fn highlight_follows_the_agent_in_use_until_a_client_steers() {
+        let mut sidebar = Sidebar {
+            all_agents: vec![
+                agent("%1", State::Idle),
+                agent("%2", State::Idle),
+                agent("%3", State::Idle),
+            ],
+            ..Sidebar::default()
+        };
+        sidebar.rebuild();
+        let selected = |sidebar: &Sidebar| sidebar.selected().unwrap().pane.clone();
+        // Hidden with an agent active: ready before any client arrives.
+        sidebar.follow(&observed(false, "%2", &[], "%3"), "%9");
+        assert_eq!(selected(&sidebar), "%2");
+        // Viewed with the agent active.
+        sidebar.follow(&observed(true, "%3", &[], "%2"), "%9");
+        assert_eq!(selected(&sidebar), "%3");
+        // A plain shell in front: the last agent used.
+        sidebar.follow(&observed(true, "%7", &[], "%1"), "%9");
+        assert_eq!(selected(&sidebar), "%1");
+        // Entering the sidebar starts from the last agent used, then the selection is yours.
+        sidebar.follow(&observed(true, "%9", &[], "%2"), "%9");
+        assert_eq!(selected(&sidebar), "%2");
+        press(&mut sidebar, KeyCode::Char('j'));
+        assert_eq!(selected(&sidebar), "%3");
+        sidebar.follow(&observed(true, "%9", &[], "%2"), "%9");
+        assert_eq!(selected(&sidebar), "%3");
+        // Hidden with the sidebar active: the last agent used, ready for arrival.
+        sidebar.follow(&observed(false, "%9", &[], "%1"), "%9");
+        assert_eq!(selected(&sidebar), "%1");
+        // An agent hidden by a filter or search leaves the selection alone.
+        sidebar.follow(&observed(true, "%5", &[], "%8"), "%9");
+        assert_eq!(selected(&sidebar), "%1");
+    }
+
+    #[test]
+    fn last_used_is_announced_once_per_visit() {
+        let mut sidebar = Sidebar {
+            all_agents: vec![agent("%1", State::Idle)],
+            ..Sidebar::default()
+        };
+        let viewing = observed(true, "%1", &[], "");
+        assert_eq!(sidebar.newly_used(&viewing, "%9").as_deref(), Some("%1"));
+        assert_eq!(sidebar.newly_used(&viewing, "%9"), None);
+        // Another pane took over while this sidebar was hidden: returning announces again.
+        assert_eq!(
+            sidebar.newly_used(&observed(false, "%1", &[], "%7"), "%9"),
+            None
+        );
+        assert_eq!(sidebar.newly_used(&viewing, "%9").as_deref(), Some("%1"));
+        // A sidebar or shell in front is not an agent in use.
+        assert_eq!(
+            sidebar.newly_used(&observed(true, "%9", &[], ""), "%9"),
+            None
+        );
+        assert_eq!(
+            sidebar.newly_used(&observed(true, "%5", &[], ""), "%9"),
+            None
+        );
     }
 
     #[test]

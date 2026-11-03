@@ -5,6 +5,11 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Fixed
+
+- Keep one agent order in every sidebar: rows no longer change as you move between windows and sessions, and `s` re-sorts them everywhere
+- Highlight the agent you are in, or the last one you used when you are in a sidebar or a plain shell, in every sidebar
+
 ## 0.4.1 - 2026-11-03
 
 ### Fixed
