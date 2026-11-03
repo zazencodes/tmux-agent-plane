@@ -356,7 +356,6 @@ struct Sidebar {
     killing: Option<KillConfirmation>,
     /// Hide successfully closed panes until the daemon has removed them from the index.
     closed: HashSet<String>,
-    focused: bool,
 }
 
 impl Navigation {
@@ -394,10 +393,6 @@ impl Navigation {
 }
 
 impl Sidebar {
-    fn update_focus(&mut self, focused: bool) {
-        self.focused = focused;
-    }
-
     fn rank_order(&mut self) {
         let attention = |state| match state {
             State::Blocked => 0,
@@ -754,27 +749,27 @@ struct Client {
     pane: String,
 }
 
+const CLIENT_FORMAT: &str =
+    "#{client_name}\x1f#{client_pid}\x1f#{session_id}\x1f#{window_id}\x1f#{pane_id}";
+
+fn parse_client(line: &str) -> Result<Client> {
+    let fields: Vec<_> = line.split('\x1f').collect();
+    if fields.len() != 5 {
+        bail!("unexpected client context: {line:?}");
+    }
+    Ok(Client {
+        name: fields[0].into(),
+        pid: fields[1].into(),
+        session: fields[2].into(),
+        window: fields[3].into(),
+        pane: fields[4].into(),
+    })
+}
+
 fn clients() -> Result<Vec<Client>> {
-    let output = tmux::run(&[
-        "list-clients",
-        "-F",
-        "#{client_name}\x1f#{client_pid}\x1f#{session_id}\x1f#{window_id}\x1f#{pane_id}",
-    ])?;
-    output
+    tmux::run(&["list-clients", "-F", CLIENT_FORMAT])?
         .lines()
-        .map(|line| {
-            let fields: Vec<_> = line.split('\x1f').collect();
-            if fields.len() != 5 {
-                bail!("unexpected client context: {line:?}");
-            }
-            Ok(Client {
-                name: fields[0].into(),
-                pid: fields[1].into(),
-                session: fields[2].into(),
-                window: fields[3].into(),
-                pane: fields[4].into(),
-            })
-        })
+        .map(parse_client)
         .collect()
 }
 
@@ -803,49 +798,79 @@ fn guard_destination(
     Ok(())
 }
 
-fn navigate(sidebar: &Sidebar, own: &str, focus: bool) -> Result<()> {
+/// What a switch must check, read in one tmux command: each command costs a process.
+struct SwitchContext {
+    clients: Vec<Client>,
+    session: String,
+    sidebar: Option<String>,
+}
+
+fn parse_switch_context(output: &str) -> Result<SwitchContext> {
+    let mut clients = Vec::new();
+    let mut session = None;
+    let mut sidebar = None;
+    for line in output.lines() {
+        match line.split('\x1f').collect::<Vec<_>>().as_slice() {
+            ["session", id] => session = Some(id.to_string()),
+            ["pane", id, "1"] => sidebar = Some(id.to_string()),
+            ["pane", _, _] => {}
+            _ => clients.push(parse_client(line)?),
+        }
+    }
+    Ok(SwitchContext {
+        clients,
+        session: session.context("switch context has no session")?,
+        sidebar,
+    })
+}
+
+/// The tmux command for a preview or Enter jump, or None when the client is already there.
+fn switch_command(sidebar: &Sidebar, own: &str, focus: bool) -> Result<Option<Vec<String>>> {
     let Some(agent) = sidebar.selected() else {
-        return Ok(());
+        return Ok(None);
     };
-    let clients = clients()?;
-    let client = input_client(&clients, own)?;
     let window_target = format!("={}:{}", agent.session, agent.window);
     // Resolve the indexed session explicitly: a pane can be linked into several sessions.
-    let session = tmux::run(&[
+    let context = parse_switch_context(&tmux::run(&[
+        "list-clients",
+        "-F",
+        CLIENT_FORMAT,
+        ";",
         "display-message",
         "-p",
         "-t",
         &window_target,
-        "#{session_id}",
-    ])?;
-    guard_destination(&clients, client, session.trim(), &agent.window)?;
-    let destination = add(&window_target)?;
+        "session\x1f#{session_id}",
+        ";",
+        "list-panes",
+        "-t",
+        &window_target,
+        "-F",
+        &format!("pane\x1f#{{pane_id}}\x1f#{{{MARK}}}"),
+    ])?)?;
+    let client = input_client(&context.clients, own)?;
+    guard_destination(&context.clients, client, &context.session, &agent.window)?;
+    let destination = match context.sidebar {
+        Some(pane) => pane,
+        None => add(&window_target)?,
+    };
     // Enter lands on the agent. Preview stays in this sidebar, so neither agent keys nor seen
     // state are manufactured.
     let pane = if focus { agent.pane.as_str() } else { own };
-    let pane_target = format!("{window_target}.{pane}");
-    if destination == own {
-        if focus {
-            tmux::run(&["switch-client", "-c", &client.name, "-t", &pane_target])?;
-        }
-        return Ok(());
+    let switch = [
+        "switch-client".to_string(),
+        "-c".to_string(),
+        client.name.clone(),
+        "-t".to_string(),
+        format!("{window_target}.{pane}"),
+    ];
+    if destination != own {
+        // This pane travels with the client, so its selection and keyboard input stay continuous
+        // on screen. tmux runs the whole sequence before it redraws.
+        let swap = ["swap-pane", "-s", own, "-t", &destination, ";"].map(String::from);
+        return Ok(Some(swap.into_iter().chain(switch).collect()));
     }
-    // This pane travels with the client, so its selection and keyboard input stay continuous on
-    // screen. tmux runs the whole sequence before it redraws.
-    tmux::run(&[
-        "swap-pane",
-        "-s",
-        own,
-        "-t",
-        &destination,
-        ";",
-        "switch-client",
-        "-c",
-        &client.name,
-        "-t",
-        &pane_target,
-    ])?;
-    Ok(())
+    Ok(focus.then(|| switch.to_vec()))
 }
 
 fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
@@ -853,7 +878,6 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
     let own = std::env::var("TMUX_PANE")?;
     let mut sidebar = Sidebar::default();
     sidebar.refresh();
-    sidebar.focused = clients()?.iter().any(|client| client.pane == own);
     let mut refreshed = Instant::now();
     loop {
         // tmux rescales panes proportionally when the window or a client resizes, and a
@@ -863,13 +887,6 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
         }
         terminal.draw(|f| draw(f, &mut sidebar))?;
         if event::poll(Duration::from_millis(100))? {
-            let focused = clients()?.iter().any(|client| client.pane == own);
-            if focused && !sidebar.focused {
-                sidebar.update_focus(focused);
-                sidebar.refresh();
-            } else {
-                sidebar.focused = focused;
-            }
             let mut focus = false;
             let mut preview = false;
             // Apply the complete buffered burst first, so a fast jjj makes one preview switch.
@@ -906,10 +923,17 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
             }
             if focus || (preview && sidebar.navigation.view && sidebar.navigation.search.is_none())
             {
-                // Draw first: this frame arrives in the destination window with the client.
-                terminal.draw(|f| draw(f, &mut sidebar))?;
-                if let Err(error) = navigate(&sidebar, &own, focus) {
-                    sidebar.notice = Some(error.to_string());
+                match switch_command(&sidebar, &own, focus) {
+                    Ok(Some(command)) => {
+                        // Draw last, so the selection moves on screen together with the window.
+                        terminal.draw(|f| draw(f, &mut sidebar))?;
+                        let command: Vec<_> = command.iter().map(String::as_str).collect();
+                        if let Err(error) = tmux::run(&command) {
+                            sidebar.notice = Some(error.to_string());
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => sidebar.notice = Some(error.to_string()),
                 }
             }
         }
@@ -918,7 +942,6 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
                 return Ok(Exit::Alone);
             }
             // Refresh may change selection when an agent vanishes. Only input triggers preview.
-            sidebar.update_focus(clients()?.iter().any(|client| client.pane == own));
             sidebar.refresh();
             refreshed = Instant::now();
         }
@@ -1360,7 +1383,6 @@ mod tests {
                 agent("%3", State::Blocked),
                 agent("%4", State::Blocked),
             ],
-            focused: true,
             ..Sidebar::default()
         };
         sidebar.all_agents[2].state_since = 20;
@@ -1382,10 +1404,8 @@ mod tests {
         press(&mut sidebar, KeyCode::Char('s'));
         assert_eq!(order(&sidebar), ["%1", "%5", "%3", "%4"]);
         assert_eq!(sidebar.selected().unwrap().pane, "%3");
-        // Focus changes never move rows.
-        sidebar.update_focus(false);
+        // State changes never move rows.
         sidebar.all_agents[0].state = State::Working;
-        sidebar.update_focus(true);
         sidebar.rebuild();
         assert_eq!(order(&sidebar), ["%1", "%5", "%3", "%4"]);
         assert_eq!(sidebar.selected().unwrap().pane, "%3");
@@ -1395,7 +1415,6 @@ mod tests {
     fn session_groups_and_search_acceptance_keep_a_stable_order() {
         let mut sidebar = Sidebar {
             all_agents: vec![agent("%1", State::Idle), agent("%2", State::Working)],
-            focused: true,
             ..Sidebar::default()
         };
         let mut remote = agent("%3", State::Blocked);
@@ -1474,6 +1493,21 @@ mod tests {
                 .unwrap()
                 .contains("rename cancelled")
         );
+    }
+
+    #[test]
+    fn switch_context_reads_clients_session_and_sidebar_from_one_output() {
+        let context = parse_switch_context(
+            "/dev/ttys1\x1f42\x1f$1\x1f@1\x1f%1\nsession\x1f$2\npane\x1f%7\x1f\npane\x1f%8\x1f1\n",
+        )
+        .unwrap();
+        assert_eq!(context.clients[0].name, "/dev/ttys1");
+        assert_eq!(context.session, "$2");
+        assert_eq!(context.sidebar.as_deref(), Some("%8"));
+        let context = parse_switch_context("session\x1f$2\npane\x1f%7\x1f\n").unwrap();
+        assert!(context.clients.is_empty() && context.sidebar.is_none());
+        assert!(parse_switch_context("pane\x1f%7\x1f\n").is_err());
+        assert!(parse_switch_context("session\x1f$2\nnot-a-client\n").is_err());
     }
 
     #[test]

@@ -7,6 +7,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Make view mode previews and `Enter` jumps faster: a switch now runs two tmux commands where it ran five, and the selection moves together with the window
 - Stop the sidebar flickering in view mode: previewing an agent no longer shows the wrong row selected for up to half a second after the window changes
 - Keep the selected row highlighted after `Enter` jumps to another window: the sidebar now moves with you, so its selection, filter and search stay as they were
 - Stop reporting `degraded: scan:pi` and briefly dropping every Pi agent from the list when one Pi agent exits

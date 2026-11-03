@@ -226,6 +226,7 @@ def assert_no_stale_preview_frame(client):
     names = shown_names(client)
     sidebar = client.context()[1]
     trace = []
+    calls_before = len((ROOT / "tmux.calls").read_text().splitlines())
     for _ in names:
         before = client.selected()
         expected = names[(names.index(before) + 1) % len(names)]
@@ -240,6 +241,12 @@ def assert_no_stale_preview_frame(client):
         assert frames[-1][1] == (window, expected), frames
         previewed(client, expected)
         assert client.context()[1] == sidebar, "the sidebar pane itself must travel with the client"
+    # Each tmux command costs a process: one preview is one combined read and one swap.
+    calls = [json.loads(line) for line in (ROOT / "tmux.calls").read_text().splitlines()[calls_before:]]
+    assert sum(call[0] == "swap-pane" for call in calls) == len(names), calls
+    assert sum(call[0] == "list-clients" and ";" in call for call in calls) == len(names), calls
+    assert not any(call[0] in ("display-message", "list-panes") and "-t" in call and
+                   call[call.index("-t") + 1].startswith("=") for call in calls), calls
 
 
 def settle(seconds=1.2):
