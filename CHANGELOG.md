@@ -8,6 +8,7 @@ before 1.0, a breaking change bumps the minor version.
 ### Fixed
 
 - Stop the sidebar flickering in view mode: previewing an agent no longer shows the wrong row selected for up to half a second after the window changes
+- Stop reporting `degraded: scan:pi` and briefly dropping every Pi agent from the list when one Pi agent exits
 
 ## 0.4.0 - 2026-11-03
 

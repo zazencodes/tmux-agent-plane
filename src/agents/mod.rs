@@ -64,6 +64,7 @@ pub struct Process {
     /// Published command line, flattened without shell parsing.
     pub argv: String,
 }
+/// Live processes only. An exited process awaiting its parent's wait has lost its command line.
 pub struct ProcessTable {
     pub processes: HashMap<i32, Process>,
 }
@@ -85,7 +86,7 @@ impl ProcessTable {
         // BSD ps pads comm to this header's width, preserving paths containing spaces.
         // procps does not: Linux reads /proc and never uses this layout.
         let exe_header = "E".repeat(1024);
-        let format = format!("pid=PID,ppid=PPID,comm={exe_header},args=ARGV");
+        let format = format!("pid=PID,ppid=PPID,stat=STAT,comm={exe_header},args=ARGV");
         let out = Command::new("ps")
             .args(["-A", "-ww", "-o", &format])
             .output()
@@ -108,8 +109,12 @@ impl ProcessTable {
                 .context("short ps row")?
                 .split_whitespace()
                 .collect::<Vec<_>>();
-            if ids.len() != 2 {
+            if ids.len() != 3 {
                 bail!("invalid ps identity columns");
+            }
+            // Z is a zombie; the E flag means the process is exiting.
+            if ids[2].starts_with('Z') || ids[2].contains('E') {
+                continue;
             }
             let executable = line
                 .get(exe..argv)
@@ -214,6 +219,7 @@ struct ProcIdentity {
     parent: i32,
     name: String,
     started: u64,
+    exited: bool,
 }
 #[cfg(any(target_os = "linux", test))]
 fn parse_proc_stat(stat: &str, expected_pid: i32) -> Result<ProcIdentity> {
@@ -232,6 +238,7 @@ fn parse_proc_stat(stat: &str, expected_pid: i32) -> Result<ProcIdentity> {
         name: name.to_owned(),
         // starttime is field 22; the suffix starts at field 3 (state).
         started: fields[19].parse().context("invalid proc stat starttime")?,
+        exited: matches!(fields[0], "Z" | "X" | "x"),
     })
 }
 #[cfg(any(target_os = "linux", test))]
@@ -247,7 +254,7 @@ fn read_proc_process(path: &std::path::Path, pid: i32) -> Result<Option<Process>
     let after = read_identity()?;
     // Reject detected PID reuse, comm changes or reparenting between reads.
     // Command-line bytes may still change within one process lifetime, as with ps.
-    if before != after {
+    if before != after || after.exited {
         return Ok(None);
     }
     let argv = std::str::from_utf8(&bytes)
@@ -267,20 +274,26 @@ mod tests {
     use super::*;
     #[test]
     fn process_columns_preserve_spaces_and_ancestry() {
-        let header = format!("PID PPID {} ARGV\n", "E".repeat(64));
-        let row = |pid, parent, exe, args| format!("{pid:<4}{parent:<5}{exe:<65}{args}\n");
+        let header = format!("PID PPID STAT {} ARGV\n", "E".repeat(64));
+        let row =
+            |pid, parent, stat, exe, args| format!("{pid:<4}{parent:<5}{stat:<5}{exe:<65}{args}\n");
         let output = header
-            + &row(1, 0, "/bin/shell", "shell")
+            + &row(1, 0, "Ss", "/bin/shell", "shell")
             + &row(
                 2,
                 1,
+                "S+",
                 "/Applications/Agent App/codex",
                 "codex task with spaces",
-            );
+            )
+            + &row(3, 1, "Z", "(pi)", "<defunct>")
+            + &row(4, 1, "SE", "pi", "(pi)");
         let table = ProcessTable::parse_bsd_ps(&output).unwrap();
         assert_eq!(table.processes[&2].argv, "codex task with spaces");
         assert_eq!(table.descendants_named(1, "codex").len(), 1);
         assert!(!table.is_descendant(1, 2));
+        assert!(!table.processes.contains_key(&3));
+        assert!(!table.processes.contains_key(&4));
     }
     struct ProcFixture(std::path::PathBuf);
     impl ProcFixture {
@@ -323,6 +336,9 @@ mod tests {
         fixture.process(103, 0, "kworker", b"");
         fixture.process(104, 100, "exited", b"exited\0");
         std::fs::remove_file(fixture.0.join("104/cmdline")).unwrap();
+        fixture.process(105, 100, "pi", b"");
+        let zombie = stat(105, 100, "pi").replace(") S ", ") Z ");
+        std::fs::write(fixture.0.join("105/stat"), zombie).unwrap();
         // Reproduce the reported procps shape without copying real command lines.
         // It is not a Linux input: /proc is canonical even if procps is installed.
         let header = format!("    PID    PPID {} ARGV\n", "E".repeat(1024));
@@ -339,6 +355,7 @@ mod tests {
         assert_eq!(table.processes[&102].argv, "changed title");
         assert!(table.processes[&103].argv.is_empty());
         assert!(!table.processes.contains_key(&104));
+        assert!(!table.processes.contains_key(&105));
         assert_eq!(table.descendants_named(100, "codex").len(), 1);
         assert!(!table.is_descendant(100, 101));
     }

@@ -773,6 +773,8 @@ try:
                          if call[0] == "set-option" and "@agent-plane-sidebar" in call)
     assert not any(call[0] == "send-keys" for call in calls[first_sidebar:])
     assert not any(call[0] == 'kill-session' for call in calls)
+    daemon_log = (STATE / "daemon.log").read_text()
+    assert "[scan:" not in daemon_log, "closing an agent must not fault its kind: " + daemon_log
     assert not any(call[0] in ("copy-mode", "clock-mode") for call in calls)
     RESULTS = {**extended_results, "passed": True, "native_fixtures": len(FIXTURES), "models_used": 0,
         "same_window": True, "cross_window_and_session": True, "view_off_selects_only": True,
