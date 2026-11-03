@@ -649,6 +649,20 @@ try:
     client.key(b"jj")
     settle(0.3)
     assert client.context() == original
+    # Enter with view off also carries this sidebar, so the new window never shows a stale row.
+    sidebar = client.context()[1]
+    while client.selected() != "nav-idle":
+        client.key(b"j")
+        settle(0.1)
+    window = agent("nav-idle")["window"]
+    assert window != client.context()[2]
+    frames = frames_after(client, b"\r")
+    (ROOT / "enter-frames.json").write_text(json.dumps(frames) + "\n")
+    assert all(shown == "nav-idle" for _, (shown_window, shown) in frames if shown_window == window), frames
+    assert frames[-1][1] == (window, "nav-idle"), frames
+    assert client.context()[1] == agent("nav-idle")["pane"] and sidebar_pane(window) == sidebar
+    tmux("switch-client", "-c", client.context()[0], "-t", sidebar)
+    wait("back in travelling sidebar", lambda: client.context()[1] == sidebar)
     # Restore all four states. Only F may skip categories/change the state filter.
     change("nav-done", "idle", 2)
     wait("done again", lambda: agent("nav-done")["state"] == "done" and "✓ 1" in client.text())

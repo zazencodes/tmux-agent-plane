@@ -819,26 +819,25 @@ fn navigate(sidebar: &Sidebar, own: &str, focus: bool) -> Result<()> {
         "#{session_id}",
     ])?;
     guard_destination(&clients, client, session.trim(), &agent.window)?;
-    if focus {
-        // One targeted tmux command changes session/window/pane without an intermediate focus.
-        let pane_target = format!("{window_target}.{}", agent.pane);
-        tmux::run(&["switch-client", "-c", &client.name, "-t", &pane_target])?;
+    let destination = add(&window_target)?;
+    // Enter lands on the agent. Preview stays in this sidebar, so neither agent keys nor seen
+    // state are manufactured.
+    let pane = if focus { agent.pane.as_str() } else { own };
+    let pane_target = format!("{window_target}.{pane}");
+    if destination == own {
+        if focus {
+            tmux::run(&["switch-client", "-c", &client.name, "-t", &pane_target])?;
+        }
         return Ok(());
     }
-    let target = add(&window_target)?;
-    if target == own {
-        return Ok(());
-    }
-    // Preview carries this pane to the destination, so its selection and keyboard input stay
-    // continuous on screen. tmux runs the sequence before it redraws. It targets only sidebars,
-    // so neither agent keys nor seen state are manufactured.
-    let pane_target = format!("{window_target}.{own}");
+    // This pane travels with the client, so its selection and keyboard input stay continuous on
+    // screen. tmux runs the whole sequence before it redraws.
     tmux::run(&[
         "swap-pane",
         "-s",
         own,
         "-t",
-        &target,
+        &destination,
         ";",
         "switch-client",
         "-c",
