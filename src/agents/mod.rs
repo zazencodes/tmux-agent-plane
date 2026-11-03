@@ -61,7 +61,8 @@ pub struct Process {
     pub parent: i32,
     /// BSD executable path on macOS; kernel comm name on Linux.
     pub executable: String,
-    /// Published command line, flattened without shell parsing.
+    /// Published command line, flattened without shell parsing. Empty when it cannot be read:
+    /// a kernel thread, another user's process, or one that is exiting.
     pub argv: String,
 }
 /// Live processes only. An exited process awaiting its parent's wait has lost its command line.
@@ -124,11 +125,14 @@ impl ProcessTable {
             if executable.len() >= argv - exe - 1 {
                 bail!("ps executable column truncated");
             }
+            // BSD ps prints "(comm)" when it cannot read the arguments, in any process state.
+            let args = line.get(argv..).unwrap_or("");
+            let unreadable = args.starts_with('(') && args.ends_with(')');
             let process = Process {
                 pid: ids[0].parse()?,
                 parent: ids[1].parse()?,
                 executable,
-                argv: line.get(argv..).unwrap_or("").to_string(),
+                argv: if unreadable { "" } else { args }.to_string(),
             };
             processes.insert(process.pid, process);
         }
@@ -287,13 +291,15 @@ mod tests {
                 "codex task with spaces",
             )
             + &row(3, 1, "Z", "(pi)", "<defunct>")
-            + &row(4, 1, "SE", "pi", "(pi)");
+            + &row(4, 1, "SE", "pi", "pi")
+            + &row(5, 1, "S+", "pi", "(pi)");
         let table = ProcessTable::parse_bsd_ps(&output).unwrap();
         assert_eq!(table.processes[&2].argv, "codex task with spaces");
         assert_eq!(table.descendants_named(1, "codex").len(), 1);
         assert!(!table.is_descendant(1, 2));
         assert!(!table.processes.contains_key(&3));
         assert!(!table.processes.contains_key(&4));
+        assert!(table.processes[&5].argv.is_empty());
     }
     struct ProcFixture(std::path::PathBuf);
     impl ProcFixture {

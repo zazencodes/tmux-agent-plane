@@ -79,6 +79,10 @@ fn scan_directory(
             continue;
         }
         let process = &context.processes.processes[&pid];
+        // An exiting process loses its command line before it leaves the process table.
+        if process.argv.is_empty() {
+            continue;
+        }
         if process.argv.trim() != "pi" {
             bail!("live Pi status PID {pid} is not an interactive Pi process");
         }
@@ -320,6 +324,16 @@ mod tests {
                 .iter()
                 .any(|o| o.pane_id == "%2" && o.state == RawState::Idle)
         );
+    }
+
+    #[test]
+    fn exiting_process_is_gone_but_a_different_command_is_an_error() {
+        let mut f = Fixture::new();
+        f.write(101, WORKING);
+        f.processes.processes.get_mut(&101).unwrap().argv = String::new();
+        assert!(f.scan(10000).unwrap().is_empty());
+        f.processes.processes.get_mut(&101).unwrap().argv = "vim".into();
+        assert!(f.scan(10000).is_err());
     }
 
     #[test]
