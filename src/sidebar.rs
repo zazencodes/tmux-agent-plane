@@ -749,7 +749,7 @@ impl Sidebar {
                 self.resort();
             }
             KeyCode::Char('S') => self.resort(),
-            KeyCode::Char('\\') => {
+            KeyCode::Char('/') => {
                 self.navigation.search = Some(SearchEdit {
                     query: self.navigation.query.clone(),
                     pane: self.navigation.pane.clone(),
@@ -1088,12 +1088,8 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let block = panel(Line::from(" agents ")).title_top(counts(&sidebar.all_agents));
     let content = block.inner(list_area);
     f.render_widget(block, list_area);
-    let [mode_area, query_area, agents_area] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(0),
-    ])
-    .areas(content);
+    let [mode_area, agents_area] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(content);
     let mode = format!(
         " V {}{}  F {}",
         if sidebar.navigation.view { "on" } else { "off" },
@@ -1104,20 +1100,23 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         },
         sidebar.navigation.filter.map_or("all", State::as_str)
     );
-    f.render_widget(Paragraph::new(Line::styled(mode, LAVENDER)), mode_area);
     let query = &sidebar.navigation.query;
     let search = sidebar.navigation.search.is_some();
+    let room = inner.saturating_sub(mode.chars().count() + 4);
     let query = if search {
-        let tail: String = query.chars().rev().take(inner.saturating_sub(4)).collect();
-        format!(" \\ {}▏", tail.chars().rev().collect::<String>())
+        let tail: String = query.chars().rev().take(room).collect();
+        format!("  / {}▏", tail.chars().rev().collect::<String>())
     } else if query.is_empty() {
-        " \\ search".into()
+        "  / search".into()
     } else {
-        truncate(&format!(" \\ {query}"), inner)
+        truncate(&format!("  / {query}"), room + 4)
     };
     f.render_widget(
-        Paragraph::new(Line::styled(query, if search { TEXT } else { SUBTEXT })),
-        query_area,
+        Paragraph::new(Line::from(vec![
+            Span::styled(mode, LAVENDER),
+            Span::styled(query, if search { TEXT } else { SUBTEXT }),
+        ])),
+        mode_area,
     );
     if let Some(e) = &sidebar.error {
         message(
@@ -1540,7 +1539,7 @@ mod tests {
         sidebar.rebuild();
         assert_eq!(order(&sidebar), ["%3", "%2", "%1", "%4"]);
         sidebar.select(Some(2));
-        press(&mut sidebar, KeyCode::Char('\\'));
+        press(&mut sidebar, KeyCode::Char('/'));
         sidebar.rebuild();
         assert_eq!(order(&sidebar), ["%3", "%2", "%1", "%4"]);
         press(&mut sidebar, KeyCode::Enter);
@@ -1568,7 +1567,7 @@ mod tests {
             ..Sidebar::default()
         };
         sidebar.rebuild();
-        press(&mut sidebar, KeyCode::Char('\\'));
+        press(&mut sidebar, KeyCode::Char('/'));
         for c in "PaYmEnT".chars() {
             press(&mut sidebar, KeyCode::Char(c));
         }
@@ -1576,7 +1575,7 @@ mod tests {
         press(&mut sidebar, KeyCode::Enter);
         assert!(sidebar.navigation.search.is_none());
         assert_eq!(sidebar.navigation.query, "PaYmEnT");
-        press(&mut sidebar, KeyCode::Char('\\'));
+        press(&mut sidebar, KeyCode::Char('/'));
         for c in "qVFr".chars() {
             press(&mut sidebar, KeyCode::Char(c));
         }
@@ -1720,7 +1719,7 @@ mod tests {
             KeyCode::Char('F'),
             KeyCode::Char('V'),
             KeyCode::Char('x'),
-            KeyCode::Char('\\'),
+            KeyCode::Char('/'),
         ] {
             let key = KeyEvent::new(code, KeyModifiers::NONE);
             assert!(!kill_accepts(key));
