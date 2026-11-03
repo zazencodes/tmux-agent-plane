@@ -20,9 +20,7 @@ use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
 
 const WIDTH: &str = "38";
-/// How often a sidebar no client is viewing, and one a client is viewing, checks tmux.
 const REFRESH: Duration = Duration::from_millis(500);
-const REFRESH_VIEWED: Duration = Duration::from_millis(100);
 /// Pane option marking a sidebar pane, so the toggle finds it.
 const MARK: &str = "@agent-plane-sidebar";
 /// Global option set while the sidebar is open, in every window of every session.
@@ -395,7 +393,6 @@ struct Sidebar {
     steering: bool,
     /// The agent a client is viewing here, once announced as the last one used.
     used: Option<String>,
-    viewed: bool,
 }
 
 impl Navigation {
@@ -491,7 +488,6 @@ impl Sidebar {
             Some(&observation.last_agent)
         };
         self.steering = steering;
-        self.viewed = observation.viewed;
         let position = target.and_then(|pane| self.agents.iter().position(|a| &a.pane == pane));
         if position.is_some() {
             self.select(position);
@@ -948,12 +944,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
     let mut sidebar = Sidebar::default();
     let mut refreshed = None;
     loop {
-        let interval = if sidebar.viewed {
-            REFRESH_VIEWED
-        } else {
-            REFRESH
-        };
-        if refreshed.is_none_or(|at: Instant| at.elapsed() >= interval) {
+        if refreshed.is_none_or(|at: Instant| at.elapsed() >= REFRESH) {
             // Refresh may change selection when an agent vanishes. Only input triggers preview.
             let observation = observe(&own)?;
             if observation.alone {
