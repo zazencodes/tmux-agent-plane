@@ -5,6 +5,7 @@ use crate::agents::RawState;
 use crate::detect::{self, Detected};
 use crate::diagnostics::{self, Active, Batch, Issue};
 use crate::index::{self, Agent, Index, RecentEvent, State};
+use crate::popup::{self, Announcements};
 use crate::tmux;
 use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
@@ -37,10 +38,18 @@ pub fn report_fatal(error: &anyhow::Error) -> Result<()> {
         STATUS_OPTION,
         "#[fg=#f38ba8]⚠ daemon stopped; see daemon.log#[default] ",
     ]);
-    let _ = tmux_message(&format!(
-        "tmux-agent-plane stopped: {reason}; log: {}",
-        path.display()
-    ));
+    if let Ok(clients) = tmux::clients() {
+        for client in clients {
+            // The popup outlives the exiting daemon and is shown at once: nothing will retry it.
+            let _ = popup::show(
+                &client.name,
+                &format!(
+                    "tmux-agent-plane stopped: {reason}; log: {}",
+                    path.display()
+                ),
+            );
+        }
+    }
     persistence
 }
 
@@ -79,7 +88,7 @@ fn run_inner() -> Result<()> {
     let mut notifications = Notifications::default();
     let mut recent_event: Option<RecentEvent> = None;
     // Diagnostic announcements use only tmux and are never sent through notification retry.
-    let mut announcement: Option<String> = None;
+    let mut announcements = Announcements::default();
 
     loop {
         if SHUTDOWN.load(Ordering::Relaxed) {
@@ -102,15 +111,8 @@ fn run_inner() -> Result<()> {
             }
         }
         issues.extend(notifications.deliver());
-        if let Some(message) = &announcement {
-            match tmux_message(message) {
-                Ok(()) => announcement = None,
-                Err(error) => {
-                    // Retain the announcement for retry. Its failure never announces itself.
-                    issues.push(Issue::new("diagnostics:tmux", error));
-                }
-            }
-        }
+        // A failed popup is retried while its client is idle. Its failure never announces itself.
+        issues.extend(announcements.deliver());
         // Index persistence remains fatal and independent of status presentation.
         index::write(&Index {
             updated_at: now,
@@ -123,16 +125,16 @@ fn run_inner() -> Result<()> {
         let segment = active.status() + &status_segment(&agents);
         issues.extend(presentation.update(&segment));
         let changes = active.update(&issues)?;
-        let announcements: Vec<_> = changes
+        let changes: Vec<_> = changes
             .into_iter()
             .filter(|message| !message.starts_with("diagnostics:tmux:"))
             .collect();
-        if !announcements.is_empty() {
-            announcement = Some(format!(
+        if !changes.is_empty() {
+            announcements.push(format!(
                 "tmux-agent-plane: {}; log: {}",
-                announcements.join("; "),
+                changes.join("; "),
                 diagnostics::log_path()?.display()
-            ));
+            ))?;
         }
         std::thread::sleep(TICK);
     }
@@ -149,7 +151,7 @@ impl Presentation {
         self.update_with(
             segment,
             |segment| tmux::run(&["set-option", "-g", STATUS_OPTION, segment]).map(|_| ()),
-            tmux::clients,
+            || Ok(tmux::clients()?.into_iter().map(|c| c.name).collect()),
             |client| tmux::run(&["refresh-client", "-S", "-t", client]).map(|_| ()),
         )
     }
@@ -348,18 +350,6 @@ impl Notifications {
         });
         issues
     }
-}
-
-fn client_message(client: &str, message: &str) -> Result<()> {
-    tmux::run(&["display-message", "-c", client, "-d", "5000", message])?;
-    Ok(())
-}
-
-fn tmux_message(message: &str) -> Result<()> {
-    for client in tmux::clients()? {
-        client_message(&client, message)?;
-    }
-    Ok(())
 }
 
 #[cfg(target_os = "macos")]

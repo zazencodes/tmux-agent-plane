@@ -136,11 +136,31 @@ fn physical_panes(mut panes: Vec<Pane>) -> Vec<Pane> {
     unique
 }
 
-pub fn clients() -> Result<Vec<String>> {
-    Ok(run(&["list-clients", "-F", "#{client_name}"])?
+pub struct Client {
+    pub name: String,
+    /// Unix seconds of the client's last keyboard or mouse input.
+    pub activity: u64,
+}
+
+pub fn clients() -> Result<Vec<Client>> {
+    run(&["list-clients", "-F", "#{client_name}\x1f#{client_activity}"])?
         .lines()
-        .map(str::to_string)
-        .collect())
+        .map(|line| {
+            let (name, activity) = line
+                .split_once(SEP)
+                .with_context(|| format!("invalid list-clients row {line:?}"))?;
+            Ok(Client {
+                name: name.to_string(),
+                activity: activity.parse().context("invalid client activity")?,
+            })
+        })
+        .collect()
+}
+
+pub fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// The visible screen of a pane, with or without colour escapes.

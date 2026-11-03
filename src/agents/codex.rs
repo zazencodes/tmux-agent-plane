@@ -18,7 +18,11 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
             .processes
             .descendants_named(pane.pid, "codex")
             .into_iter()
-            .filter(|p| !context.processes.has_ancestor_named(p.pid, pane.pid, "claude"))
+            .filter(|p| {
+                !context
+                    .processes
+                    .has_ancestor_named(p.pid, pane.pid, "claude")
+            })
             .collect();
         let processes: Vec<_> = all
             .iter()

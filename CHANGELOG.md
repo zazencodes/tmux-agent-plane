@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Changed
+
+- Show daemon fault and recovery announcements in a short popup under the status bar instead of replacing the status bar, opened only after you pause typing so it does not swallow keystrokes
+
 ### Fixed
 
 - Stop reporting `degraded: scan:codex` or `ambiguous agent identity` when a Claude Code session runs `codex` in its pane or several one-off `codex` processes run side by side; those are tools, not agents

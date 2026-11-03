@@ -5,6 +5,7 @@ mod detect;
 mod diagnostics;
 mod index;
 mod lifecycle;
+mod popup;
 mod sidebar;
 mod tmux;
 mod ui;
