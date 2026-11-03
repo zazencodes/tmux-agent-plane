@@ -11,6 +11,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Keep every sidebar exactly 38 columns wide; resizing the window or attaching a differently sized client no longer leaves some at other widths
 - Stop reporting `degraded: scan:codex` or `ambiguous agent identity` when a Claude Code session runs `codex` in its pane or several one-off `codex` processes run side by side; those are tools, not agents
 - Stop reporting `degraded: scan:codex` when Codex starts helper `codex` processes under itself
 - Start the daemon after tmux creates its first session, preventing a stopped watcher when opening a fresh tmux server

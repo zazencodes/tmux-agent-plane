@@ -961,6 +961,11 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
     let mut refreshed = Instant::now();
     let mut relay = None;
     loop {
+        // tmux rescales panes proportionally when the window or a client resizes, and a
+        // dragged border moves them: every sidebar is always exactly WIDTH columns.
+        if terminal.size()?.width != WIDTH.parse::<u16>()? {
+            tmux::run(&["resize-pane", "-t", &own, "-x", WIDTH])?;
+        }
         terminal.draw(|f| draw(f, &mut sidebar))?;
         if event::poll(Duration::from_millis(100))? {
             if receive_handoff(&mut sidebar, &own)? {
