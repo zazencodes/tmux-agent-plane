@@ -7,6 +7,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Stop reporting `degraded: scan:codex` when Codex starts helper `codex` processes under itself
 - Start the daemon after tmux creates its first session, preventing a stopped watcher when opening a fresh tmux server
 
 ## 0.3.0 - 2026-11-02

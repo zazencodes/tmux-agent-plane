@@ -12,7 +12,15 @@ pub fn launch(task: Option<&str>) -> Result<Launch> {
 pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
     let mut found = Vec::new();
     for pane in context.panes {
-        let processes = context.processes.descendants_named(pane.pid, "codex");
+        // Codex starts helper `codex` children; only the outermost process is the agent.
+        let all = context.processes.descendants_named(pane.pid, "codex");
+        let processes: Vec<_> = all
+            .iter()
+            .filter(|p| {
+                !all.iter()
+                    .any(|a| a.pid != p.pid && context.processes.is_descendant(p.pid, a.pid))
+            })
+            .collect();
         if processes.len() > 1 {
             bail!("multiple interactive Codex processes in pane {}", pane.id);
         }
@@ -59,6 +67,69 @@ fn codex_state(title: &str) -> (RawState, Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agents::{Process, ProcessTable};
+    use crate::tmux::Pane;
+    use std::collections::HashMap;
+
+    fn process(pid: i32, parent: i32, executable: &str) -> (i32, Process) {
+        let process = Process {
+            pid,
+            parent,
+            executable: executable.into(),
+            argv: executable.into(),
+        };
+        (pid, process)
+    }
+
+    fn pane(id: &str, pid: i32) -> Pane {
+        Pane {
+            id: id.into(),
+            pid,
+            session: "s".into(),
+            window: "@1".into(),
+            window_index: 0,
+            pane_index: 0,
+            cwd: "/".into(),
+            title: "Fix tests | repo".into(),
+            visible: false,
+            name: String::new(),
+            parent: String::new(),
+        }
+    }
+
+    #[test]
+    fn nested_codex_helpers_belong_to_one_agent() {
+        let processes = ProcessTable {
+            processes: HashMap::from([
+                process(10, 1, "/bin/zsh"),
+                process(11, 10, "/bin/codex"),
+                process(12, 11, "/bin/codex"),
+            ]),
+        };
+        let panes = [pane("%1", 10)];
+        let context = ScanContext {
+            panes: &panes,
+            processes: &processes,
+        };
+        assert_eq!(scan(&context).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn sibling_codex_processes_are_ambiguous() {
+        let processes = ProcessTable {
+            processes: HashMap::from([
+                process(10, 1, "/bin/zsh"),
+                process(11, 10, "/bin/codex"),
+                process(12, 10, "/bin/codex"),
+            ]),
+        };
+        let panes = [pane("%1", 10)];
+        let context = ScanContext {
+            panes: &panes,
+            processes: &processes,
+        };
+        assert!(scan(&context).is_err());
+    }
 
     #[test]
     fn codex_titles() {
