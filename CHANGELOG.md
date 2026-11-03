@@ -5,6 +5,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+## 0.4.1 - 2026-11-03
+
 ### Fixed
 
 - Make view mode previews and `Enter` jumps faster: a switch now runs two tmux commands where it ran five, and the selection moves together with the window
