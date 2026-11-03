@@ -15,7 +15,6 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
@@ -26,9 +25,6 @@ const REFRESH: Duration = Duration::from_millis(500);
 const MARK: &str = "@agent-plane-sidebar";
 /// Global option set while the sidebar is open, in every window of every session.
 const OPEN: &str = "@agent-plane-sidebar-open";
-/// A one-shot transfer to the sidebar in the previewed window. Never global: only the
-/// named client may adopt it, after that client has arrived in this pane.
-const HANDOFF: &str = "@agent-plane-sidebar-navigation";
 
 /// The sidebar key: close the sidebar everywhere when it is open, wherever you are; otherwise
 /// open it everywhere and move into this window's.
@@ -171,7 +167,7 @@ fn alone() -> Result<bool> {
     Ok(panes.trim() == "1")
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Default)]
 struct Navigation {
     view: bool,
     filter: Option<State>,
@@ -181,17 +177,9 @@ struct Navigation {
     order: Vec<String>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
 struct SearchEdit {
     query: String,
     pane: Option<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Handoff {
-    client: String,
-    client_pid: String,
-    navigation: Navigation,
 }
 
 struct Rename {
@@ -815,9 +803,9 @@ fn guard_destination(
     Ok(())
 }
 
-fn navigate(sidebar: &Sidebar, own: &str, focus: bool) -> Result<Option<Client>> {
+fn navigate(sidebar: &Sidebar, own: &str, focus: bool) -> Result<()> {
     let Some(agent) = sidebar.selected() else {
-        return Ok(None);
+        return Ok(());
     };
     let clients = clients()?;
     let client = input_client(&clients, own)?;
@@ -831,116 +819,34 @@ fn navigate(sidebar: &Sidebar, own: &str, focus: bool) -> Result<Option<Client>>
         "#{session_id}",
     ])?;
     guard_destination(&clients, client, session.trim(), &agent.window)?;
-    let target = if focus {
-        agent.pane.clone()
-    } else {
-        add(&window_target)?
-    };
+    if focus {
+        // One targeted tmux command changes session/window/pane without an intermediate focus.
+        let pane_target = format!("{window_target}.{}", agent.pane);
+        tmux::run(&["switch-client", "-c", &client.name, "-t", &pane_target])?;
+        return Ok(());
+    }
+    let target = add(&window_target)?;
     if target == own {
-        return Ok(None);
+        return Ok(());
     }
-    if !focus {
-        let handoff = Handoff {
-            client: client.name.clone(),
-            client_pid: client.pid.clone(),
-            navigation: sidebar.navigation.clone(),
-        };
-        tmux::run(&[
-            "set-option",
-            "-p",
-            "-t",
-            &target,
-            HANDOFF,
-            &serde_json::to_string(&handoff)?,
-        ])?;
-    }
-    // One targeted tmux command changes session/window/pane without an intermediate agent focus.
-    // Preview targets only the sidebar, so neither agent keys nor seen state are manufactured.
-    let pane_target = format!("={}:{}.{}", agent.session, agent.window, target);
-    if let Err(error) = tmux::run(&["switch-client", "-c", &client.name, "-t", &pane_target]) {
-        if !focus {
-            tmux::run(&["set-option", "-pu", "-t", &target, HANDOFF])
-                .context(format!("{error}; also failed to clear sidebar handoff"))?;
-        }
-        return Err(error);
-    }
-    Ok((!focus).then(|| Client {
-        name: client.name.clone(),
-        pid: client.pid.clone(),
-        session: client.session.clone(),
-        window: client.window.clone(),
-        pane: target,
-    }))
-}
-
-fn receive_handoff(sidebar: &mut Sidebar, own: &str) -> Result<bool> {
-    let value = tmux::run(&["show-option", "-pqv", "-t", own, HANDOFF])?;
-    if value.trim().is_empty() {
-        return Ok(false);
-    }
-    let handoff: Handoff =
-        serde_json::from_str(value.trim()).context("invalid sidebar navigation handoff")?;
-    let clients = clients()?;
-    if clients.iter().any(|client| {
-        client.name == handoff.client && client.pid == handoff.client_pid && client.pane == own
-    }) {
-        // Consume before handling buffered keys in the destination pane.
-        tmux::run(&["set-option", "-pu", "-t", own, HANDOFF])?;
-        sidebar.navigation = handoff.navigation;
-        sidebar.focused = true;
-        sidebar.editing = None;
-        sidebar.killing = None;
-        sidebar.notice = None;
-        sidebar.refresh();
-        return Ok(true);
-    } else if !clients
-        .iter()
-        .any(|client| client.name == handoff.client && client.pid == handoff.client_pid)
-    {
-        tmux::run(&["set-option", "-pu", "-t", own, HANDOFF])?;
-    }
-    Ok(false)
-}
-
-/// Keys may reach the old PTY while tmux is executing the switch. Relay those only to
-/// the same live client's current sidebar. A pane marker and a unique client are required;
-/// deliberate Enter focus ends the relay rather than sending any subsequent key to an agent.
-fn relay_key(key: KeyEvent, own: &str, origin: &Client) -> Result<bool> {
-    let clients = clients()?;
-    if clients.iter().any(|client| client.pane == own) {
-        return Ok(false);
-    }
-    let client = clients
-        .iter()
-        .find(|client| client.name == origin.name && client.pid == origin.pid)
-        .context("navigation client disconnected; buffered key discarded")?;
-    input_client(&clients, &client.pane)?;
-    if tmux::run(&["show-option", "-pqv", "-t", &client.pane, MARK])?.trim() != "1" {
-        bail!("client left sidebar; buffered key discarded");
-    }
-    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-    let alt = key.modifiers.contains(KeyModifiers::ALT);
-    let (literal, code) = match key.code {
-        KeyCode::Char(c) => (!ctrl && !alt, c.to_string()),
-        KeyCode::Enter => (false, "Enter".into()),
-        KeyCode::Esc => (false, "Escape".into()),
-        KeyCode::Backspace => (false, "BSpace".into()),
-        KeyCode::Up => (false, "Up".into()),
-        KeyCode::Down => (false, "Down".into()),
-        _ => return Ok(true), // Other keys have no sidebar action.
-    };
-    let code = format!(
-        "{}{}{code}",
-        if ctrl { "C-" } else { "" },
-        if alt { "M-" } else { "" }
-    );
-    let mut args = vec!["send-keys", "-t", &client.pane];
-    if literal {
-        args.push("-l");
-    }
-    args.push(&code);
-    tmux::run(&args)?;
-    Ok(true)
+    // Preview carries this pane to the destination, so its selection and keyboard input stay
+    // continuous on screen. tmux runs the sequence before it redraws. It targets only sidebars,
+    // so neither agent keys nor seen state are manufactured.
+    let pane_target = format!("{window_target}.{own}");
+    tmux::run(&[
+        "swap-pane",
+        "-s",
+        own,
+        "-t",
+        &target,
+        ";",
+        "switch-client",
+        "-c",
+        &client.name,
+        "-t",
+        &pane_target,
+    ])?;
+    Ok(())
 }
 
 fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
@@ -949,9 +855,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
     let mut sidebar = Sidebar::default();
     sidebar.refresh();
     sidebar.focused = clients()?.iter().any(|client| client.pane == own);
-    receive_handoff(&mut sidebar, &own)?;
     let mut refreshed = Instant::now();
-    let mut relay = None;
     loop {
         // tmux rescales panes proportionally when the window or a client resizes, and a
         // dragged border moves them: every sidebar is always exactly WIDTH columns.
@@ -960,46 +864,20 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
         }
         terminal.draw(|f| draw(f, &mut sidebar))?;
         if event::poll(Duration::from_millis(100))? {
-            if receive_handoff(&mut sidebar, &own)? {
-                terminal.draw(|f| draw(f, &mut sidebar))?;
+            let focused = clients()?.iter().any(|client| client.pane == own);
+            if focused && !sidebar.focused {
+                sidebar.update_focus(focused);
+                sidebar.refresh();
             } else {
-                let focused = clients()?.iter().any(|client| client.pane == own);
-                if focused && !sidebar.focused {
-                    sidebar.update_focus(focused);
-                    sidebar.refresh();
-                } else {
-                    sidebar.focused = focused;
-                }
+                sidebar.focused = focused;
             }
             let mut focus = false;
             let mut preview = false;
-            // Apply the complete buffered burst before changing panes. Otherwise a fast jjj
-            // would strand the second and third keys in the sidebar we just left.
+            // Apply the complete buffered burst first, so a fast jjj makes one preview switch.
             loop {
                 if let Event::Key(key) = event::read()?
                     && key.kind == KeyEventKind::Press
                 {
-                    // Arrival can race the outer poll's handoff check. Adopt immediately
-                    // before consuming a key, including when revisiting an earlier sidebar.
-                    receive_handoff(&mut sidebar, &own)?;
-                    if let Some(origin) = &relay {
-                        match relay_key(key, &own, origin) {
-                            Ok(true) => {
-                                if !event::poll(Duration::ZERO)? {
-                                    break;
-                                }
-                                continue;
-                            }
-                            Ok(false) => {
-                                relay = None;
-                                receive_handoff(&mut sidebar, &own)?;
-                            }
-                            Err(error) => {
-                                sidebar.notice = Some(error.to_string());
-                                break;
-                            }
-                        }
-                    }
                     if sidebar.kill_key(key, &own) {
                         if !event::poll(Duration::ZERO)? {
                             break;
@@ -1029,9 +907,10 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
             }
             if focus || (preview && sidebar.navigation.view && sidebar.navigation.search.is_none())
             {
-                match navigate(&sidebar, &own, focus) {
-                    Ok(destination) => relay = destination,
-                    Err(error) => sidebar.notice = Some(error.to_string()),
+                // Draw first: this frame arrives in the destination window with the client.
+                terminal.draw(|f| draw(f, &mut sidebar))?;
+                if let Err(error) = navigate(&sidebar, &own, focus) {
+                    sidebar.notice = Some(error.to_string());
                 }
             }
         }
@@ -1040,10 +919,8 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
                 return Ok(Exit::Alone);
             }
             // Refresh may change selection when an agent vanishes. Only input triggers preview.
-            if !receive_handoff(&mut sidebar, &own)? {
-                sidebar.update_focus(clients()?.iter().any(|client| client.pane == own));
-                sidebar.refresh();
-            }
+            sidebar.update_focus(clients()?.iter().any(|client| client.pane == own));
+            sidebar.refresh();
             refreshed = Instant::now();
         }
     }
@@ -1516,7 +1393,7 @@ mod tests {
     }
 
     #[test]
-    fn session_groups_and_search_acceptance_carry_a_stable_handoff_snapshot() {
+    fn session_groups_and_search_acceptance_keep_a_stable_order() {
         let mut sidebar = Sidebar {
             all_agents: vec![agent("%1", State::Idle), agent("%2", State::Working)],
             focused: true,
@@ -1537,19 +1414,11 @@ mod tests {
         press(&mut sidebar, KeyCode::Enter);
         assert_eq!(order(&sidebar), ["%3", "%2", "%1", "%4"]);
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
-        let nav: Navigation =
-            serde_json::from_str(&serde_json::to_string(&sidebar.navigation).unwrap()).unwrap();
-        let mut destination = Sidebar {
-            all_agents: sidebar.all_agents.clone(),
-            navigation: nav,
-            focused: true,
-            ..Sidebar::default()
-        };
-        destination.all_agents[2].state = State::Idle;
-        destination.rebuild();
-        assert_eq!(order(&destination), ["%3", "%2", "%1", "%4"]);
-        assert_eq!(destination.selected().unwrap().pane, "%1");
-        assert!(footer(&destination, 38, 100).to_string().contains("sort"));
+        sidebar.all_agents[2].state = State::Idle;
+        sidebar.rebuild();
+        assert_eq!(order(&sidebar), ["%3", "%2", "%1", "%4"]);
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        assert!(footer(&sidebar, 38, 100).to_string().contains("sort"));
     }
 
     #[test]
@@ -1606,29 +1475,6 @@ mod tests {
                 .unwrap()
                 .contains("rename cancelled")
         );
-    }
-
-    #[test]
-    fn accepted_handoff_preserves_query_mode_and_identity() {
-        let original = Handoff {
-            client: "/dev/pts/1".into(),
-            client_pid: "42".into(),
-            navigation: Navigation {
-                view: true,
-                query: "review".into(),
-                pane: Some("%8".into()),
-                filter: Some(State::Done),
-                search: None,
-                order: vec!["%8".into()],
-            },
-        };
-        let restored: Handoff =
-            serde_json::from_str(&serde_json::to_string(&original).unwrap()).unwrap();
-        assert!(restored.navigation.view);
-        assert_eq!(restored.navigation.filter, Some(State::Done));
-        assert_eq!(restored.navigation.pane.as_deref(), Some("%8"));
-        assert!(restored.navigation.search.is_none());
-        assert_eq!(restored.navigation.order, vec!["%8"]);
     }
 
     #[test]

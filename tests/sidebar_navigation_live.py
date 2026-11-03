@@ -49,7 +49,7 @@ ENV.pop("NO_COLOR", None)  # The agent tool environment disables colours; this P
 WRAPPER = BIN / "tmux"
 WRAPPER.write_text(f"#!{sys.executable}\nimport json, os, sys\n"
     f"with open({str(ROOT / 'tmux.calls')!r}, 'a') as log: log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
-    f"if sys.argv[1] == 'switch-client' and os.path.exists({str(ROOT / 'switch.fail')!r}):\n"
+    f"if 'switch-client' in sys.argv and os.path.exists({str(ROOT / 'switch.fail')!r}):\n"
     "    print('injected switch failure', file=sys.stderr); sys.exit(23)\n"
     f"os.execv({TMUX!r}, [{TMUX!r}, '-S', {str(ROOT / 't.sock')!r}, *sys.argv[1:]])\n")
 WRAPPER.chmod(0o755)
@@ -200,9 +200,46 @@ def previewed(client, name):
         target = sidebar_pane(agent(name)["window"])
         context = client.context()
         return (context[1] == target and context[2] == agent(name)["window"] and
-                client.selected() == name and "v on" in client.text() and
-                not tmux("show-option", "-pqv", "-t", target, "@agent-plane-sidebar-navigation"))
-    wait("preview " + name + " with handoff applied", arrived)
+                client.selected() == name and "v on" in client.text())
+    wait("preview " + name, arrived)
+
+
+def frames_after(client, key, seconds=1.0):
+    """Every screen the terminal is left on, as (window, selected). A frame ends when tmux pauses."""
+    client.drain()
+    frames = []
+    client.key(key)
+    start = time.monotonic()
+    while time.monotonic() < start + seconds:
+        if not select.select([client.master], [], [], 0.05)[0]:
+            continue
+        while select.select([client.master], [], [], 0.003)[0]:
+            client.stream.feed(os.read(client.master, 65536))
+        frame = (client.screen.display[0].split()[-1], client.selected())
+        if not frames or frames[-1][1] != frame:
+            frames.append((round(time.monotonic() - start, 3), frame))
+    return frames
+
+
+def assert_no_stale_preview_frame(client):
+    # The selection on screen must always be the one you chose, never a stale row in the new window.
+    names = shown_names(client)
+    sidebar = client.context()[1]
+    trace = []
+    for _ in names:
+        before = client.selected()
+        expected = names[(names.index(before) + 1) % len(names)]
+        window = agent(expected)["window"]
+        frames = frames_after(client, b"j")
+        trace.append({"before": before, "expected": expected, "window": window,
+                      "frames": [[at, *frame] for at, frame in frames]})
+        (ROOT / "preview-frames.json").write_text(json.dumps(trace, indent=2) + "\n")
+        for _, (shown_window, shown) in frames:
+            assert shown_window != window or shown == expected, (
+                f"stale frame: {shown} selected in {window} while previewing {expected}: {frames}")
+        assert frames[-1][1] == (window, expected), frames
+        previewed(client, expected)
+        assert client.context()[1] == sidebar, "the sidebar pane itself must travel with the client"
 
 
 def settle(seconds=1.2):
@@ -277,12 +314,12 @@ def extra_checks(client):
     plane('kill', 'nav-new')
     SPAWNED.remove('nav-new')
     wait('removed row disappears', lambda: shown_names(client) == expected)
-    # Search acceptance and the view handoff both keep the latched order.
+    # Search acceptance and preview both keep the latched order.
     query(client, 'nav-')
     wait('search acceptance keeps order', lambda: shown_names(client) == expected)
     client.key(b'v')
     previewed(client, selection)
-    wait('handoff keeps order', lambda: shown_names(client) == expected)
+    wait('preview keeps order', lambda: shown_names(client) == expected)
     client.key(b'f')
     blocked = [name for name in expected if agent(name)['state'] == 'blocked']
     wait('V search and blocked filter compose', lambda: 'f blocked' in client.text() and
@@ -297,11 +334,13 @@ def extra_checks(client):
          shown_names(client) == expected)
     client.key(b'v')
     wait('preview off before kill', lambda: 'v off' in client.text())
-    client.snapshot('sort-handoff-order')
+    client.snapshot('sort-preview-order')
+    assert client.context()[1] == base_sidebar, 'the previewing sidebar travels with the client'
+    # The sidebar it swapped with now sits in the base window, with its own settings.
+    base_sidebar = sidebar_pane(base_window)
+    assert base_sidebar != client.context()[1]
     tmux('switch-client', '-c', client.context()[0], '-t', base_sidebar)
-    wait('base retains its view setting', lambda: client.context()[1] == base_sidebar and 'v on' in client.text())
-    client.key(b'v')
-    wait('base view off', lambda: 'v off' in client.text())
+    wait('base sidebar', lambda: client.context()[1] == base_sidebar and 'v off' in client.text())
     # Existing filter/navigation proof covers F/search composition in detail.
     query(client, '')
     baseline = shown_names(client)
@@ -481,7 +520,7 @@ def extra_checks(client):
     tmux('resize-pane', '-t', client.context()[1], '-x', '38')
     assert not any(json.loads(line)[0] == 'kill-session' for line in (ROOT / 'tmux.calls').read_text().splitlines())
     return {'latched_sort_live_badges': True, 'oldest_state_first': True,
-            'arrivals_removals': True, 'unfocused_and_reentry_rank': True, 'S_preserves_selection': True, 'search_V_sort_handoff': True, 'V_search_F_combination': True,
+            'arrivals_removals': True, 'unfocused_and_reentry_rank': True, 'S_preserves_selection': True, 'search_v_keeps_order': True, 'V_search_F_combination': True,
             'kill_cancel_without_replay': True, 'kill_native_state_identity_rename_exit_pin': True,
             'kill_x_Enter_x_Enter_next_visible': True, 'kill_remote_y': True, 'kill_topology_change_pin': True,
             'kill_linked_sessions': True, 'kill_client_session_change_pin': True, 'kill_attached_final_refusal': True, 'kill_session_commands': 0}
@@ -495,7 +534,7 @@ try:
     tmux("set-option", "-g", "default-shell", "/bin/sh")
     tmux("set-option", "-g", "default-command", "/bin/sh")
     tmux("set-option", "-g", "status-position", "top")
-    tmux("set-option", "-g", "status-format[0]", "TOP-STATUS")
+    tmux("set-option", "-g", "status-format[0]", "TOP-STATUS #{window_id}")
     tmux("set-option", "-as", "terminal-features", ",xterm-256color:RGB")
     plane("daemon", "start")
     wait("daemon index", lambda: (STATE / "agents.json").exists())
@@ -529,7 +568,7 @@ try:
     client.key(b"v")
     previewed(client, "nav-work")  # same window, sidebar remains active
     client.snapshot("same-window")
-    # Clear query while viewing, then fast jjj. Exact net movement, one final handoff.
+    # Clear query while viewing, then fast jjj. Exact net movement, one final switch.
     client.key(b"\x1b")
     wait("query cleared before burst", lambda: "/ search" in client.text())
     selected(client, "nav-work")
@@ -538,7 +577,7 @@ try:
     client.key(b"jjj")
     previewed(client, expected)
     client.snapshot("burst-jjj")
-    # Keys delivered while native switch commands are still in flight must also survive.
+    # Keys delivered while switch commands are still in flight must also survive.
     start = expected
     for _ in range(7):
         client.key(b"j")
@@ -548,6 +587,9 @@ try:
     settle(0.7)
     assert client.selected() == expected
     client.snapshot("timed-stream-seven-j")
+    assert_no_stale_preview_frame(client)
+    client.snapshot("no-stale-preview-frame")
+    expected = client.selected()
     # Mix text, movement and editing across preview switches. Assert content/order,
     # rather than only the commutative count of j presses.
     editing_context = client.context()
@@ -565,14 +607,14 @@ try:
     assert "/ nav-done▏" in observed, observed
     assert client.context() == editing_context, "search must stay in its originating sidebar"
     edit_calls = [json.loads(line) for line in (ROOT / "tmux.calls").read_text().splitlines()[calls_before_edit:]]
-    assert not any(call[0] == "switch-client" for call in edit_calls), edit_calls
+    assert not any("switch-client" in call for call in edit_calls), edit_calls
     client.key(b"\r")
     previewed(client, "nav-done")
     wait("timed search accepted", lambda: "paused" not in client.text() and "/ nav-done" in client.text())
     client.key(b"\x1b")
     wait("timed query cleared", lambda: "/ search" in client.text())
     expected = "nav-done"
-    # Successive arrows after handoff use the transferred selection, never destination defaults.
+    # Successive arrows continue from the same selection after each preview.
     expected = ordered[(ordered.index(expected) + 1) % len(ordered)]
     client.key(b"\x1b[B")
     previewed(client, expected)
@@ -669,7 +711,7 @@ try:
     assert observer.context() == observer_context
     client.snapshot("cross-session-independent")
     observer.snapshot("observer-unchanged")
-    # Destination with another client must be refused before a handoff/window mutation.
+    # Destination with another client must be refused before any pane or window changes.
     client.key(b"v")
     query(client, "nav-work")
     client.key(b"v")
@@ -690,16 +732,16 @@ try:
     wait("ambiguous client refusal", lambda: "multiple clients" in client.footer())
     client.snapshot("ambiguous-refused")
     tmux("switch-client", "-c", observer.context()[0], "-t", "=observer:")
-    # Inject a real tmux switch-client failure after HANDOFF was written.
+    # A failed preview command leaves the panes and the client where they were.
     client.key(b"v")  # off
     query(client, "nav-done")
     target_sidebar = sidebar_pane(agent("nav-done")["window"])
     (ROOT / "switch.fail").touch()
     client.key(b"v")
-    wait("injected switch failure", lambda: "switch-client" in client.footer())
-    assert not tmux("show-option", "-pqv", "-t", target_sidebar, "@agent-plane-sidebar-navigation")
+    wait("injected switch failure", lambda: "swap-pane" in client.footer())
+    assert sidebar_pane(agent("nav-done")["window"]) == target_sidebar
     assert client.context() == source_context
-    client.snapshot("failed-switch-clears-handoff")
+    client.snapshot("failed-switch-keeps-panes")
     (ROOT / "switch.fail").unlink()
     extended_results = extra_checks(client)
     # Rename cancellation when its original target leaves: never rename the next row.
@@ -723,30 +765,25 @@ try:
         value = path.read_bytes() if path.exists() else b''
         assert value == (b'x' if name == 'nav-done' else b''), (name, value)
     calls = [json.loads(line) for line in (ROOT / "tmux.calls").read_text().splitlines()]
-    first_preview = next(i for i, call in enumerate(calls) if call[0] == "switch-client" and "-c" in call)
-    switches = [call for call in calls[first_preview:] if call[0] == "switch-client"]
+    first_preview = next(i for i, call in enumerate(calls) if call[0] == "swap-pane")
+    switches = [call for call in calls[first_preview:] if "switch-client" in call]
     assert all("-c" in call for call in switches), switches
-    marked = {call[call.index("-t") + 1] for call in calls
-              if call[0] == "set-option" and "@agent-plane-sidebar" in call and call[-1] == "1"}
-    # Spawn launches through shell argv. Relay sends address only marked sidebar panes;
-    # native fixture input logs are the final byte-level guard.
+    # Keys stay in one sidebar PTY, so no key is ever forwarded through tmux.
     first_sidebar = next(i for i, call in enumerate(calls)
                          if call[0] == "set-option" and "@agent-plane-sidebar" in call)
-    relays = [call for call in calls[first_sidebar:] if call[0] == "send-keys"]
-    # A complete burst can be processed locally, so relaying is optional.
-    assert all(call[call.index("-t") + 1] in marked for call in relays), relays
+    assert not any(call[0] == "send-keys" for call in calls[first_sidebar:])
     assert not any(call[0] == 'kill-session' for call in calls)
     assert not any(call[0] in ("copy-mode", "clock-mode") for call in calls)
     RESULTS = {**extended_results, "passed": True, "native_fixtures": len(FIXTURES), "models_used": 0,
         "same_window": True, "cross_window_and_session": True, "view_off_selects_only": True,
         "burst_jjj_exact_net_movement": True, "timed_stream_seven_j_exact_net_movement": True,
-        "arrow_handoff_identity": True, "timed_mixed_text_arrows_backspace_order": True,
+        "arrow_selection_identity": True, "timed_mixed_text_arrows_backspace_order": True,
         "active_pane_client_flag": True, "search_edit_and_arrows_stay_local_until_accepted": True,
         "preview_done_stays_unseen": True, "Enter_marks_seen": True,
         "composed_query_filter_cycle": True, "refresh_keeps_empty_filter": True,
         "search_cancel_keep_clear_literal_keys": True, "footer_priority_and_expiry": True,
         "independent_clients_unchanged": True, "shared_target_and_ambiguous_origin_refused": True,
-        "failed_switch_clears_handoff": True, "rename_exit_cannot_retarget": True,
+        "failed_switch_keeps_panes": True, "no_stale_preview_frame": True, "rename_exit_cannot_retarget": True,
         "narrow_empty": True, "unintended_agent_input": 0}
 except Exception:
     for client in CLIENTS:

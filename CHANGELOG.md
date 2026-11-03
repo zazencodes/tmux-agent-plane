@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Fixed
+
+- Stop the sidebar flickering in view mode: previewing an agent no longer shows the wrong row selected for up to half a second after the window changes
+
 ## 0.4.0 - 2026-11-03
 
 ### Changed
