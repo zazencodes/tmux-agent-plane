@@ -380,7 +380,7 @@ impl Navigation {
             .any(|field| field.to_lowercase().contains(&query))
     }
 
-    /// Only a deliberate F skips categories. Refreshing must never change the filter.
+    /// Only a deliberate f skips categories. Refreshing must never change the filter.
     fn cycle_filter(&mut self, agents: &[Agent]) {
         let cycle = [
             None,
@@ -735,8 +735,8 @@ impl Sidebar {
             }
             KeyCode::Char('j') | KeyCode::Down => self.step(1),
             KeyCode::Char('k') | KeyCode::Up => self.step(-1),
-            KeyCode::Char('V') => self.navigation.view = !self.navigation.view,
-            KeyCode::Char('F') => {
+            KeyCode::Char('v') => self.navigation.view = !self.navigation.view,
+            KeyCode::Char('f') => {
                 self.navigation.cycle_filter(&self.all_agents);
                 self.rebuild();
             }
@@ -1017,7 +1017,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
                                 KeyCode::Up
                                     | KeyCode::Down
                                     | KeyCode::Esc
-                                    | KeyCode::Char('j' | 'k' | 'F' | 'V')
+                                    | KeyCode::Char('j' | 'k' | 'f' | 'v')
                             ));
                     if sidebar.key(key) {
                         return Ok(Exit::Quit);
@@ -1083,7 +1083,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let [mode_area, agents_area] =
         Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(content);
     let mode = format!(
-        " V {}{}  F {}",
+        " v {}{}  f {}",
         if sidebar.navigation.view { "on" } else { "off" },
         if sidebar.navigation.view && sidebar.navigation.search.is_some() {
             " · paused"
@@ -1125,7 +1125,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
                 "start claude or codex in any tmux pane",
             ]
         } else {
-            ["no matching agents", "F changes state · esc clears search"]
+            ["no matching agents", "f changes state · esc clears search"]
         };
         message(
             f,
@@ -1425,9 +1425,9 @@ mod tests {
         sidebar.all_agents.retain(|a| a.pane != "%2");
         sidebar.rebuild();
         assert_eq!(sidebar.selected().unwrap().pane, "%3");
-        press(&mut sidebar, KeyCode::Char('V'));
+        press(&mut sidebar, KeyCode::Char('v'));
         assert!(sidebar.navigation.view);
-        press(&mut sidebar, KeyCode::Char('V'));
+        press(&mut sidebar, KeyCode::Char('v'));
         assert!(!sidebar.navigation.view);
     }
 
@@ -1450,23 +1450,23 @@ mod tests {
             Some(State::Idle),
             None,
         ] {
-            press(&mut sidebar, KeyCode::Char('F'));
+            press(&mut sidebar, KeyCode::Char('f'));
             assert_eq!(sidebar.navigation.filter, expected);
         }
         sidebar.navigation.query = "AGENT-%2".into();
         sidebar.rebuild();
-        press(&mut sidebar, KeyCode::Char('F'));
+        press(&mut sidebar, KeyCode::Char('f'));
         assert_eq!(sidebar.navigation.filter, Some(State::Done));
         sidebar.all_agents[1].state = State::Idle;
         sidebar.rebuild();
         assert_eq!(sidebar.navigation.filter, Some(State::Done));
         assert!(sidebar.selected().is_none());
-        press(&mut sidebar, KeyCode::Char('F'));
+        press(&mut sidebar, KeyCode::Char('f'));
         assert_eq!(sidebar.navigation.filter, Some(State::Idle));
         assert_eq!(sidebar.selected().unwrap().pane, "%2");
         sidebar.navigation.query = "no such agent".into();
         sidebar.rebuild();
-        press(&mut sidebar, KeyCode::Char('F'));
+        press(&mut sidebar, KeyCode::Char('f'));
         assert_eq!(sidebar.navigation.filter, None);
         assert!(sidebar.agents.is_empty());
     }
@@ -1708,8 +1708,8 @@ mod tests {
             KeyCode::Char('j'),
             KeyCode::Down,
             KeyCode::Char('r'),
-            KeyCode::Char('F'),
-            KeyCode::Char('V'),
+            KeyCode::Char('f'),
+            KeyCode::Char('v'),
             KeyCode::Char('x'),
             KeyCode::Char('/'),
         ] {

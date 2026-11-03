@@ -7,7 +7,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
-- Keep sidebar rows where they are: agents no longer reorder when state changes, when you focus the sidebar, change the filter or accept a search; press `s` (was `S`) to re-sort
+- Keep sidebar rows where they are: agents no longer reorder when state changes, when you focus the sidebar, change the filter or accept a search; press `s` to re-sort
+- Use lowercase sidebar keys only: `v` for view mode, `f` for the state filter and `s` for re-sort (were `V`, `F`, `S`)
 - Search the sidebar with `/` instead of `\`, on the same line as the `V` and `F` settings
 - Show daemon fault and recovery announcements in a short popup under the status bar instead of replacing the status bar, opened only after you pause typing so it does not swallow keystrokes
 
