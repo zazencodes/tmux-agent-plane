@@ -407,10 +407,6 @@ impl Navigation {
 
 impl Sidebar {
     fn update_focus(&mut self, focused: bool) {
-        if focused && !self.focused {
-            // A fresh keyboard visit ranks current state; V handoffs set focused directly.
-            self.navigation.order.clear();
-        }
         self.focused = focused;
     }
 
@@ -496,9 +492,6 @@ impl Sidebar {
                 self.recent_event = None;
                 self.error = Some(e.to_string());
             }
-        }
-        if !self.focused {
-            self.rank_order();
         }
         self.rebuild();
     }
@@ -591,7 +584,6 @@ impl Sidebar {
             }
             KeyCode::Enter => {
                 self.navigation.search = None;
-                self.rank_order();
             }
             KeyCode::Down => {
                 self.step(1);
@@ -746,9 +738,9 @@ impl Sidebar {
             KeyCode::Char('V') => self.navigation.view = !self.navigation.view,
             KeyCode::Char('F') => {
                 self.navigation.cycle_filter(&self.all_agents);
-                self.resort();
+                self.rebuild();
             }
-            KeyCode::Char('S') => self.resort(),
+            KeyCode::Char('s') => self.resort(),
             KeyCode::Char('/') => {
                 self.navigation.search = Some(SearchEdit {
                     query: self.navigation.query.clone(),
@@ -1231,7 +1223,7 @@ fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
             }
             None => hints(&[
                 ("⏎", "jump"),
-                ("S", "sort"),
+                ("s", "sort"),
                 ("r", "rename"),
                 ("x", "kill"),
                 ("q", "close"),
@@ -1511,15 +1503,15 @@ mod tests {
         sidebar.all_agents.retain(|a| a.pane != "%2");
         sidebar.rebuild();
         assert_eq!(order(&sidebar), ["%4", "%3", "%1", "%5"]);
-        press(&mut sidebar, KeyCode::Char('S'));
+        press(&mut sidebar, KeyCode::Char('s'));
         assert_eq!(order(&sidebar), ["%1", "%5", "%3", "%4"]);
         assert_eq!(sidebar.selected().unwrap().pane, "%3");
-        // A new keyboard visit rebuilds current priorities after focus left.
+        // Focus changes never move rows.
         sidebar.update_focus(false);
         sidebar.all_agents[0].state = State::Working;
         sidebar.update_focus(true);
         sidebar.rebuild();
-        assert_eq!(order(&sidebar), ["%5", "%3", "%1", "%4"]);
+        assert_eq!(order(&sidebar), ["%1", "%5", "%3", "%4"]);
         assert_eq!(sidebar.selected().unwrap().pane, "%3");
     }
 
@@ -1543,7 +1535,7 @@ mod tests {
         sidebar.rebuild();
         assert_eq!(order(&sidebar), ["%3", "%2", "%1", "%4"]);
         press(&mut sidebar, KeyCode::Enter);
-        assert_eq!(order(&sidebar), ["%3", "%4", "%2", "%1"]);
+        assert_eq!(order(&sidebar), ["%3", "%2", "%1", "%4"]);
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
         let nav: Navigation =
             serde_json::from_str(&serde_json::to_string(&sidebar.navigation).unwrap()).unwrap();
@@ -1555,7 +1547,7 @@ mod tests {
         };
         destination.all_agents[2].state = State::Idle;
         destination.rebuild();
-        assert_eq!(order(&destination), ["%3", "%4", "%2", "%1"]);
+        assert_eq!(order(&destination), ["%3", "%2", "%1", "%4"]);
         assert_eq!(destination.selected().unwrap().pane, "%1");
         assert!(footer(&destination, 38, 100).to_string().contains("sort"));
     }
