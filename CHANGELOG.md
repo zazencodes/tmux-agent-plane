@@ -5,6 +5,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+## 0.4.0 - 2026-11-03
+
 ### Changed
 
 - Keep sidebar rows where they are: agents no longer reorder when state changes, when you focus the sidebar, change the filter or accept a search; press `s` to re-sort
