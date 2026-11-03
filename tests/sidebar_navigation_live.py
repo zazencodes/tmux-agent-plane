@@ -187,8 +187,8 @@ def input_bytes(name):
 
 
 def query(client, value):
-    client.key(b"\\\x15" + value.encode() + b"\r")
-    wait("query " + value, lambda: ("\\ " + value) in client.text() and "▏" not in client.text().splitlines()[3])
+    client.key(b"/\x15" + value.encode() + b"\r")
+    wait("query " + value, lambda: ("/ " + value) in client.text() and "▏" not in client.text())
 
 
 def selected(client, name):
@@ -200,7 +200,7 @@ def previewed(client, name):
         target = sidebar_pane(agent(name)["window"])
         context = client.context()
         return (context[1] == target and context[2] == agent(name)["window"] and
-                client.selected() == name and "V on" in client.text() and
+                client.selected() == name and "v on" in client.text() and
                 not tmux("show-option", "-pqv", "-t", target, "@agent-plane-sidebar-navigation"))
     wait("preview " + name + " with handoff applied", arrived)
 
@@ -223,13 +223,13 @@ def shown_names(client):
 
 
 def extra_checks(client):
-    # Begin from a stable command mode; accepted searches deliberately re-rank.
+    # Begin from a stable command mode.
     base_window = tmux('display-message', '-p', '-t', '=scratch:0', '#{window_id}')
     base_sidebar = sidebar_pane(base_window)
     tmux('switch-client', '-c', client.context()[0], '-t', base_sidebar)
-    wait('stable base sidebar', lambda: client.context()[1] == base_sidebar and 'V off' in client.text())
+    wait('stable base sidebar', lambda: client.context()[1] == base_sidebar and 'v off' in client.text())
     query(client, '')
-    client.key(b'S')
+    client.key(b's')
     wait('initial attention ranking', lambda: shown_names(client) == ranked_names())
     initial = shown_names(client)
     # New blocked priority must update its badge while leaving its original row in place.
@@ -250,7 +250,7 @@ def extra_checks(client):
     wait('second blocked', lambda: agent('nav-done')['state'] == 'blocked')
     assert shown_names(client) == initial
     selection = client.selected()
-    client.key(b'S')
+    client.key(b's')
     wait('explicit S ranks oldest blocked', lambda: shown_names(client) == ranked_names())
     assert client.selected() == selection
     expected = shown_names(client)
@@ -259,12 +259,14 @@ def extra_checks(client):
     wait('working badge stays latched', lambda: agent('nav-work')['state'] == 'working' and
          any('nav-work' in line and 'working' in line for line in client.text().splitlines()))
     assert shown_names(client) == expected
-    # Leave for the nonagent base shell. Unfocused refresh and re-entry use live rank.
+    # Leave for the nonagent base shell. Unfocused refresh and re-entry keep the order.
     tmux('select-pane', '-t', '=scratch:0.1')
-    wait('unfocused sidebar ranks again', lambda: shown_names(client) == ranked_names())
+    settle(0.7)
+    assert shown_names(client) == expected
     tmux('switch-client', '-c', client.context()[0], '-t', base_sidebar)
-    wait('fresh keyboard visit', lambda: client.context()[1] == base_sidebar and shown_names(client) == ranked_names())
-    expected = shown_names(client)
+    wait('fresh keyboard visit', lambda: client.context()[1] == base_sidebar)
+    settle(0.7)
+    assert shown_names(client) == expected
     client.snapshot('sort-unfocused-and-reentry')
     plane('spawn', 'pi', '--in', 'window', '--cwd', str(ROOT), '--name', 'nav-new')
     SPAWNED.append('nav-new')
@@ -275,32 +277,31 @@ def extra_checks(client):
     plane('kill', 'nav-new')
     SPAWNED.remove('nav-new')
     wait('removed row disappears', lambda: shown_names(client) == expected)
-    # Search acceptance ranks fresh state, while V handoff preserves that order.
+    # Search acceptance and the view handoff both keep the latched order.
     query(client, 'nav-')
-    expected = ranked_names()
-    wait('search acceptance ranks', lambda: shown_names(client) == expected)
-    client.key(b'V')
+    wait('search acceptance keeps order', lambda: shown_names(client) == expected)
+    client.key(b'v')
     previewed(client, selection)
-    wait('handoff draws complete ranking', lambda: shown_names(client) == expected)
-    client.key(b'F')
-    blocked = [name for name in ranked_names() if agent(name)['state'] == 'blocked']
-    wait('V search and blocked filter compose', lambda: 'F blocked' in client.text() and
-         shown_names(client) == blocked and '\\ nav-' in client.text())
+    wait('handoff keeps order', lambda: shown_names(client) == expected)
+    client.key(b'f')
+    blocked = [name for name in expected if agent(name)['state'] == 'blocked']
+    wait('V search and blocked filter compose', lambda: 'f blocked' in client.text() and
+         shown_names(client) == blocked and '/ nav-' in client.text())
     previewed(client, selection)
-    client.key(b'F')
+    client.key(b'f')
     previewed(client, 'nav-work')
-    wait('filtered preview carries query and working order', lambda: 'F working' in client.text() and
-         '\\ nav-' in client.text() and shown_names(client) == ['nav-work'])
-    client.key(b'F')  # Idle is empty; deliberate F skips it and returns to All.
-    wait('filtered preview returns to all ranking', lambda: 'F all' in client.text() and
-         shown_names(client) == ranked_names())
-    client.key(b'V')
-    wait('preview off before kill', lambda: 'V off' in client.text())
+    wait('filtered preview carries query and working order', lambda: 'f working' in client.text() and
+         '/ nav-' in client.text() and shown_names(client) == ['nav-work'])
+    client.key(b'f')  # Idle is empty; deliberate F skips it and returns to All.
+    wait('filtered preview returns to all rows', lambda: 'f all' in client.text() and
+         shown_names(client) == expected)
+    client.key(b'v')
+    wait('preview off before kill', lambda: 'v off' in client.text())
     client.snapshot('sort-handoff-order')
     tmux('switch-client', '-c', client.context()[0], '-t', base_sidebar)
-    wait('base retains its view setting', lambda: client.context()[1] == base_sidebar and 'V on' in client.text())
-    client.key(b'V')
-    wait('base view off', lambda: 'V off' in client.text())
+    wait('base retains its view setting', lambda: client.context()[1] == base_sidebar and 'v on' in client.text())
+    client.key(b'v')
+    wait('base view off', lambda: 'v off' in client.text())
     # Existing filter/navigation proof covers F/search composition in detail.
     query(client, '')
     baseline = shown_names(client)
@@ -308,14 +309,14 @@ def extra_checks(client):
     context = client.context()
     # Every command class cancels and consumes its key. No movement, mode/filter/query,
     # rename or close action may be replayed after the confirmation disappears.
-    for cancel in [b'n', b'\x1b', b'j', b'\x1b[B', b'V', b'F', b'S', b'r', b'q', b'x', b'Y', b'\\', b'\x19']:
+    for cancel in [b'n', b'\x1b', b'j', b'\x1b[B', b'v', b'f', b's', b'r', b'q', b'x', b'Y', b'/', b'\x19']:
         client.key(b'x')
         wait('kill prompt', lambda: '? Y/n' in client.text())
         client.key(cancel)
         wait('cancel consumes key', lambda: '? Y/n' not in client.text())
         assert client.selected() == selection and client.context() == context
-        assert shown_names(client) == baseline and 'V off' in client.text() and 'F all' in client.text()
-        assert '\\ nav-' not in client.text() and 'save' not in client.footer()
+        assert shown_names(client) == baseline and 'v off' in client.text() and 'f all' in client.text()
+        assert '/ nav-' not in client.text() and 'save' not in client.footer()
     client.snapshot('kill-cancel-no-replay')
     # Native state and identity are validated independently of daemon refresh.
     query(client, 'nav-idle')
@@ -366,16 +367,15 @@ def extra_checks(client):
     # No query: kill successive rows in one PTY burst; selection advances immediately,
     # even while the daemon still contains a just-closed pane.
     query(client, '')
-    client.key(b'S')
+    client.key(b's')
     settle(0.25)
     names = shown_names(client)
     # Keep nav-idle for the original rename-exit proof. Select an adjacent pair that
     # does not include it or the remote target (remote warning gets its own test).
-    while client.selected() not in ['nav-work', 'nav-done']:
+    first = min('nav-work', 'nav-done', key=names.index)
+    while client.selected() != first:
         client.key(b'j')
         settle(0.1)
-    first = client.selected()
-    names = shown_names(client)
     position = names.index(first)
     second = names[position + 1] if position + 1 < len(names) else names[position - 1]
     # Only assert/destructively exercise if both are the intended local pair.
@@ -514,7 +514,7 @@ try:
     change("nav-away", "blocked", 0)
     wait("states", lambda: agent("nav-done")["state"] == "done" and agent("nav-away")["state"] == "blocked")
     plane("toggle-sidebar", agent("nav-work")["window"])
-    wait("sidebar controls", lambda: "V off" in client.text() and "F all" in client.text())
+    wait("sidebar controls", lambda: "v off" in client.text() and "f all" in client.text())
     selected(client, "nav-away")  # blocked first
     original = client.context()
     client.key(b"j")
@@ -526,12 +526,12 @@ try:
     tmux("refresh-client", "-f", "active-pane", "-t", client.context()[0])
     flags = tmux("list-clients", "-F", "#{client_pid} #{client_flags}")
     assert "active-pane" in next(line for line in flags.splitlines() if line.split()[0] == str(client.process.pid))
-    client.key(b"V")
+    client.key(b"v")
     previewed(client, "nav-work")  # same window, sidebar remains active
     client.snapshot("same-window")
     # Clear query while viewing, then fast jjj. Exact net movement, one final handoff.
     client.key(b"\x1b")
-    wait("query cleared before burst", lambda: "\\ search" in client.text())
+    wait("query cleared before burst", lambda: "/ search" in client.text())
     selected(client, "nav-work")
     ordered = ranked_names()
     expected = ordered[(ordered.index("nav-work") + 3) % len(ordered)]
@@ -552,7 +552,7 @@ try:
     # rather than only the commutative count of j presses.
     editing_context = client.context()
     calls_before_edit = len((ROOT / "tmux.calls").read_text().splitlines())
-    client.key(b"\\")
+    client.key(b"/")
     wait("timed mixed search starts", lambda: "preview" in client.footer() and "paused" in client.text())
     stream = [bytes([byte]) for byte in b"nav-"] + [b"\x1b[B"] + [bytes([byte]) for byte in b"done"] + [b"\x1b[A", b"\x7f", b"e"]
     for key in stream:
@@ -560,17 +560,17 @@ try:
         time.sleep(0.035)
     settle(1.5)
     client.snapshot("timed-mixed-search")
-    observed = client.text().splitlines()[3]
+    observed = client.text().splitlines()[2]
     (ROOT / "mixed-order.json").write_text(json.dumps({"expected": "nav-done", "query_row": observed}) + "\n")
-    assert "\\ nav-done▏" in observed, observed
+    assert "/ nav-done▏" in observed, observed
     assert client.context() == editing_context, "search must stay in its originating sidebar"
     edit_calls = [json.loads(line) for line in (ROOT / "tmux.calls").read_text().splitlines()[calls_before_edit:]]
     assert not any(call[0] == "switch-client" for call in edit_calls), edit_calls
     client.key(b"\r")
     previewed(client, "nav-done")
-    wait("timed search accepted", lambda: "paused" not in client.text() and "\\ nav-done" in client.text())
+    wait("timed search accepted", lambda: "paused" not in client.text() and "/ nav-done" in client.text())
     client.key(b"\x1b")
-    wait("timed query cleared", lambda: "\\ search" in client.text())
+    wait("timed query cleared", lambda: "/ search" in client.text())
     expected = "nav-done"
     # Successive arrows after handoff use the transferred selection, never destination defaults.
     expected = ordered[(ordered.index(expected) + 1) % len(ordered)]
@@ -581,11 +581,11 @@ try:
     previewed(client, expected)
     # Incremental search and arrows stay local; accepting previews without agent focus.
     editing_context = client.context()
-    client.key(b"\\nav-do")
-    wait("partial query stays local", lambda: "paused" in client.text() and "\\ nav-do" in client.text())
+    client.key(b"/nav-do")
+    wait("partial query stays local", lambda: "paused" in client.text() and "/ nav-do" in client.text())
     assert client.context() == editing_context
     client.key(b"ne")
-    wait("incremental query", lambda: "\\ nav-done" in client.text() and "preview" in client.footer())
+    wait("incremental query", lambda: "/ nav-done" in client.text() and "preview" in client.footer())
     assert client.context() == editing_context
     client.key(b"\r")
     previewed(client, "nav-done")
@@ -600,9 +600,9 @@ try:
     wait("deliberate agent input", lambda: input_bytes("nav-done") == b"x")
     # Return to sidebar infrastructure, without sending an agent key.
     tmux("switch-client", "-c", client.context()[0], "-t", sidebar_pane(agent("nav-done")["window"]))
-    wait("back in sidebar", lambda: "V on" in client.text())
-    client.key(b"V\x1b")
-    wait("mode off", lambda: "V off" in client.text() and "\\ search" in client.text())
+    wait("back in sidebar", lambda: "v on" in client.text())
+    client.key(b"v\x1b")
+    wait("mode off", lambda: "v off" in client.text() and "/ search" in client.text())
     original = client.context()
     client.key(b"jj")
     settle(0.3)
@@ -611,39 +611,39 @@ try:
     change("nav-done", "idle", 2)
     wait("done again", lambda: agent("nav-done")["state"] == "done" and "✓ 1" in client.text())
     for state in ["blocked", "done", "working", "idle", "all"]:
-        client.key(b"F")
-        wait("filter " + state, lambda state=state: "F " + state in client.text())
+        client.key(b"f")
+        wait("filter " + state, lambda state=state: "f " + state in client.text())
         client.snapshot("filter-" + state)
     query(client, "NAV-WORK")
-    client.key(b"F")
-    wait("query skips empty categories", lambda: "F working" in client.text())
+    client.key(b"f")
+    wait("query skips empty categories", lambda: "f working" in client.text())
     change("nav-work", "blocked", 0)
-    wait("filter stays empty", lambda: "F working" in client.text() and "no matching agents" in client.text())
+    wait("filter stays empty", lambda: "f working" in client.text() and "no matching agents" in client.text())
     original = client.context()
     settle(1.2)
-    assert "F working" in client.text() and client.context() == original
-    client.key(b"F")
-    wait("All reached", lambda: "F all" in client.text())
-    client.key(b"F")
-    wait("blocked query category", lambda: "F blocked" in client.text())
+    assert "f working" in client.text() and client.context() == original
+    client.key(b"f")
+    wait("All reached", lambda: "f all" in client.text())
+    client.key(b"f")
+    wait("blocked query category", lambda: "f blocked" in client.text())
     # Search editing: V/F/r/q are text, Escape restores accepted query, second Escape clears.
-    client.key(b"\\qVFr")
+    client.key(b"/qVFr")
     wait("empty literal query", lambda: "no matching agents" in client.text() and "keep" in client.footer())
     client.key(b"\x1b")
-    wait("cancel query", lambda: "\\ NAV-WORK" in client.text() and "keep" not in client.footer())
+    wait("cancel query", lambda: "/ NAV-WORK" in client.text() and "keep" not in client.footer())
     client.key(b"\x1b")
-    wait("query cleared", lambda: "\\ search" in client.text())
-    client.key(b"F")  # blocked -> done
-    wait("done filter", lambda: "F done" in client.text())
-    client.key(b"F")
-    wait("skip working now empty", lambda: "F idle" in client.text())
-    client.key(b"F")
-    wait("all filter", lambda: "F all" in client.text())
+    wait("query cleared", lambda: "/ search" in client.text())
+    client.key(b"f")  # blocked -> done
+    wait("done filter", lambda: "f done" in client.text())
+    client.key(b"f")
+    wait("skip working now empty", lambda: "f idle" in client.text())
+    client.key(b"f")
+    wait("all filter", lambda: "f all" in client.text())
     # A live event yields to search controls, rename controls and rename errors.
     change("nav-done", "idle", 3)
     wait("fresh event", lambda: (index().get("recent_event") or {}).get("name") == "nav-done" and agent("nav-done")["completions"] == 3)
     wait("bottom event", lambda: "nav-done done" in client.footer())
-    client.key(b"\\")
+    client.key(b"/")
     wait("search controls over event", lambda: "keep" in client.footer())
     client.snapshot("search-priority")
     client.key(b"\x1b")
@@ -661,18 +661,18 @@ try:
     plane("follow-sidebar", observer_window)
     CLIENTS.append(Client("observer"))
     observer = CLIENTS[1]
-    wait("observer", lambda: "V off" in observer.text())
+    wait("observer", lambda: "v off" in observer.text())
     observer_context = observer.context()
     query(client, "nav-away")
-    client.key(b"V")
+    client.key(b"v")
     previewed(client, "nav-away")
     assert observer.context() == observer_context
     client.snapshot("cross-session-independent")
     observer.snapshot("observer-unchanged")
     # Destination with another client must be refused before a handoff/window mutation.
-    client.key(b"V")
+    client.key(b"v")
     query(client, "nav-work")
-    client.key(b"V")
+    client.key(b"v")
     previewed(client, "nav-work")
     tmux("switch-client", "-c", observer.context()[0], "-t", "=nav-away:")
     observer_context = observer.context()
@@ -684,18 +684,18 @@ try:
     tmux("switch-client", "-c", observer.context()[0], "-t", "=observer:")
     # Ambiguous input origin: two clients share this sidebar; refuse focus and preview.
     tmux("switch-client", "-c", observer.context()[0], "-t", source_context[1])
-    client.key(b"V")  # mode off
-    wait("view off before ambiguity test", lambda: "V off" in client.text())
-    client.key(b"V")
+    client.key(b"v")  # mode off
+    wait("view off before ambiguity test", lambda: "v off" in client.text())
+    client.key(b"v")
     wait("ambiguous client refusal", lambda: "multiple clients" in client.footer())
     client.snapshot("ambiguous-refused")
     tmux("switch-client", "-c", observer.context()[0], "-t", "=observer:")
     # Inject a real tmux switch-client failure after HANDOFF was written.
-    client.key(b"V")  # off
+    client.key(b"v")  # off
     query(client, "nav-done")
     target_sidebar = sidebar_pane(agent("nav-done")["window"])
     (ROOT / "switch.fail").touch()
-    client.key(b"V")
+    client.key(b"v")
     wait("injected switch failure", lambda: "switch-client" in client.footer())
     assert not tmux("show-option", "-pqv", "-t", target_sidebar, "@agent-plane-sidebar-navigation")
     assert client.context() == source_context
@@ -716,7 +716,7 @@ try:
     tmux("resize-pane", "-t", client.context()[1], "-x", "20")
     settle(0.5)
     client.snapshot("narrow-empty")
-    assert "V off" in client.text() and "F all" in client.text()
+    assert "v off" in client.text() and "f all" in client.text()
     wait("event expired", lambda: index().get("recent_event") is None and "jump" in client.footer())
     for name, pane in FIXTURES.items():
         path = ROOT / (pane + '.input')
