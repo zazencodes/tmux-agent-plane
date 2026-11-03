@@ -169,6 +169,24 @@ impl ProcessTable {
             })
             .collect()
     }
+    /// Whether a process named `name` sits between `pid` and `root`, exclusive of both.
+    pub fn has_ancestor_named(&self, pid: i32, root: i32, name: &str) -> bool {
+        let mut current = self.processes.get(&pid).map(|p| p.parent);
+        for _ in 0..=self.processes.len() {
+            let Some(id) = current else { return false };
+            if id == root {
+                return false;
+            }
+            let Some(process) = self.processes.get(&id) else {
+                return false;
+            };
+            if process.executable.rsplit('/').next() == Some(name) {
+                return true;
+            }
+            current = Some(process.parent);
+        }
+        false
+    }
     pub fn is_descendant(&self, pid: i32, root: i32) -> bool {
         let mut current = pid;
         for _ in 0..=self.processes.len() {

@@ -1,6 +1,6 @@
 //! Codex publishes activity and approvals in its terminal title.
 use super::{Launch, Observation, RawState, ScanContext};
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 pub fn launch(task: Option<&str>) -> Result<Launch> {
     Ok(Launch {
@@ -13,7 +13,13 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
     let mut found = Vec::new();
     for pane in context.panes {
         // Codex starts helper `codex` children; only the outermost process is the agent.
-        let all = context.processes.descendants_named(pane.pid, "codex");
+        // A `codex` run by a Claude Code session in the same pane is that session's tool.
+        let all: Vec<_> = context
+            .processes
+            .descendants_named(pane.pid, "codex")
+            .into_iter()
+            .filter(|p| !context.processes.has_ancestor_named(p.pid, pane.pid, "claude"))
+            .collect();
         let processes: Vec<_> = all
             .iter()
             .filter(|p| {
@@ -21,10 +27,8 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
                     .any(|a| a.pid != p.pid && context.processes.is_descendant(p.pid, a.pid))
             })
             .collect();
-        if processes.len() > 1 {
-            bail!("multiple interactive Codex processes in pane {}", pane.id);
-        }
-        if processes.is_empty() {
+        // Several top-level `codex` processes (parallel one-off runs) do not identify an agent.
+        if processes.len() != 1 {
             continue;
         }
         let (state, detail) = codex_state(&pane.title);
@@ -115,7 +119,25 @@ mod tests {
     }
 
     #[test]
-    fn sibling_codex_processes_are_ambiguous() {
+    fn codex_run_by_claude_in_the_pane_is_not_an_agent() {
+        let processes = ProcessTable {
+            processes: HashMap::from([
+                process(10, 1, "/bin/zsh"),
+                process(11, 10, "/bin/claude"),
+                process(12, 11, "/bin/codex"),
+                process(13, 11, "/bin/codex"),
+            ]),
+        };
+        let panes = [pane("%1", 10)];
+        let context = ScanContext {
+            panes: &panes,
+            processes: &processes,
+        };
+        assert!(scan(&context).unwrap().is_empty());
+    }
+
+    #[test]
+    fn sibling_codex_processes_are_not_tracked_and_raise_no_fault() {
         let processes = ProcessTable {
             processes: HashMap::from([
                 process(10, 1, "/bin/zsh"),
@@ -128,7 +150,7 @@ mod tests {
             panes: &panes,
             processes: &processes,
         };
-        assert!(scan(&context).is_err());
+        assert!(scan(&context).unwrap().is_empty());
     }
 
     #[test]
