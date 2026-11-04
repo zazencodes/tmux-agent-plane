@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Added
+
+- Ghostty flicker troubleshooting with synchronized-output configuration, client reattachment requirements, and shared-TERM limitations
+
 ### Changed
 
 - Open configuration with `c`, always shown as `c configure` above the sidebar footer; the `a` key and the `AI names` hint are gone

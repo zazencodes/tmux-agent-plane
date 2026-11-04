@@ -267,6 +267,40 @@ Read a blocked question before replying: `tmux-agent-plane read reviewer`, then 
 - After upgrading, run `tmux-agent-plane daemon restart`. This stops the managed watcher through its private control socket, waits for its index lock to release, then starts the current binary. `daemon stop` stops it without a replacement. Startup failures and SIGTERM exits are recorded in `~/.local/state/tmux-agent-plane/daemon.log` (under `$XDG_STATE_HOME` when set).
 - Only the default tmux server is watched.
 
+## Screen flicker in Ghostty
+
+Ghostty supports synchronized output, which lets tmux finish a redraw before the
+terminal displays it. Without it, pane and window changes can expose partially
+redrawn frames, including sidebar view-mode navigation. See
+[Ghostty's explanation](https://ghostty.org/docs/help/synchronized-output).
+
+Check the attached clients with:
+
+```sh
+tmux list-clients -F '#{client_termname}: #{client_termtype}: #{client_termfeatures}'
+```
+
+If Ghostty uses `xterm-256color` and its features lack `sync`, add this to your
+`tmux.conf` **only if every client using that TERM supports synchronized output**:
+
+```tmux
+set -as terminal-features ',xterm-256color:sync'
+```
+
+Reload your configuration, then detach and reattach the client. On tmux 3.7c,
+changing this option or running `refresh-client` does not update the attached
+client's features. Confirm `sync` appears in the command above. This requires
+neither a daemon restart nor reopening sidebars.
+
+The plugin leaves terminal capabilities to tmux: `terminal-features` matches TERM,
+not the terminal's reported `client_termtype`, and a Ghostty client may share TERM
+with a terminal lacking this feature. Automatically adding the option after
+recognizing Ghostty would also affect those other clients on their next attach.
+
+Repeat pane changes and sidebar view-mode navigation with the same window size.
+If flicker persists with `sync` active, temporarily disable custom Ghostty shaders
+and repeat to distinguish terminal rendering effects from application redraws.
+
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md). Releases are tagged `vX.Y.Z`.
