@@ -83,7 +83,26 @@ struct Ledger {
     attempts: BTreeMap<String, String>,
     failed_at: u64,
     fault: Option<String>,
-    command: Option<config::AutoName>,
+    command: Option<Applied>,
+}
+
+/// The settings the ledger last applied. Its own type, without `deny_unknown_fields`: a ledger
+/// written by an older version may hold config keys that have since been removed.
+#[derive(Deserialize, Serialize, PartialEq)]
+struct Applied {
+    enabled: bool,
+    command: Vec<String>,
+    output: Output,
+}
+
+impl From<&config::AutoName> for Applied {
+    fn from(settings: &config::AutoName) -> Self {
+        Self {
+            enabled: settings.enabled,
+            command: settings.command.clone(),
+            output: settings.output,
+        }
+    }
 }
 
 struct Job {
@@ -173,11 +192,12 @@ impl Runtime {
                 return Ok(vec![Issue::new("auto-name:config", error)]);
             }
         };
-        if self.ledger.command.as_ref() != Some(&config.auto_name) {
+        let applied = Applied::from(&config.auto_name);
+        if self.ledger.command.as_ref() != Some(&applied) {
             if let Some(job) = &self.job {
                 job.cancel.store(true, Ordering::Relaxed);
             }
-            self.ledger.command = Some(config.auto_name.clone());
+            self.ledger.command = Some(applied);
             self.ledger.fault = None;
             self.ledger.failed_at = 0;
             self.save()?;
@@ -485,6 +505,17 @@ mod tests {
             visible: false,
         }
     }
+    #[test]
+    fn ledger_from_an_older_version_still_loads() {
+        let ledger: Ledger = serde_json::from_str(
+            r#"{"attempts":{"%1":"a"},"failed_at":0,"fault":null,
+                "command":{"enabled":false,"hide_hint":false,"command":[],"output":"text"}}"#,
+        )
+        .unwrap();
+        assert_eq!(ledger.attempts["%1"], "a");
+        assert!(ledger.command.is_some());
+    }
+
     #[test]
     fn name_rule_and_untrusted_output() {
         let agent = agent();
