@@ -136,7 +136,7 @@ Run your agents as usual. Then ask any of them things like:
 | `v` | Toggle sidebar view mode (off initially): preview while keeping keyboard input in the sidebar |
 | `s` | Re-sort agents within each session by attention, then longest in state; keep the selected pane |
 | `f` | Cycle sidebar state filter: All → Blocked → Done → Working → Idle → All, skipping states with no search matches when pressed |
-| `/` | Edit sidebar search across name, task, blocked detail, location and directory; matches ignore case. `Enter` keeps the query and previews its selection when view mode is on, `Esc` cancels the edit, `Ctrl-W` deletes a word, `Ctrl-U` clears; arrows move selection while editing |
+| `/` | Edit sidebar fuzzy search across name, task, blocked detail, location and directory; characters match in order, ignoring case and allowing gaps. A query can span the name and description, and matching rows keep their order. `Enter` keeps the query and previews its selection when view mode is on, `Esc` cancels the edit, `Ctrl-W` deletes a word, `Ctrl-U` clears; arrows move selection while editing |
 | `Esc` | Clear sidebar search outside editing; close the popup |
 | `Enter` | Jump to the agent. The sidebar stays open; the popup closes |
 | `x` | Ask to kill the selected agent’s pane. The footer pins its name/state; `Enter` or lowercase `y` confirms; `?` temporarily shows help; other keys cancel without replay. Refuses to end your attached session; warns if a remote session would end |

@@ -14,7 +14,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("v", "Toggle window previews"),
     ("s", "Re-sort agents"),
     ("f", "Cycle state filter"),
-    ("/", "Search agents"),
+    ("/", "Fuzzy search agents"),
     ("esc", "Clear / cancel / close"),
     ("r", "Rename selected agent"),
     ("x", "Confirm kill of agent"),

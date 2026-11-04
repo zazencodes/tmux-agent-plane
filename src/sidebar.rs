@@ -361,11 +361,22 @@ struct Sidebar {
 
 impl Navigation {
     fn matches_query(&self, agent: &Agent) -> bool {
-        let query = self.query.to_lowercase();
-        [&agent.name, &agent.title, &agent.location, &agent.cwd]
-            .into_iter()
-            .chain(agent.detail.as_ref())
-            .any(|field| field.to_lowercase().contains(&query))
+        // One row lets a query span the name and description. Match characters in order;
+        // this is only a filter, so the published row order stays in charge.
+        let text = [
+            agent.name.as_str(),
+            agent.title.as_str(),
+            agent.detail.as_deref().unwrap_or(""),
+            agent.location.as_str(),
+            agent.cwd.as_str(),
+        ]
+        .join(" ")
+        .to_lowercase();
+        let mut characters = text.chars();
+        self.query
+            .to_lowercase()
+            .chars()
+            .all(|query| characters.by_ref().any(|c| c == query))
     }
 
     /// Only a deliberate f skips categories. Refreshing must never change the filter.
@@ -1481,6 +1492,116 @@ mod tests {
 
     fn press(sidebar: &mut Sidebar, code: KeyCode) {
         sidebar.key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn fuzzy_search_matches_case_insensitive_ordered_characters() {
+        let mut a = agent("%1", State::Idle);
+        a.name = "Sidebar-Search".into();
+        a.title.clear();
+        a.location.clear();
+        a.cwd.clear();
+        for (query, expected) in [
+            ("", true),
+            ("SIDEBAR", true),
+            ("sbsrch", true),
+            ("s-s", true),
+            ("rsbs", false),
+            ("sss", false),
+            ("sidebar-search-search", false),
+            ("missing", false),
+        ] {
+            let navigation = Navigation {
+                query: query.into(),
+                ..Navigation::default()
+            };
+            assert_eq!(navigation.matches_query(&a), expected, "{query:?}");
+        }
+        a.name = "Éclair-Über".into();
+        let navigation = Navigation {
+            query: "éLÜB".into(),
+            ..Navigation::default()
+        };
+        assert!(navigation.matches_query(&a));
+    }
+
+    #[test]
+    fn fuzzy_search_spans_name_description_and_existing_fields() {
+        let mut a = agent("%1", State::Blocked);
+        a.name = "api-builder".into();
+        a.detail = Some("Confirm permission".into());
+        for query in [
+            "ABLD",        // Agent name.
+            "RVPMT",       // Task title, retained even while blocked.
+            "CNFPRM",      // The displayed blocked description.
+            "WK:1",        // Location includes the tmux session name.
+            "TMP/CKT",     // Working directory.
+            "ABLD RVPMT",  // Name and task in one query.
+            "ABLD CNFPRM", // Name and displayed blocked description.
+            "ABLD RVPMT CNFPRM WK:1 TMP/CKT",
+        ] {
+            let navigation = Navigation {
+                query: query.into(),
+                ..Navigation::default()
+            };
+            assert!(navigation.matches_query(&a), "{query:?}");
+        }
+    }
+
+    #[test]
+    fn fuzzy_search_keeps_order_selection_filters_and_incremental_edits() {
+        let mut agents = vec![
+            agent("%1", State::Working),
+            agent("%2", State::Blocked),
+            agent("%3", State::Idle),
+        ];
+        agents[0].name = "api-builder".into();
+        agents[1].name = "abld".into(); // A tighter match still keeps its published row.
+        agents[2].title = "Unrelated task".into();
+        let mut sidebar = showing(agents);
+        sidebar.navigation.order = ["%1", "%2", "%3"].map(String::from).to_vec();
+        sidebar.rebuild();
+        sidebar.select(Some(1));
+        press(&mut sidebar, KeyCode::Char('v'));
+        press(&mut sidebar, KeyCode::Char('/'));
+        for c in "ABLD RVPMT".chars() {
+            press(&mut sidebar, KeyCode::Char(c));
+            assert!(sidebar.navigation.search.is_some());
+            assert!(sidebar.navigation.view);
+            assert_eq!(sidebar.selected().unwrap().pane, "%2");
+        }
+        assert_eq!(order(&sidebar), ["%1", "%2"]);
+        assert!(footer(&sidebar, 38, 100).to_string().contains("preview"));
+        press(&mut sidebar, KeyCode::Up);
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        press(&mut sidebar, KeyCode::Enter);
+        assert!(sidebar.navigation.search.is_none());
+        assert_eq!(order(&sidebar), ["%1", "%2"]);
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        press(&mut sidebar, KeyCode::Char('f'));
+        assert_eq!(sidebar.navigation.filter, Some(State::Blocked));
+        assert_eq!(order(&sidebar), ["%2"]);
+        sidebar.all_agents[1].state = State::Idle;
+        sidebar.rebuild();
+        assert!(sidebar.agents.is_empty());
+        assert_eq!(sidebar.navigation.filter, Some(State::Blocked));
+        press(&mut sidebar, KeyCode::Char('f'));
+        assert_eq!(sidebar.navigation.filter, Some(State::Working));
+        press(&mut sidebar, KeyCode::Char('/'));
+        press(&mut sidebar, KeyCode::Char('z'));
+        assert!(sidebar.agents.is_empty());
+        press(&mut sidebar, KeyCode::Backspace);
+        assert_eq!(order(&sidebar), ["%1"]);
+        sidebar.key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert_eq!(sidebar.navigation.query, "ABLD ");
+        sidebar.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        assert!(sidebar.navigation.query.is_empty());
+        press(&mut sidebar, KeyCode::Esc);
+        assert_eq!(sidebar.navigation.query, "ABLD RVPMT");
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        press(&mut sidebar, KeyCode::Esc);
+        assert!(sidebar.navigation.query.is_empty());
+        assert!(sidebar.navigation.view);
     }
 
     #[test]

@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Changed
+
+- Fuzzy search sidebar rows by name and description together, allowing gaps and abbreviations while ignoring case; task, blocked detail, location and directory stay searchable, and matching rows keep their order
+
 ### Fixed
 
 - Close a window's sidebar immediately when its last other pane disappears, removing the full-screen sidebar pause before the window closes

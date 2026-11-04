@@ -6,6 +6,7 @@
 """Private sidebar navigation proof: native Pi fixtures, no agent CLI/model calls.
 
 uv run tests/sidebar_navigation_live.py target/debug/tmux-agent-plane
+uv run tests/sidebar_navigation_live.py target/debug/tmux-agent-plane --search-only
 PTY decoding asserts UI only. Agent state comes exclusively from native fixtures/index.
 Search editing pauses preview; Enter accepts and previews.
 Evidence persists in /tmp/tap-nav-*. Agent jobs use the branch CLI.
@@ -212,6 +213,79 @@ def previewed(client, name):
         return (context[1] == target and context[2] == agent(name)["window"] and
                 client.selected() == name and "v on" in client.text())
     wait("preview " + name, arrived)
+
+
+def assert_fuzzy_search(client):
+    baseline = shown_names(client)
+    origin = client.context()
+    query(client, "NV NPMTRVW")  # Name and Native payment review, with gaps in both.
+    wait("fuzzy rows retain order", lambda: shown_names(client) == baseline)
+    selected(client, "nav-work")
+    query(client, "NAV-AWAY RVFXPRM")  # Name and the displayed blocked description.
+    wait("fuzzy blocked description", lambda: shown_names(client) == ["nav-away"])
+    assert client.context() == origin
+    client.key(b"f")
+    wait("fuzzy blocked filter", lambda: "f blocked" in client.text())
+    query(client, "NVWRK NPMTRVW")
+    wait("fuzzy empty filter", lambda: "no matching agents" in client.text() and
+         "f blocked" in client.text())
+    client.key(b"f")
+    wait("fuzzy skips empty states", lambda: "f working" in client.text() and
+         shown_names(client) == ["nav-work"])
+    client.key(b"f")
+    wait("fuzzy filter all", lambda: "f all" in client.text())
+    client.key(b"v")
+    previewed(client, "nav-work")
+    editing_origin = client.context()
+    client.key(b"/\x15NV NPMTRVW")
+    wait("fuzzy editing pauses previews", lambda: "paused" in client.text() and
+         shown_names(client) == baseline)
+    client.key(b"\x1b[B")
+    next_name = baseline[(baseline.index("nav-work") + 1) % len(baseline)]
+    selected(client, next_name)
+    assert client.context() == editing_origin
+    client.key(b"z")
+    wait("fuzzy incremental miss", lambda: "no matching agents" in client.text())
+    client.key(b"\x7f")
+    wait("fuzzy backspace restores rows", lambda: shown_names(client) == baseline)
+    client.key(b"\x17")
+    wait("fuzzy delete word", lambda: "/ NV " in client.text())
+    client.key(b"\x15")
+    wait("fuzzy clear edit", lambda: "/ ▏" in client.text())
+    assert client.context() == editing_origin
+    client.key(b"\x1b")
+    wait("fuzzy cancel restores query and selection", lambda: "/ NVWRK NPMTRVW" in client.text()
+         and "paused" not in client.text() and client.selected() == "nav-work")
+    assert client.context() == editing_origin
+    assert agent("nav-done")["state"] == "done"
+    client.key(b"/\x15NVDN NPMTRVW")
+    wait("fuzzy final edit stays local", lambda: "paused" in client.text() and
+         client.selected() == "nav-done")
+    assert client.context() == editing_origin
+    client.key(b"\r")
+    previewed(client, "nav-done")
+    assert agent("nav-done")["state"] == "done", "preview must leave completion unseen"
+    client.snapshot("fuzzy-accepted-preview")
+    client.key(b"v")
+    wait("fuzzy view off", lambda: "v off" in client.text())
+    client.key(b"\x1b")
+    wait("fuzzy Escape clears search", lambda: "/ search" in client.text() and
+         shown_names(client) == baseline)
+    query(client, "NVWRK NPMTRVW")
+    client.key(b"v")
+    previewed(client, "nav-work")
+    client.key(b"v")
+    wait("fuzzy restores view off", lambda: "v off" in client.text())
+    client.key(b"\x1b")
+    wait("fuzzy restores rows", lambda: "/ search" in client.text() and
+         shown_names(client) == baseline)
+    selected(client, "nav-work")
+    for pane in FIXTURES.values():
+        assert typed(pane) == b"", "search sent input to an agent"
+    return {"fuzzy_name_and_title": True, "fuzzy_name_and_blocked_description": True,
+            "fuzzy_stable_order_and_selection": True, "fuzzy_filter_composition": True,
+            "fuzzy_incremental_edit_cancel_clear": True, "fuzzy_preview_pause_and_accept": True,
+            "unintended_agent_input": 0, "models_used": 0}
 
 
 def frames_after(client, action, seconds=1.0):
@@ -729,6 +803,10 @@ try:
     plane("toggle-sidebar", agent("nav-work")["window"])
     wait("sidebar controls", lambda: "v off" in client.text() and "f all" in client.text())
     selected(client, "nav-work")  # the agent it was opened from
+    fuzzy_results = assert_fuzzy_search(client)
+    if "--search-only" in sys.argv[2:]:
+        RESULTS = {"passed": True, **fuzzy_results}
+        sys.exit(0)
     start_sidebar = client.context()[1]
     client.key(b"s")
     wait("attention order", lambda: shown_names(client) == ranked_names())
@@ -993,7 +1071,7 @@ try:
     daemon_log = (STATE / "daemon.log").read_text()
     assert "[scan:" not in daemon_log, "closing an agent must not fault its kind: " + daemon_log
     assert not any(call[0] in ("copy-mode", "clock-mode") for call in calls)
-    RESULTS = {**extended_results, "passed": True, "native_fixtures": len(FIXTURES), "models_used": 0,
+    RESULTS = {**extended_results, **fuzzy_results, "passed": True, "native_fixtures": len(FIXTURES), "models_used": 0,
         "quick_hop_screens": hop_screens, "idle_commands_in_10s": idle_calls, "lone_sidebar_closes": True,
         "left_windows_restored_without_input": True, "sort_everywhere_without_snap_back": True,
         "same_window": True, "cross_window_and_session": True, "view_off_selects_only": True,
