@@ -10,6 +10,7 @@ pub enum Direction {
     Previous,
 }
 
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Client {
     pub name: String,
     pub pid: String,

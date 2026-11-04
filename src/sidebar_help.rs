@@ -20,6 +20,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("r", "Rename selected agent"),
     ("x", "Confirm kill of agent"),
     ("c", "Configure"),
+    ("o O", "Organize all projects"),
     ("?", "Keyboard shortcuts"),
     ("q", "Close all sidebars"),
     ("ctrl-w", "Delete word in an edit"),
@@ -29,6 +30,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("enter y", "Kill: confirm (esc cancels)"),
     ("1-7", "Configure: choose AI command"),
     ("d", "Configure: turn AI names off"),
+    ("a A", "Organize: confirm request"),
 ];
 
 #[derive(Default)]

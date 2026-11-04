@@ -17,7 +17,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, Ke
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame, Terminal};
 use std::collections::{BTreeMap, HashSet};
 use std::os::fd::AsRawFd;
@@ -192,8 +192,38 @@ struct KillConfirmation {
     ends_sessions: Vec<String>,
 }
 
+struct OrganizeConfirmation {
+    agent: Agent,
+    codex_pid: Option<i32>,
+    client: Client,
+}
+
+fn organize_accepts(key: KeyEvent) -> bool {
+    !key.modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        && matches!(key.code, KeyCode::Char('a' | 'A'))
+}
+
+fn organizer_ready(agent: &Agent) -> Result<()> {
+    if !matches!(agent.state, State::Idle | State::Done) {
+        bail!(
+            "select an idle or done organizer; {} is {}",
+            agent.name,
+            agent.state.as_str()
+        );
+    }
+    Ok(())
+}
+
+fn organize_task(agent: &Agent) -> String {
+    format!(
+        "Organize the current tmux work into project sessions. The user selected you as the organizer; your explicit agent name is {:?}. Load the tmux-agent-plane skill and follow its Organizing projects workflow. A tmux session IS a project. Inspect `tmux-agent-plane sessions list --json` and `tmux-agent-plane list --json`; use current tasks, names, working directories, parent links and established sessions to understand which work belongs together. Create appropriate named sessions and move existing agents through the canonical CLI commands: `tmux-agent-plane sessions create NAME --cwd DIR` and `tmux-agent-plane move AGENT --session NAME`. This request authorizes you to carry out the organization and verify it, then report the resulting project sessions and any limits. Preserve agent processes, names, pane identities, parents and completion history. Keep unrelated shells and existing work intact. Never restart or kill agents, submit prompts/keys to other agents, use raw tmux on agent panes, change files/settings/trust or access usage/reset controls. Respect linked/grouped-session and attached-session move refusals; report those limits without bypassing them. This task is tmux organization; no source changes are requested.",
+        agent.name
+    )
+}
+
 /// Changes in task/state/turn or native identity require a new deliberate confirmation.
-fn same_kill_target(before: &Agent, current: &Agent) -> bool {
+fn same_action_target(before: &Agent, current: &Agent) -> bool {
     before.pane == current.pane
         && before.window == current.window
         && before.session == current.session
@@ -209,14 +239,14 @@ fn same_kill_target(before: &Agent, current: &Agent) -> bool {
         && before.detail == current.detail
 }
 
-/// Read the native signal again, rather than trusting a possibly one-tick-old index at y.
+/// Read the native signal again at confirmation, rather than trusting a one-tick-old index.
 /// Codex has no session id in its title signal, so pin its unique live process PID too.
-fn kill_identity(agent: &Agent) -> Result<Option<i32>> {
+fn action_identity(agent: &Agent) -> Result<Option<i32>> {
     let panes = tmux::list_panes()?;
     let pane = panes
         .iter()
         .find(|p| p.id == agent.pane && p.window == agent.window && p.session == agent.session)
-        .context("agent exited; kill cancelled")?;
+        .context("agent exited; action cancelled")?;
     if pane.name != agent.name
         && !(pane.name.is_empty()
             && agent.name
@@ -226,7 +256,7 @@ fn kill_identity(agent: &Agent) -> Result<Option<i32>> {
                     pane.id.trim_start_matches('%')
                 ))
     {
-        bail!("agent renamed; press x again");
+        bail!("agent renamed; refresh and confirm again");
     }
     let processes = ProcessTable::load()?;
     let observations = (agent.kind.adapter().scan)(&ScanContext {
@@ -236,7 +266,7 @@ fn kill_identity(agent: &Agent) -> Result<Option<i32>> {
     let observation = observations
         .iter()
         .find(|observation| observation.pane_id == agent.pane)
-        .context("agent exited or changed; press x again")?;
+        .context("agent exited or changed; refresh and confirm again")?;
     let raw_state = match agent.state {
         State::Working => RawState::Working,
         State::Blocked => RawState::Blocked,
@@ -249,17 +279,17 @@ fn kill_identity(agent: &Agent) -> Result<Option<i32>> {
         || observation.detail != agent.detail
         || (!observation.preserve_title && observation.title != agent.title)
     {
-        bail!("agent state/identity changed; press x again");
+        bail!("agent state/identity changed; refresh and confirm again");
     }
     if agent.kind == index::Kind::Codex {
         let pids = processes.descendants_named(pane.pid, "codex");
         if pids.len() != 1 {
-            bail!("agent process changed; press x again");
+            bail!("agent process changed; refresh and confirm again");
         }
         Ok(Some(pids[0].pid))
     } else {
         if agent.session_id.is_none() {
-            bail!("agent has no native identity; kill cancelled");
+            bail!("agent has no native identity; action cancelled");
         }
         Ok(None)
     }
@@ -348,6 +378,7 @@ struct Sidebar {
     editing: Option<Rename>,
     notice: Option<String>,
     killing: Option<KillConfirmation>,
+    organizing: Option<OrganizeConfirmation>,
     /// Hide successfully closed panes until the daemon has removed them from the index.
     closed: HashSet<String>,
     /// The order `s` chose, on its way to the daemon.
@@ -644,7 +675,7 @@ impl Sidebar {
                 .iter()
                 .find(|a| a.pane == selected.pane)
                 .context("agent exited; kill cancelled")?;
-            if !same_kill_target(&selected, current) {
+            if !same_action_target(&selected, current) {
                 bail!("agent changed; refresh and press x again");
             }
             let clients = clients()?;
@@ -652,7 +683,7 @@ impl Sidebar {
             let ends_sessions = ending_sessions(current, client)?;
             Ok(Some(KillConfirmation {
                 agent: current.clone(),
-                codex_pid: kill_identity(current)?,
+                codex_pid: action_identity(current)?,
                 client: client.name.clone(),
                 client_pid: client.pid.clone(),
                 client_session: client.session.clone(),
@@ -686,7 +717,7 @@ impl Sidebar {
             .iter()
             .find(|a| a.pane == confirmation.agent.pane)
             .context("agent exited; kill cancelled")?;
-        if !same_kill_target(&confirmation.agent, current) {
+        if !same_action_target(&confirmation.agent, current) {
             bail!("agent changed; press x again");
         }
         if ending_sessions(current, client)? != confirmation.ends_sessions {
@@ -694,16 +725,93 @@ impl Sidebar {
         }
         // Read the native signal last, after the topology queries. Pane IDs are
         // server-lifetime identities, so an exited target cannot resolve to its neighbour.
-        if kill_identity(current)? != confirmation.codex_pid {
+        if action_identity(current)? != confirmation.codex_pid {
             bail!("agent changed; press x again");
         }
         commands::kill_pane(&current.pane)
     }
 
+    /// Only A dispatches; every other closing key is consumed in this sidebar.
+    fn organize_key(&mut self, key: KeyEvent, own: &str) -> bool {
+        if let Some(confirmation) = self.organizing.take() {
+            self.notice = None;
+            if organize_accepts(key) {
+                match self.confirm_organize(&confirmation, own) {
+                    Ok(()) => {
+                        self.notice = Some(format!("asked {} to organize", confirmation.agent.name))
+                    }
+                    Err(error) => self.notice = Some(error.to_string()),
+                }
+            }
+            return true;
+        }
+        if !matches!(key.code, KeyCode::Char('o' | 'O'))
+            || key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            || self.editing.is_some()
+            || self.navigation.search.is_some()
+            || self.killing.is_some()
+        {
+            return false;
+        }
+        self.notice = None;
+        let result: Result<OrganizeConfirmation> = (|| {
+            let selected = self
+                .selected()
+                .context("select a ready agent to organize projects")?;
+            let index = index::read()?;
+            let current = index
+                .agents
+                .iter()
+                .find(|a| a.pane == selected.pane)
+                .context("organizer exited; select it again")?;
+            // Opening only reviews the target: capture its fresh state and identity,
+            // even if the rendered row is one sidebar refresh behind the index.
+            organizer_ready(current)?;
+            let clients = clients()?;
+            let client = input_client(&clients, own)?.clone();
+            Ok(OrganizeConfirmation {
+                agent: current.clone(),
+                codex_pid: action_identity(current)?,
+                client,
+            })
+        })();
+        match result {
+            Ok(confirmation) => self.organizing = Some(confirmation),
+            Err(error) => self.notice = Some(error.to_string()),
+        }
+        true
+    }
+
+    fn confirm_organize(&self, confirmation: &OrganizeConfirmation, own: &str) -> Result<()> {
+        let clients = clients()?;
+        if input_client(&clients, own)? != &confirmation.client {
+            bail!("confirmation client changed; press O again");
+        }
+        let index = index::read()?;
+        let current = index
+            .agents
+            .iter()
+            .find(|a| a.pane == confirmation.agent.pane)
+            .context("organizer exited; select it again")?;
+        if !same_action_target(&confirmation.agent, current) {
+            bail!("organizer changed; press O again");
+        }
+        organizer_ready(current)?;
+        if action_identity(current)? != confirmation.codex_pid {
+            bail!("organizer process changed; press O again");
+        }
+        commands::send(&current.pane, &organize_task(current), false, false, None)
+    }
+
     fn help_key(&mut self, key: KeyEvent) -> bool {
         self.help.key(
             key,
-            self.editing.is_none() && self.navigation.search.is_none() && !self.auto_name.open,
+            self.editing.is_none()
+                && self.navigation.search.is_none()
+                && !self.auto_name.open
+                && self.organizing.is_none(),
         )
     }
 
@@ -947,10 +1055,17 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
                 }
                 // Setup consumes its keys before navigation/kill, including Enter.
                 if sidebar.killing.is_none()
+                    && sidebar.organizing.is_none()
                     && sidebar.editing.is_none()
                     && sidebar.navigation.search.is_none()
                     && sidebar.auto_name.key(key)
                 {
+                    if !event::poll(Duration::ZERO)? {
+                        break;
+                    }
+                    continue;
+                }
+                if sidebar.organize_key(key, &own) {
                     if !event::poll(Duration::ZERO)? {
                         break;
                     }
@@ -1036,6 +1151,10 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         sidebar.auto_name.draw(f);
         return;
     }
+    if let Some(confirmation) = &sidebar.organizing {
+        draw_organize(f, confirmation);
+        return;
+    }
     let confirmation = sidebar
         .killing
         .as_ref()
@@ -1115,13 +1234,43 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let footer = confirmation.map_or_else(
         || {
             Text::from(vec![
-                hints(&[("c", "configure")]),
+                hints(&[("c", "configure"), ("O", "organize")]),
                 footer(sidebar, inner + 2, index::now_ms()),
             ])
         },
         Text::from,
     );
     f.render_widget(Paragraph::new(footer), help_area);
+}
+
+fn draw_organize(f: &mut Frame, confirmation: &OrganizeConfirmation) {
+    let [body, footer] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
+    let block = panel(Line::from(" organize projects "));
+    let inner = block.inner(body).inner(ratatui::layout::Margin::new(1, 0));
+    f.render_widget(block, body);
+    let agent = &confirmation.agent;
+    let lines = vec![
+        Line::styled("Organize all projects?", Style::default().fg(TEXT).bold()),
+        Line::default(),
+        Line::styled(format!("Organizer: {}", agent.name), TEXT),
+        Line::styled(
+            format!("{} · {}", agent.kind.as_str(), agent.state.as_str()),
+            SUBTEXT,
+        ),
+        Line::default(),
+        Line::from("Ask this agent to create project sessions and move related work into them."),
+        Line::default(),
+        Line::styled(
+            "Agent processes keep running. Uses this agent's current model.",
+            SUBTEXT,
+        ),
+    ];
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+    f.render_widget(
+        Paragraph::new(hints(&[("A", "organize"), ("esc", "cancel")])),
+        footer,
+    );
 }
 
 /// Two lines keep both name and state readable in a narrow pane. Remote session
@@ -1295,6 +1444,86 @@ fn right<'a>(mut line: Line<'a>, end: Span<'a>, width: usize) -> Line<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn organize_confirmation() -> OrganizeConfirmation {
+        OrganizeConfirmation {
+            agent: agent("%1", State::Idle),
+            codex_pid: None,
+            client: Client {
+                name: "/dev/fixture".into(),
+                pid: "42".into(),
+                session: "$1".into(),
+                window: "@1".into(),
+                pane: "%99".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn organize_requires_ready_agent_and_deliberate_a() {
+        for state in [State::Idle, State::Done, State::Working, State::Blocked] {
+            assert_eq!(
+                organizer_ready(&agent("%1", state)).is_ok(),
+                matches!(state, State::Idle | State::Done)
+            );
+        }
+        for code in [KeyCode::Char('a'), KeyCode::Char('A')] {
+            assert!(organize_accepts(KeyEvent::from(code)));
+            assert!(organize_accepts(KeyEvent::new(code, KeyModifiers::SHIFT)));
+            assert!(!organize_accepts(KeyEvent::new(
+                code,
+                KeyModifiers::CONTROL
+            )));
+            assert!(!organize_accepts(KeyEvent::new(code, KeyModifiers::ALT)));
+        }
+        assert!(!organize_accepts(KeyEvent::from(KeyCode::Enter)));
+    }
+
+    #[test]
+    fn organize_cancel_consumes_keys_without_other_sidebar_actions() {
+        for code in [
+            KeyCode::Enter,
+            KeyCode::Esc,
+            KeyCode::Char('q'),
+            KeyCode::Char('x'),
+            KeyCode::Char('c'),
+            KeyCode::Char('j'),
+            KeyCode::Char('O'),
+            KeyCode::Char('?'),
+        ] {
+            let mut sidebar = Sidebar {
+                organizing: Some(organize_confirmation()),
+                ..Sidebar::default()
+            };
+            assert!(sidebar.organize_key(KeyEvent::from(code), "%99"));
+            assert!(sidebar.organizing.is_none());
+            assert!(
+                sidebar.killing.is_none() && sidebar.editing.is_none() && !sidebar.auto_name.open
+            );
+            assert!(sidebar.notice.is_none());
+        }
+    }
+
+    #[test]
+    fn organize_confirmation_fits_sidebar_and_keeps_action_visible_when_short() {
+        for height in [1, 2, 4, 8, 28] {
+            let mut terminal = Terminal::new(TestBackend::new(38, height)).unwrap();
+            let mut sidebar = Sidebar {
+                organizing: Some(organize_confirmation()),
+                ..Sidebar::default()
+            };
+            terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
+            let row: String = (0..38)
+                .map(|x| terminal.backend().buffer()[(x, height - 1)].symbol())
+                .collect();
+            assert!(
+                row.contains("A organize") && row.contains("esc cancel"),
+                "{row}"
+            );
+            assert!(!sidebar.help_key(KeyEvent::from(KeyCode::Char('?'))));
+            assert!(!sidebar.help.open);
+        }
+    }
     use crate::index::EventState;
 
     #[test]
@@ -2006,7 +2235,7 @@ mod tests {
     #[test]
     fn kill_guard_pins_native_identity_state_turn_name_and_location() {
         let original = agent("%1", State::Working);
-        assert!(same_kill_target(&original, &original));
+        assert!(same_action_target(&original, &original));
         for change in 0..10 {
             let mut current = original.clone();
             match change {
@@ -2021,7 +2250,7 @@ mod tests {
                 8 => current.window = "@2".into(),
                 _ => current.session = "other".into(),
             }
-            assert!(!same_kill_target(&original, &current), "change {change}");
+            assert!(!same_action_target(&original, &current), "change {change}");
         }
     }
 

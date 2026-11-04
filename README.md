@@ -157,6 +157,7 @@ These are tmux key names (`C` is Ctrl, `M` is Alt). The defaults leave tmux's pr
 | `x` | Ask to kill the selected agent’s pane. The footer pins its name/state; `Enter` or lowercase `y` confirms; `?` temporarily shows help; other keys cancel without replay. Refuses to end your attached session; warns if a remote session would end |
 | `r` | Rename the agent (sidebar), starting from its current name. `Ctrl-W` deletes a word, `Ctrl-U` clears, `Enter` saves, `Esc` cancels |
 | `c` | Configure, in the sidebar. AI naming: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `d` disables naming, `Esc` goes back or closes |
+| `O` / `o` | Ask the selected ready agent to organize all work into project sessions. Review the named organizer, then `A` / `a` sends the request; other keys cancel |
 | `?` | Show every sidebar shortcut. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search and rename |
 | `q` | Close the sidebar everywhere; in the popup, letters are search text |
 
@@ -229,6 +230,8 @@ tmux-agent-plane spawn claude "Plan the website" --in session --session website 
 `move` uses a native detached pane move: the process keeps running, with the same pane ID, native identity, name, parent and completion history. No input is sent to the agent. Only the chosen pane moves, leaving other agents and shells in a mixed source window. The destination's current window and clients stay in place. The command prints the new location; the daemon publishes it on its next scan.
 
 A source window or detached session may disappear when it has no remaining content; the normal sidebar hook closes a lone sidebar. Moves that would end an attached source session are refused. Linked source windows and grouped source/destination sessions are also refused because those share windows across projects. The CLI checks the live agent identity and rechecks topology in tmux's command queue before moving. Existing shell-only windows remain for the user. The skill's project organization workflow covers inspecting work, creating sessions, moving each team member and verifying the result.
+
+To organize from the sidebar, select an idle or done agent and press `O`. The confirmation names that organizer and explains the scope. Press `A` to send it one complete organization task, using its current model and the installed skill. It then inspects existing projects, creates suitable sessions and moves related work through the CLI. Follow its progress in the usual agent state and screen. Working or blocked agents are refused; a changed organizer or input client requires a fresh confirmation. Canceling, including with `Esc` or `Enter`, sends no input. `O` stays ordinary text while searching or renaming.
 
 ### Agent launch syntax
 
