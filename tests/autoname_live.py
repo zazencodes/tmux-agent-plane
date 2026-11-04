@@ -261,7 +261,7 @@ try:
         client.key(closing)
         wait('help closes safely', lambda: 'v off' in client.text() and 'c configure' in client.text())
         assert client.selected() == selected_before
-        assert '? Y/n' not in client.text()
+        assert '? [Y/n]' not in client.text()
         assert len(index()['agents']) == 3
     # Search and rename retain ? as ordinary text.
     client.key(b'/?')
@@ -276,14 +276,14 @@ try:
     wait('rename cancelled', lambda: 'save' not in client.footer())
     # Help temporarily covers a kill confirmation and restores it without replay.
     client.key(b'x')
-    wait('kill confirmation before help', lambda: '? Y/n' in client.text())
+    wait('kill confirmation before help', lambda: '? [Y/n]' in client.text())
     client.key(b'?')
     wait('help covers confirmation', lambda: 'Keyboard shortcuts' in client.text())
-    assert '? Y/n' not in client.text()
+    assert '? [Y/n]' not in client.text()
     client.key(b'x')
-    wait('closing x restores confirmation', lambda: '? Y/n' in client.text())
+    wait('closing x restores confirmation', lambda: '? [Y/n]' in client.text())
     client.key(b'n')
-    wait('confirmation cancelled', lambda: '? Y/n' not in client.text())
+    wait('confirmation cancelled', lambda: '? [Y/n]' not in client.text())
     # A short window pages the same list; every closing key is still consumed.
     window = by_pane(default)['window']
     original_height = tmux('display-message', '-p', '-t', window, '#{window_height}')

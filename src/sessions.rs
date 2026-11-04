@@ -32,9 +32,9 @@ pub fn run(action: Action) -> Result<()> {
 }
 
 #[derive(Debug, Serialize)]
-struct Session {
-    id: String,
-    name: String,
+pub struct Session {
+    pub id: String,
+    pub name: String,
     attached: u32,
     group: Option<String>,
     /// Physical window ids make links between projects explicit.
@@ -118,24 +118,11 @@ impl Snapshot {
 
 fn list(json: bool) -> Result<()> {
     let index = index::read()?;
-    let mut snapshot = Snapshot::load()?;
-    for session in &mut snapshot.sessions {
-        session.agents = index
-            .agents
-            .iter()
-            .filter(|a| {
-                snapshot
-                    .panes
-                    .iter()
-                    .any(|p| p.session == session.id && p.id == a.pane)
-            })
-            .map(|a| a.name.clone())
-            .collect();
-    }
+    let sessions = inventory(&index.agents)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&snapshot.sessions)?);
+        println!("{}", serde_json::to_string_pretty(&sessions)?);
     } else {
-        for session in snapshot.sessions {
+        for session in sessions {
             println!(
                 "{} {}  {} windows  {} clients  agents: {}{}",
                 session.name,
@@ -150,6 +137,23 @@ fn list(json: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+pub fn inventory(agents: &[Agent]) -> Result<Vec<Session>> {
+    let mut snapshot = Snapshot::load()?;
+    for session in &mut snapshot.sessions {
+        session.agents = agents
+            .iter()
+            .filter(|a| {
+                snapshot
+                    .panes
+                    .iter()
+                    .any(|p| p.session == session.id && p.id == a.pane)
+            })
+            .map(|a| a.name.clone())
+            .collect();
+    }
+    Ok(snapshot.sessions)
 }
 
 pub fn validate_name(name: &str) -> Result<()> {
@@ -168,6 +172,12 @@ pub fn validate_name(name: &str) -> Result<()> {
 }
 
 fn create(name: &str, cwd: Option<PathBuf>) -> Result<()> {
+    let id = create_project(name, cwd)?;
+    println!("{name} {id}");
+    Ok(())
+}
+
+pub fn create_project(name: &str, cwd: Option<PathBuf>) -> Result<String> {
     validate_name(name)?;
     let cwd = match cwd {
         Some(cwd) => cwd,
@@ -183,7 +193,7 @@ fn create(name: &str, cwd: Option<PathBuf>) -> Result<()> {
         "-d",
         "-P",
         "-F",
-        "#{session_name} #{session_id}",
+        "#{session_id}",
         "-s",
         name,
         "-c",
@@ -191,8 +201,7 @@ fn create(name: &str, cwd: Option<PathBuf>) -> Result<()> {
         &shell,
         "-il",
     ])?;
-    print!("{created}");
-    Ok(())
+    Ok(created.trim().to_owned())
 }
 
 fn independent(session: &Session) -> Result<()> {
@@ -211,6 +220,85 @@ pub fn destination(target: &str) -> Result<String> {
     let session = snapshot.find(target)?;
     independent(session)?;
     Ok(session.id.clone())
+}
+
+/// Validate the entire assignment before creating sessions or moving anything.
+/// Return evacuated sources that need a shell for attached clients or incoming work.
+pub fn organization_preflight(
+    assignments: &[(String, String)],
+    agents: &[Agent],
+) -> Result<Vec<String>> {
+    preflight(&Snapshot::load()?, assignments, agents)
+}
+
+fn preflight(
+    snapshot: &Snapshot,
+    assignments: &[(String, String)],
+    agents: &[Agent],
+) -> Result<Vec<String>> {
+    let mut keep = Vec::new();
+    for (pane, target) in assignments {
+        let links: Vec<_> = snapshot.panes.iter().filter(|p| &p.id == pane).collect();
+        if agents
+            .iter()
+            .any(|a| &a.pane == pane && &a.session == target)
+        {
+            continue;
+        }
+        let [link] = links.as_slice() else {
+            bail!("agent pane is missing or linked into multiple sessions; organization refused");
+        };
+        if link.sidebar {
+            bail!("cannot organize a sidebar as an agent");
+        }
+        independent(snapshot.find(&link.session)?)?;
+        if let Some(destination) = snapshot.sessions.iter().find(|s| &s.name == target) {
+            independent(destination)?;
+        } else {
+            validate_name(target)?;
+        }
+    }
+    for session in &snapshot.sessions {
+        let content: Vec<_> = snapshot
+            .panes
+            .iter()
+            .filter(|p| p.session == session.id && !p.sidebar)
+            .collect();
+        if !content.is_empty()
+            && (session.attached > 0
+                || assignments
+                    .iter()
+                    .any(|(_, target)| target == &session.name))
+            && content.iter().all(|p| {
+                assignments
+                    .iter()
+                    .any(|(pane, target)| pane == &p.id && target != &session.name)
+            })
+        {
+            keep.push(session.id.clone());
+        }
+    }
+    Ok(keep)
+}
+
+/// Keep a source alive while its last agents move. This creates only a shell;
+/// canonical move guards still recheck every pane/window/session inside tmux.
+pub fn retain_attached_shell(session: &str) -> Result<()> {
+    let snapshot = Snapshot::load()?;
+    let source = snapshot.find(session)?;
+    independent(source)?;
+    let shell = tmux::default_shell(Some(session))?;
+    tmux::run(&[
+        "new-window",
+        "-d",
+        "-t",
+        &format!("{session}:"),
+        "-n",
+        "shell",
+        &shell,
+        "-il",
+    ])?;
+    Ok(())
 }
 
 struct MovePlan<'a> {
@@ -292,8 +380,10 @@ pub fn move_agent(agent: &Agent, target: &str) -> Result<()> {
         || live.session_id != agent.session_id
         || live.completion_epoch != agent.completion_epoch
         || name != agent.name
+        || live.pane.session != agent.session
+        || live.pane.window != agent.window
     {
-        bail!("agent identity/name changed; list agents again before moving");
+        bail!("agent identity/name/placement changed; list agents again before moving");
     }
     let snapshot = Snapshot::load()?;
     let plan = plan_move(&snapshot, &agent.pane, target)?;
@@ -469,6 +559,37 @@ mod tests {
                     .contains("grouped")
             );
         }
+    }
+
+    #[test]
+    fn organization_preflight_retains_evacuated_clients_and_incoming_projects() {
+        let snapshot = Snapshot::parse(
+            &(row("$0", "mixed", 1, "", "@0", "%0", false)
+                + &row("$1", "api", 0, "", "@1", "%1", false)),
+        )
+        .unwrap();
+        let assignments = vec![("%0".into(), "api".into()), ("%1".into(), "new".into())];
+        // Both attached mixed and detached api (which receives %0 later) must survive.
+        assert_eq!(
+            preflight(&snapshot, &assignments, &[]).unwrap(),
+            ["$1", "$0"]
+        );
+        let with_shell = Snapshot::parse(
+            &(row("$0", "mixed", 1, "", "@0", "%0", false)
+                + &row("$0", "mixed", 1, "", "@0", "%shell", false)
+                + &row("$1", "api", 0, "", "@1", "%1", false)),
+        )
+        .unwrap();
+        assert_eq!(preflight(&with_shell, &assignments, &[]).unwrap(), ["$1"]);
+        let grouped = Snapshot::parse(
+            &(row("$0", "mixed", 1, "team", "@0", "%0", false)
+                + &row("$1", "api", 0, "", "@1", "%1", false)),
+        )
+        .unwrap();
+        assert!(preflight(&grouped, &assignments, &[]).is_err());
+        let linked =
+            Snapshot::parse(&(base() + &row("$2", "alias", 0, "", "@0", "%0", false))).unwrap();
+        assert!(preflight(&linked, &assignments, &[]).is_err());
     }
 
     #[test]

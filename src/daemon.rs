@@ -91,6 +91,8 @@ fn run_inner() -> Result<()> {
     let previous = index::read_any()?;
     let mut order = previous.as_ref().map_or_else(Vec::new, |i| i.order.clone());
     let mut last_agent = previous.as_ref().and_then(|i| i.last_agent.clone());
+    let mut organizer =
+        crate::organize::Runtime::restore(previous.as_ref().and_then(|i| i.organize.clone()));
     let mut prev: HashMap<String, Agent> = previous
         .map(|i| i.agents.into_iter().map(|a| (a.pane.clone(), a)).collect())
         .unwrap_or_default();
@@ -102,6 +104,7 @@ fn run_inner() -> Result<()> {
     let mut announcements = Announcements::default();
     // Optional naming runs outside tmux and never blocks this loop.
     let mut auto_name = None;
+    let mut auto_name_issues = Vec::new();
 
     loop {
         if SHUTDOWN.load(Ordering::Relaxed) {
@@ -116,7 +119,12 @@ fn run_inner() -> Result<()> {
         let batch = fold(&mut prev, detect::detect(&panes)?, &panes, now);
         let agents = batch.values;
         let mut issues = batch.issues;
-        issues.extend(crate::autoname::tick(&mut auto_name, &agents, &panes, now));
+        issues.extend(organizer.tick(&agents, &panes)?);
+        // Delay naming application and new attempts while manual organization is active.
+        if !crate::organize::busy() {
+            auto_name_issues = crate::autoname::tick(&mut auto_name, &agents, &panes, now);
+        }
+        issues.extend(auto_name_issues.clone());
         order = next_order(order, requested_order, &agents, &panes);
         last_agent = last_used(last_agent, &before, &agents, &panes);
         recent_event = recent_event.filter(|event| event.is_live(now));
@@ -140,6 +148,7 @@ fn run_inner() -> Result<()> {
             windows: windows(&panes),
             order: order.clone(),
             last_agent: last_agent.clone(),
+            organize: organizer.status.clone(),
         })
         .context("writing agent index")?;
         // Use the last diagnostic snapshot for presentation, then fold this attempt's issues

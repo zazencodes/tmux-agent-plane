@@ -717,9 +717,9 @@ def extra_checks(client):
     # rename or close action may be replayed after the confirmation disappears.
     for cancel in [b'n', b'\x1b', b'j', b'\x1b[B', b'v', b'f', b's', b'r', b'q', b'x', b'Y', b'/', b'\x19']:
         client.key(b'x')
-        wait('kill prompt', lambda: '? Y/n' in client.text())
+        wait('kill prompt', lambda: '? [Y/n]' in client.text())
         client.key(cancel)
-        wait('cancel consumes key', lambda: '? Y/n' not in client.text())
+        wait('cancel consumes key', lambda: '? [Y/n]' not in client.text())
         assert client.selected() == selection and client.context() == context
         assert shown_names(client) == baseline and 'v off' in client.text() and 'f all' in client.text()
         assert '/ nav-' not in client.text() and 'save' not in client.footer()
@@ -727,7 +727,7 @@ def extra_checks(client):
     # Native state and identity are validated independently of daemon refresh.
     query(client, 'nav-idle', select='nav-idle')
     client.key(b'x')
-    wait('state pin prompt', lambda: '? Y/n' in client.text())
+    wait('state pin prompt', lambda: '? [Y/n]' in client.text())
     change('nav-idle', 'working', 0)
     settle(0.15)
     client.key(b'y')
@@ -736,7 +736,7 @@ def extra_checks(client):
     wait('new state indexed', lambda: agent('nav-idle')['state'] == 'working')
     settle(0.7)
     client.key(b'x')
-    wait('identity pin prompt', lambda: '? Y/n' in client.text())
+    wait('identity pin prompt', lambda: '? [Y/n]' in client.text())
     change('nav-idle', 'working', 0, identity=1)
     settle(0.15)
     client.key(b'y')
@@ -744,7 +744,7 @@ def extra_checks(client):
     wait('new identity indexed', lambda: agent('nav-idle')['session_id'].endswith('-1'))
     settle(0.7)
     client.key(b'x')
-    wait('rename pin prompt', lambda: '? Y/n' in client.text())
+    wait('rename pin prompt', lambda: '? [Y/n]' in client.text())
     plane('rename', 'nav-idle', 'nav-renamed')
     SPAWNED[SPAWNED.index('nav-idle')] = 'nav-renamed'
     client.key(b'y')
@@ -759,7 +759,7 @@ def extra_checks(client):
     # The confirmation belongs to its original client context, even on the same pane.
     query(client, 'nav-idle', select='nav-idle')
     client.key(b'x')
-    wait('client context pin prompt', lambda: '? Y/n' in client.text())
+    wait('client context pin prompt', lambda: '? [Y/n]' in client.text())
     pinned_context = client.context()
     tmux('new-session', '-d', '-s', 'zzz-context', '-t', 'scratch')
     tmux('switch-client', '-c', pinned_context[0], '-t',
@@ -797,7 +797,7 @@ def extra_checks(client):
     # Remote final session warning plus lowercase y confirmation.
     query(client, 'nav-away', select='nav-away')
     client.key(b'x')
-    wait('named remote last-session warning', lambda: 'ends session nav-away? Y/n' in client.text())
+    wait('named remote last-session warning', lambda: 'ends session nav-away? [Y/n]' in client.text())
     client.snapshot('kill-remote-session-warning')
     extra_pane = tmux('new-window', '-d', '-t', '=nav-away:', '-P', '-F', '#{pane_id}', '/bin/sh')
     client.key(b'y')
@@ -805,7 +805,7 @@ def extra_checks(client):
     assert agent('nav-away')
     tmux('kill-pane', '-t', extra_pane)  # Private nonagent fixture infrastructure only.
     client.key(b'x')
-    wait('remote warning after topology restored', lambda: 'ends session nav-away? Y/n' in client.text())
+    wait('remote warning after topology restored', lambda: 'ends session nav-away? [Y/n]' in client.text())
     client.key(b'y')
     wait('remote y close', lambda: not any(a['name'] == 'nav-away' for a in index()['agents']))
     SPAWNED.remove('nav-away')
@@ -818,12 +818,12 @@ def extra_checks(client):
     selected(client, 'nav-exit')
     exiting_window = agent('nav-exit')['window']
     client.key(b'x')
-    wait('exit pin prompt', lambda: '? Y/n' in client.text())
+    wait('exit pin prompt', lambda: '? [Y/n]' in client.text())
     plane('kill', 'nav-exit')
     SPAWNED.remove('nav-exit')
     calls_before_exit_confirmation = len((ROOT / 'tmux.calls').read_text().splitlines())
     client.key(b'y')
-    wait('exited pin refused', lambda: '? Y/n' not in client.text() and
+    wait('exited pin refused', lambda: '? [Y/n]' not in client.text() and
          ('exited' in client.footer() or 'changed' in client.footer() or
           ('tmux list-panes -t ' + exiting_window) in client.footer()))
     exit_confirmation_calls = [json.loads(line) for line in
@@ -850,7 +850,7 @@ def extra_checks(client):
     query(client, 'nav-linked', select='nav-linked')
     selected(client, 'nav-linked')
     client.key(b'x')
-    wait('linked remote warning', lambda: 'ends session' in client.text() and '? Y/n' in client.text())
+    wait('linked remote warning', lambda: 'ends session' in client.text() and '? [Y/n]' in client.text())
     client.snapshot('kill-linked-remote-warning')
     client.key(b'y')
     wait('linked remote close', lambda: not any(a['pane'] == linked['pane'] for a in index()['agents']))
@@ -880,10 +880,10 @@ def extra_checks(client):
     query(client, 'nav-idle', select='nav-idle')
     tmux('resize-pane', '-t', client.context()[1], '-x', '20')
     client.key(b'x')
-    wait('narrow confirmation readable', lambda: '(working)? Y/n' in client.text())
+    wait('narrow confirmation readable', lambda: '(working)? [Y/n]' in client.text())
     client.snapshot('kill-narrow-confirmation')
     client.key(b'n')
-    wait('narrow cancelled', lambda: '? Y/n' not in client.text())
+    wait('narrow cancelled', lambda: '? [Y/n]' not in client.text())
     tmux('resize-pane', '-t', client.context()[1], '-x', '38')
     assert not any(json.loads(line)[0] == 'kill-session' for line in (ROOT / 'tmux.calls').read_text().splitlines())
     return {'latched_sort_live_badges': True, 'oldest_state_first': True,

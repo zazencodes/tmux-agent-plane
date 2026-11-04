@@ -7,7 +7,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
-- Organize project sessions from the sidebar: select a ready coordinator, press `o`, then Enter or Space to ask it to group all agents across every session using the existing skill and CLI; opening or canceling sends nothing
+- Organize project sessions from the sidebar: press `o`, then Enter or Space to group all agents across every session using the configured background AI command; opening or canceling runs nothing
 - Focus the previous or next agent directly with Alt+↑/↓, across sessions and without entering the sidebar; configure the keys with `@agent-plane-previous-key` and `@agent-plane-next-key`
 - Treat tmux sessions as projects: inspect/create named sessions, spawn directly into an explicit project, and move running agents between projects without restarting them or sending input; the agent skill now includes a project organization workflow
 - A Neovim Telescope picker for tracked agent sessions: fuzzy-search names, task titles and blocked details, browse with arrows, and press Enter to focus the selected pane
@@ -24,6 +24,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Run global organization through the same configured background command/model as AI naming, with progress in the sidebar and guarded native session moves; never send organization tasks into open agent panes
+- Show the default-yes confirmation as `[Y/n]` for organization and kill; Enter accepts, and Space also accepts organization
 - Close a window's sidebar immediately when its last other pane disappears, removing the full-screen sidebar pause before the window closes
 
 ## 0.4.3 - 2026-11-04

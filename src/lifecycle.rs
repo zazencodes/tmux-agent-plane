@@ -112,6 +112,14 @@ pub fn set_order(order: &[String]) -> Result<()> {
     request(&socket_path()?, &format!("order {}", order.join(" ")))
 }
 
+/// Queue a manual background organization job with the configuration the user confirmed.
+pub fn organize(settings: &crate::autoname_config::Config) -> Result<()> {
+    request(
+        &socket_path()?,
+        &format!("organize {}", serde_json::to_string(settings)?),
+    )
+}
+
 fn control(action: Action) -> Result<()> {
     let lock = open_lock("lifecycle.lock")?;
     flock(&lock, libc::LOCK_EX)?;
@@ -317,6 +325,17 @@ fn control_loop(listener: UnixListener, done: &AtomicBool) -> Result<()> {
                 (&mut socket)
                     .take(REQUEST_LIMIT)
                     .read_to_string(&mut command)?;
+                if let Some(payload) = command.strip_prefix("organize ") {
+                    let result = serde_json::from_str(payload)
+                        .context("parsing organization settings")
+                        .and_then(crate::organize::request);
+                    let response = match result {
+                        Ok(()) => "ok".into(),
+                        Err(error) => format!("{error:#}"),
+                    };
+                    socket.write_all(response.as_bytes())?;
+                    continue;
+                }
                 match command.as_str() {
                     "ping" => {}
                     "stop" => {

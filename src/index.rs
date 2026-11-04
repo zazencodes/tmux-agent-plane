@@ -137,6 +137,9 @@ pub struct Index {
     /// The agent a client most recently viewed as the active pane. Survives a daemon restart.
     #[serde(default)]
     pub last_agent: Option<String>,
+    /// Manual background organization, observed by all sidebars.
+    #[serde(default)]
+    pub organize: Option<crate::organize::Status>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

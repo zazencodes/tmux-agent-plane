@@ -193,31 +193,12 @@ struct KillConfirmation {
 }
 
 struct OrganizeConfirmation {
-    agent: Agent,
-    codex_pid: Option<i32>,
+    settings: crate::autoname_config::Config,
     client: Client,
 }
 
 fn organize_accepts(key: KeyEvent) -> bool {
     key.modifiers.is_empty() && matches!(key.code, KeyCode::Enter | KeyCode::Char(' ' | 'y'))
-}
-
-fn organizer_ready(agent: &Agent) -> Result<()> {
-    if !matches!(agent.state, State::Idle | State::Done) {
-        bail!(
-            "select an idle or done coordinator; {} is {}",
-            agent.name,
-            agent.state.as_str()
-        );
-    }
-    Ok(())
-}
-
-fn organize_task(agent: &Agent) -> String {
-    format!(
-        "Organize all tracked agents across every tmux session into project sessions. The user selected you to coordinate this global organization; your explicit agent name is {:?}. Load the tmux-agent-plane skill and follow its Organizing projects workflow. A tmux session IS a project. Inspect the complete inventories from `tmux-agent-plane sessions list --json` and `tmux-agent-plane list --json`, including agents hidden by sidebar search or state filters. Review every listed agent; retain agents already in the correct project and move any misplaced agents. Use current tasks, names, working directories, parent links and established sessions to understand which work belongs together. Create appropriate named sessions and move existing agents through the canonical CLI commands: `tmux-agent-plane sessions create NAME --cwd DIR` and `tmux-agent-plane move AGENT --session NAME`. This request authorizes you to carry out the organization and verify the full inventory, then report the resulting project sessions and any limits. Preserve agent processes, names, pane identities, parents and completion history. Keep unrelated shells and existing work intact. Never restart or kill agents, submit prompts/keys to other agents, use raw tmux on agent panes, change files/settings/trust or access usage/reset controls. Respect linked/grouped-session and attached-session move refusals; report those limits without bypassing them. This task is tmux organization; no source changes are requested.",
-        agent.name
-    )
 }
 
 /// Changes in task/state/turn or native identity require a new deliberate confirmation.
@@ -371,6 +352,7 @@ struct Sidebar {
     agents: Vec<Agent>,
     navigation: Navigation,
     recent_event: Option<RecentEvent>,
+    organize_status: Option<crate::organize::Status>,
     list: ListState,
     error: Option<String>,
     editing: Option<Rename>,
@@ -492,6 +474,15 @@ impl Sidebar {
             .filter(|a| !self.closed.contains(&a.pane))
             .collect();
         self.recent_event = index.recent_event;
+        if index
+            .organize
+            .as_ref()
+            .is_some_and(|status| status.updated_at >= self.pressed_at)
+            && self.notice.as_deref() == Some("organization queued")
+        {
+            self.notice = None;
+        }
+        self.organize_status = index.organize;
         self.error = None;
         // Any tick stamped after the acknowledgement has adopted the order `s` sent.
         if self.sorted_at.is_none_or(|at| index.updated_at > at) {
@@ -735,7 +726,7 @@ impl Sidebar {
             self.notice = None;
             if organize_accepts(key) {
                 match self.confirm_organize(&confirmation, own) {
-                    Ok(()) => self.notice = Some("asked to organize all agents".into()),
+                    Ok(()) => self.notice = Some("organization queued".into()),
                     Err(error) => self.notice = Some(error.to_string()),
                 }
             }
@@ -751,25 +742,13 @@ impl Sidebar {
         }
         self.notice = None;
         let result: Result<OrganizeConfirmation> = (|| {
-            let selected = self
-                .selected()
-                .context("select a ready coordinator for all agents")?;
-            let index = index::read()?;
-            let current = index
-                .agents
-                .iter()
-                .find(|a| a.pane == selected.pane)
-                .context("coordinator exited; select it again")?;
-            // Opening only reviews the target: capture its fresh state and identity,
-            // even if the rendered row is one sidebar refresh behind the index.
-            organizer_ready(current)?;
+            let settings = crate::organize::settings()?;
+            if index::read()?.organize.is_some_and(|s| s.running) {
+                bail!("organization already running");
+            }
             let clients = clients()?;
             let client = input_client(&clients, own)?.clone();
-            Ok(OrganizeConfirmation {
-                agent: current.clone(),
-                codex_pid: action_identity(current)?,
-                client,
-            })
+            Ok(OrganizeConfirmation { settings, client })
         })();
         match result {
             Ok(confirmation) => self.organizing = Some(confirmation),
@@ -783,20 +762,10 @@ impl Sidebar {
         if input_client(&clients, own)? != &confirmation.client {
             bail!("confirmation client changed; press o again");
         }
-        let index = index::read()?;
-        let current = index
-            .agents
-            .iter()
-            .find(|a| a.pane == confirmation.agent.pane)
-            .context("coordinator exited; select it again")?;
-        if !same_action_target(&confirmation.agent, current) {
-            bail!("coordinator changed; press o again");
+        if crate::organize::settings()? != confirmation.settings {
+            bail!("background agent configuration changed; press o again");
         }
-        organizer_ready(current)?;
-        if action_identity(current)? != confirmation.codex_pid {
-            bail!("coordinator process changed; press o again");
-        }
-        commands::send(&current.pane, &organize_task(current), false, false, None)
+        lifecycle::organize(&confirmation.settings)
     }
 
     fn help_key(&mut self, key: KeyEvent) -> bool {
@@ -1242,18 +1211,34 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
 fn organize_footer(confirmation: &OrganizeConfirmation, width: usize) -> Vec<Line<'static>> {
     vec![
         Line::styled(
-            truncate(" organize all agents? y/n", width),
+            truncate(
+                if width >= 28 {
+                    " organize all agents? [Y/n]"
+                } else {
+                    " organize all? [Y/n]"
+                },
+                width,
+            ),
             Style::default().fg(TEXT).bold(),
         ),
         Line::styled(
-            truncate(&format!(" via {}", confirmation.agent.name), width),
+            truncate(
+                &format!(
+                    " via {}",
+                    std::path::Path::new(&confirmation.settings.auto_name.command[0])
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                ),
+                width,
+            ),
             SUBTEXT,
         ),
     ]
 }
 
 /// Two lines keep both name and state readable in a narrow pane. Remote session
-/// destruction gets a third, explicit risk line; Y/n always remains visible.
+/// destruction gets a third, explicit risk line; [Y/n] always remains visible.
 fn kill_footer(confirmation: &KillConfirmation, width: usize) -> Vec<Line<'static>> {
     let agent = &confirmation.agent;
     let narrow = agent.name.chars().count() + 6 > width;
@@ -1263,11 +1248,14 @@ fn kill_footer(confirmation: &KillConfirmation, width: usize) -> Vec<Line<'stati
         format!(" kill {}", agent.name)
     };
     let state = format!(
-        "{}({}){}",
-        if narrow { "kill " } else { " " },
-        agent.state.as_str(),
+        "{}{}",
+        if narrow {
+            format!("kill {}", agent.state.as_str())
+        } else {
+            format!(" ({})", agent.state.as_str())
+        },
         if confirmation.ends_sessions.is_empty() {
-            "? Y/n"
+            "? [Y/n]"
         } else {
             ""
         }
@@ -1279,9 +1267,12 @@ fn kill_footer(confirmation: &KillConfirmation, width: usize) -> Vec<Line<'stati
     if !confirmation.ends_sessions.is_empty() {
         let risk = truncate(
             &format!(" ends session {}", confirmation.ends_sessions.join(", ")),
-            width.saturating_sub(5),
+            width.saturating_sub(7),
         );
-        lines.push(Line::styled(format!("{risk}? Y/n"), colour(State::Blocked)));
+        lines.push(Line::styled(
+            format!("{risk}? [Y/n]"),
+            colour(State::Blocked),
+        ));
     }
     lines
 }
@@ -1306,6 +1297,21 @@ fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
             ("esc", "cancel"),
             ("^w ^u", "clear"),
         ]),
+        (None, None)
+            if sidebar.organize_status.as_ref().is_some_and(|s| {
+                s.running || s.failed || now.saturating_sub(s.updated_at) < 10_000
+            }) =>
+        {
+            let status = sidebar.organize_status.as_ref().unwrap();
+            Line::styled(
+                truncate(&format!(" {}", status.message), width),
+                if status.failed {
+                    colour(State::Blocked)
+                } else {
+                    SUBTEXT
+                },
+            )
+        }
         (None, None) => match sidebar
             .recent_event
             .as_ref()
@@ -1426,8 +1432,12 @@ mod tests {
 
     fn organize_confirmation() -> OrganizeConfirmation {
         OrganizeConfirmation {
-            agent: agent("%1", State::Idle),
-            codex_pid: None,
+            settings: crate::autoname_config::Config {
+                auto_name: crate::autoname_config::AutoName {
+                    command: vec!["agy".into(), "{prompt}".into()],
+                    ..Default::default()
+                },
+            },
             client: Client {
                 name: "/dev/fixture".into(),
                 pid: "42".into(),
@@ -1439,13 +1449,7 @@ mod tests {
     }
 
     #[test]
-    fn organize_requires_ready_agent_and_yes() {
-        for state in [State::Idle, State::Done, State::Working, State::Blocked] {
-            assert_eq!(
-                organizer_ready(&agent("%1", state)).is_ok(),
-                matches!(state, State::Idle | State::Done)
-            );
-        }
+    fn organize_accepts_default_yes() {
         for code in [KeyCode::Enter, KeyCode::Char(' '), KeyCode::Char('y')] {
             assert!(organize_accepts(KeyEvent::from(code)));
             for modifier in [
@@ -1499,6 +1503,7 @@ mod tests {
         for width in [20, 38] {
             let lines = organize_footer(&confirmation, width);
             assert_eq!(lines.len(), 2);
+            assert!(lines[0].to_string().contains("all") && lines[0].to_string().contains("[Y/n]"));
             assert!(lines.iter().all(|line| line.width() <= width));
         }
         let mut terminal = Terminal::new(TestBackend::new(38, 28)).unwrap();
@@ -1515,8 +1520,8 @@ mod tests {
             })
             .collect();
         assert!(rows[0].contains("agents"));
-        assert!(rows[26].contains("organize all agents? y/n"));
-        assert!(rows[27].contains("via agent-%1"));
+        assert!(rows[26].contains("organize all agents? [Y/n]"));
+        assert!(rows[27].contains("via agy"));
         assert!(!sidebar.help_key(KeyEvent::from(KeyCode::Char('?'))));
         assert!(!sidebar.help.open);
     }
@@ -1584,7 +1589,7 @@ mod tests {
                 })
                 .collect();
             assert!(!help.contains("c configure"));
-            assert!(!help.contains("? Y/n"));
+            assert!(!help.contains("? [Y/n]"));
             sidebar.help_key(KeyEvent::from(KeyCode::Char('x')));
             assert!(sidebar.killing.is_some());
             terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
@@ -1859,6 +1864,7 @@ mod tests {
             windows: Vec::new(),
             order: order.iter().map(|pane| pane.to_string()).collect(),
             last_agent: None,
+            organize: None,
         }
     }
 
@@ -1982,6 +1988,7 @@ mod tests {
         let at = |updated_at, active: &str, viewed| Index {
             windows: vec![window(active, viewed)],
             last_agent: Some("%1".into()),
+            organize: None,
             ..index_at(updated_at, &agents, &["%1", "%2"])
         };
         sidebar.apply(at(1, "%1", true), "%9");
@@ -2287,13 +2294,13 @@ mod tests {
             assert_eq!(lines.len(), 2);
             assert!(lines[0].to_string().contains("kill-name-is-long"));
             assert!(lines[1].to_string().contains("working"));
-            assert!(lines[1].to_string().ends_with("Y/n"));
+            assert!(lines[1].to_string().ends_with("[Y/n]"));
             assert!(lines.iter().all(|line| line.width() <= width));
         }
         kill.ends_sessions = vec!["remote".into()];
         let lines = kill_footer(&kill, 38);
         assert_eq!(lines.len(), 3);
-        assert!(lines[2].to_string().contains("ends session remote? Y/n"));
+        assert!(lines[2].to_string().contains("ends session remote? [Y/n]"));
         // Render confirmation over a local error/event; no hidden normal key hints.
         use ratatui::{Terminal, backend::TestBackend};
         sidebar.killing = Some(kill);
@@ -2309,7 +2316,7 @@ mod tests {
             .collect();
         assert!(rows[9].contains("kill-name-is-long"));
         assert!(rows[10].contains("working"));
-        assert!(rows[11].contains("ends session remote? Y/n"));
+        assert!(rows[11].contains("ends session remote? [Y/n]"));
         assert!(!rows.iter().any(|row| row.contains("rename error")));
     }
 
