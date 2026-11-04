@@ -10,6 +10,7 @@ mod index;
 mod lifecycle;
 mod navigation;
 mod popup;
+mod sessions;
 mod sidebar;
 mod sidebar_help;
 mod tmux;
@@ -58,6 +59,19 @@ enum Cmd {
     List {
         #[arg(long)]
         json: bool,
+    },
+    /// Inspect or create tmux sessions (each session is a project)
+    Sessions {
+        #[command(subcommand)]
+        action: sessions::Action,
+    },
+    /// Move a running agent into an existing project without restarting it
+    Move {
+        /// Agent name, pane id, or `self` when caller identity is available
+        target: String,
+        /// Exact destination session name or id
+        #[arg(long)]
+        session: String,
     },
     /// Print an agent's recent screen
     Read {
@@ -129,6 +143,9 @@ enum Cmd {
         task: Option<String>,
         #[arg(long = "in", value_enum, default_value = "pane")]
         placement: commands::Placement,
+        /// Exact existing session for --in window; new session name for --in session
+        #[arg(long)]
+        session: Option<String>,
         /// Working directory (default: current directory)
         #[arg(long)]
         cwd: Option<PathBuf>,
@@ -153,6 +170,8 @@ fn main() -> anyhow::Result<()> {
         Cmd::ToggleSidebar { window } => sidebar::toggle(&commands::target_pane(&window)?),
         Cmd::FollowSidebar { window } => sidebar::follow(&commands::target_pane(&window)?),
         Cmd::List { json } => commands::list(json),
+        Cmd::Sessions { action } => sessions::run(action),
+        Cmd::Move { target, session } => commands::move_agent(&target, &session),
         Cmd::Read { target, lines } => commands::read(&target, lines),
         Cmd::Send {
             target,
@@ -171,6 +190,7 @@ fn main() -> anyhow::Result<()> {
             kind,
             task,
             placement,
+            session,
             cwd,
             name,
             wait,
@@ -178,6 +198,7 @@ fn main() -> anyhow::Result<()> {
         } => commands::spawn(commands::Spawn {
             kind,
             placement,
+            session,
             cwd,
             name,
             task,

@@ -34,6 +34,7 @@ Claude Code, Codex and Antigravity use native signals. Pi and OpenCode use publi
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
 - **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`. Optional AI naming can name the remaining default-named agents; press `a` in the sidebar to set it up.
 - **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. A spawned agent records its parent when caller identity is known.
+- **Sessions are projects.** Inspect and create named project sessions, start helpers directly in them, and move running agent panes between projects while their processes, names and parent links stay intact.
 - **Your agents, unchanged.** Spawned agents start in a normal shell, so your aliases and flags apply, and the shell stays when the agent exits.
 
 ## States
@@ -210,6 +211,25 @@ Pi and OpenCode completion counters also report a new finished turn when it comp
 
 Desktop notifications keep the task or blocked detail and work with the sidebar closed. Daemon faults and recoveries open in their own window a little below the top of the terminal, once you pause typing so it does not swallow keystrokes. A notice stays until you press a key or for 10 seconds, and it takes keyboard input while it is open.
 
+### Project sessions
+
+A tmux session is a project: its orchestrator and helpers live in the same session, and the sidebar groups them under that session's name. The CLI and shipped skill let an orchestrator organize existing work and place new work directly in a named project:
+
+```bash
+tmux-agent-plane sessions list --json
+tmux-agent-plane list --json
+tmux-agent-plane sessions create api --cwd /path/to/api
+tmux-agent-plane move api-review --session api
+tmux-agent-plane spawn codex "Review the API changes" --in window --session api --cwd /path/to/api --name api-tests
+tmux-agent-plane spawn claude "Plan the website" --in session --session website --cwd /path/to/website --name website-lead
+```
+
+`sessions list` includes every session, even one with only shells: exact name and ID, attached-client count, window IDs, session group and agent names. Linked agents appear in each containing session. Existing destinations use exact names or IDs; new session names reject dots, colons, control characters and surrounding whitespace so tmux cannot silently rewrite them. `sessions create` opens a detached interactive shell. `spawn --in session --session NAME` creates the project with its first agent; `--name` names that agent separately. `spawn --in window --session NAME` uses an existing project's configured shell. An unknown destination fails before launching anything.
+
+`move` uses a native detached pane move: the process keeps running, with the same pane ID, native identity, name, parent and completion history. No input is sent to the agent. Only the chosen pane moves, leaving other agents and shells in a mixed source window. The destination's current window and clients stay in place. The command prints the new location; the daemon publishes it on its next scan.
+
+A source window or detached session may disappear when it has no remaining content; the normal sidebar hook closes a lone sidebar. Moves that would end an attached source session are refused. Linked source windows and grouped source/destination sessions are also refused because those share windows across projects. The CLI checks the live agent identity and rechecks topology in tmux's command queue before moving. Existing shell-only windows remain for the user. The skill's project organization workflow covers inspecting work, creating sessions, moving each team member and verifying the result.
+
 ### Agent launch syntax
 
 `spawn` starts a persistent interactive session in tmux’s configured `default-shell`. It passes the launch command directly to an interactive login shell, which loads your startup files before running the agent, so aliases and flags apply even with long or multi-line tasks. Each argument is quoted separately. When the agent exits, a fresh interactive login shell stays open. `spawn` supplies its own launch command, so tmux’s `default-command` is not used.
@@ -264,6 +284,9 @@ AI output must be two or three lowercase words joined by hyphens, each starting 
 | Command | Action |
 | --- | --- |
 | `list [--json]` | All agents. `*` (or `"self": true`) marks a known caller |
+| `sessions list [--json]` | Every project session: name/ID, windows, attached clients, group and agents |
+| `sessions create <name> [--cwd DIR]` | Create a detached named project with an interactive shell |
+| `move <agent> --session SESSION` | Move the running agent pane to an existing project, preserving its process and metadata |
 | `read <agent> [--lines N]` | The agent's screen, plus N lines of scrollback |
 | `send <agent> "<prompt>" [--answer] [--wait] [--timeout S]` | Paste a prompt and press Enter. Refuses blocked agents unless `--answer` deliberately replies to their question; `--answer` requires a blocked target. `--wait` follows the submitted turn until it ends or blocks |
 | `keys <agent> <key>...` | Press keys, by tmux key name: `Enter`, `Escape`, `Down`, `2` |
@@ -272,7 +295,7 @@ AI output must be two or three lowercase words joined by hyphens, each starting 
 | `focus <agent>` | Show the agent on your screen |
 | `cycle next\|previous --client CLIENT` | Direct key binding: focus the adjacent agent in global sidebar order for the exact invoking tmux client |
 | `kill <agent>` | Close the agent's pane |
-| `spawn claude\|codex\|pi\|opencode\|agy\|grok ["<task>"] [--in pane\|window\|session] [--cwd DIR] [--name NAME] [--wait] [--timeout S]` | Start an agent. `--in pane` (default) splits the caller's pane |
+| `spawn claude\|codex\|pi\|opencode\|agy\|grok ["<task>"] [--in pane\|window\|session] [--session SESSION] [--cwd DIR] [--name NAME] [--wait] [--timeout S]` | Start an agent. `--in pane` (default) splits the caller's pane; `--session` selects an existing project with `--in window`, or names a new one with `--in session` |
 | `toggle-sidebar <window>` | What the sidebar key does, from a window (a window or pane id) |
 | `follow-sidebar <window>` | Add the sidebar to a window while it is open. The plugin runs it when a window comes on screen |
 | `sidebar` | The sidebar's agent list, run in the sidebar pane |

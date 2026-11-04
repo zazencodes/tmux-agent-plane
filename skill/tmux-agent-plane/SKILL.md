@@ -1,6 +1,7 @@
 ---
 name: tmux-agent-plane
-description: The system-wide index of the user's coding agents (Claude Code, Codex, Pi, OpenCode, Antigravity, Grok Build) across every tmux session, and the only way to work with them, through the `tmux-agent-plane` CLI. Load it first, before any tmux command, whenever a task touches another agent: the user names an agent (`claude-154`, `codex-26`, `reviewer`) or a pane, asks how an agent is doing or what agents are running, wants to check on, read, message, answer, wait for, show, close, start or spawn an agent (in a pane, window or session), wants work delegated to another agent, or wants a super agent that coordinates others.
+description: >-
+  The system-wide index of the user's coding agents (Claude Code, Codex, Pi, OpenCode, Antigravity, Grok Build) across every tmux session, and the only way to work with them, through the `tmux-agent-plane` CLI. Load it first, before any tmux command, whenever a task touches another agent: the user names an agent (`claude-154`, `codex-26`, `reviewer`) or a pane, asks how an agent is doing or what agents are running, wants to check on, read, message, answer, wait for, show, close, start or spawn an agent (in a pane, window or session), wants work delegated to another agent, or wants a super agent that coordinates others, or asks to organize tmux sessions, clean up tmux projects or organize work into projects.
 ---
 
 # tmux-agent-plane
@@ -39,6 +40,9 @@ Do every agent job through `tmux-agent-plane`: finding agents, reading their scr
 ```bash
 tmux-agent-plane list                     # all agents: name, kind, state, where, parent, cwd, task
 tmux-agent-plane list --json              # the same with every field
+tmux-agent-plane sessions list [--json]   # projects: exact name/id, windows, clients, group, agents
+tmux-agent-plane sessions create <name> [--cwd DIR] # new detached project with a shell
+tmux-agent-plane move <agent> --session <session>  # existing exact session name or id
 tmux-agent-plane read <agent> [--lines N] # its screen, plus N lines of scrollback
 tmux-agent-plane send <agent> "<prompt>" [--answer] [--wait] [--timeout S]
 tmux-agent-plane keys <agent> <key>...    # tmux key names: Enter Escape Up Down Tab 1 2 y n
@@ -47,7 +51,7 @@ tmux-agent-plane wait <agent> [--timeout S]
 tmux-agent-plane focus <agent>            # bring it on screen for the user
 tmux-agent-plane toggle-sidebar self  # requires known caller identity; opens/closes every sidebar
 tmux-agent-plane kill <agent>             # close its pane, ending it
-tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|window|session] [--cwd DIR] [--name NAME] [--wait] [--timeout S]
+tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|window|session] [--session SESSION] [--cwd DIR] [--name NAME] [--wait] [--timeout S]
 ```
 
 `<agent>` is a name, pane id, or `self` when caller identity is reliable. `read` and `keys` also take any pane id, including a pane whose agent has not started yet.
@@ -62,6 +66,7 @@ tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|w
 
 - `spawn` passes the agent command directly to tmux’s `default-shell` as an interactive login shell command, after startup files load. Aliases and flags apply, long and multi-line tasks arrive intact, and a fresh interactive login shell stays when the agent exits. It supplies its own command rather than tmux’s `default-command`.
 - `--in pane` (default) splits a known caller's pane. Codex callers must use `--in window` or `--in session`. Use a window for independent work or a session for a separate project; follow the requested placement when caller identity permits it.
+- A tmux session is a project. Use `--in window --session api` to start work in the existing `api` project, or `--in session --session api` to create that named project with its first agent. `--session` requires one of those placements. Existing destinations accept exact names or session IDs from `sessions list`; there is no fuzzy matching or implicit creation. New session names must have no dots, colons, control characters or surrounding whitespace. `--name` names the agent separately. An explicit existing destination uses that session's configured shell.
 - Give the full task as the prompt: the new agent has none of your context. Say which files, what done looks like, and what to report back.
 - Always name agents you spawn (`--name reviewer`), following the naming rule above.
 - `spawn` prints `<name> <pane> <location>`. The spawned agent records you as its parent when caller identity is known; Codex window/session spawns record `parent: null`.
@@ -99,3 +104,14 @@ Before **any status or escalation message**, inspect the target's current state 
 ## Working as a super agent
 
 When coordinating several agents: spawn each with a self-contained task and a name, `send --wait` or `wait` on them, `read` their results, and check `list` for anything `blocked` or `done`. Give each agent its own files or worktree so they do not edit the same files. When the user wants to look at an agent, `focus` it. Close a finished agent only when the user wants it gone: `kill <agent>`.
+
+## Organizing projects
+
+Treat requests such as “organize my tmux sessions”, “clean up my tmux projects” or “organize my work into projects” as requests to organize the existing session/sidebar hierarchy. Each tmux session is one project, with its orchestrator and helpers inside it.
+
+1. Inspect `sessions list --json` and `list --json`. The session inventory includes shell-only sessions, attached-client counts, window IDs, group membership and agent names. Linked agents appear in every session containing their window; `list` retains one canonical agent row. Use tasks, names, directories and parent links to understand the work and choose appropriate existing or new sessions. Read an agent if its task is unclear.
+2. Create any needed project with `sessions create api --cwd /path/to/api`. Choose short, meaningful session names. Keep the user's established session/project boundaries.
+3. Move each existing agent with `move reviewer --session api`. Move its orchestrator and helpers individually when they belong together. Each move detaches only that agent pane into a destination window; other agents and shells in a mixed source window stay there. Moving preserves the process, pane ID, name, parent and completion history, and sends no prompt or keys. It prints the new location immediately; the index/sidebar follows on the next daemon scan.
+4. Start future helpers directly in that project: `spawn codex "<full task>" --in window --session api --cwd /path/to/worktree --name api-review`. Check `sessions list` and `list` to verify the result, then report the organization.
+
+Moves keep destination clients on their current windows. A source window, and a detached session with no remaining content, may disappear naturally, including the plugin's lone-sidebar cleanup. A move that would end an attached source session is refused; leave another content pane/window there before retrying. Linked source windows and grouped source/destination sessions are refused because they share work across sessions. Report those limits rather than using raw tmux to bypass them. Existing shell-only windows remain for the user; organizing projects does not authorize killing agents or unrelated shells.

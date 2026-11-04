@@ -1,7 +1,7 @@
 //! The commands agents (and people) use to see and steer other agents.
 
 use crate::index::{self, Agent, Index, Kind, State};
-use crate::tmux;
+use crate::{sessions, tmux};
 use anyhow::{Context, Result, bail};
 use std::borrow::Cow;
 use std::path::PathBuf;
@@ -285,6 +285,11 @@ pub fn kill(target: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn move_agent(target: &str, session: &str) -> Result<()> {
+    let index = index::read()?;
+    sessions::move_agent(find_agent(&index, target)?, session)
+}
+
 /// The single close operation shared by the CLI and the sidebar's confirmed action.
 /// tmux removes a window/session naturally only when its last pane/window is gone.
 pub fn kill_pane(pane: &str) -> Result<()> {
@@ -328,6 +333,7 @@ fn wait_for(pane: &str, timeout: Option<u64>, settled: impl Fn(&Agent) -> bool) 
 pub struct Spawn {
     pub kind: Kind,
     pub placement: Placement,
+    pub session: Option<String>,
     pub cwd: Option<PathBuf>,
     pub name: Option<String>,
     pub task: Option<String>,
@@ -338,6 +344,7 @@ pub struct Spawn {
 pub fn spawn(s: Spawn) -> Result<()> {
     // Validate the interactive launch before creating a pane or contacting tmux.
     let launch = (s.kind.adapter().launch)(s.task.as_deref())?;
+    validate_session_placement(s.placement, s.session.as_deref())?;
     let index = index::read()?;
     if let Some(name) = &s.name {
         check_name(&index, name, None)?;
@@ -361,7 +368,15 @@ pub fn spawn(s: Spawn) -> Result<()> {
 
     // Pass the command as argv to an interactive login shell. Shell startup finishes
     // before -c is evaluated; no terminal input can race startup or hit its line limit.
-    let shell = tmux::default_shell(me.as_deref())?;
+    let destination = if matches!(s.placement, Placement::Window) {
+        s.session
+            .as_deref()
+            .map(sessions::destination)
+            .transpose()?
+    } else {
+        None
+    };
+    let shell = tmux::default_shell(destination.as_deref().or(me.as_deref()))?;
     let command = shell_launch(&shell, launch.command, &launch.args);
     let shell_args = [shell.as_str(), "-ilc", command.as_str()];
     let pane = match (s.placement, &me) {
@@ -385,12 +400,13 @@ pub fn spawn(s: Spawn) -> Result<()> {
         ])?,
         (Placement::Window, _) => {
             // `session_id:` puts the window at the next free index of the caller's session.
-            let session = match &me {
-                Some(me) => Some(format!(
+            let session = match (destination, &me) {
+                (Some(id), _) => Some(format!("{id}:")),
+                (None, Some(me)) => Some(format!(
                     "{}:",
                     tmux::run(&["display-message", "-p", "-t", me, "#{session_id}"])?.trim()
                 )),
-                None => None,
+                (None, None) => None,
             };
             let mut args = vec!["new-window", "-d", "-P", "-F", "#{pane_id}", "-c", cwd];
             if let Some(session) = &session {
@@ -404,7 +420,7 @@ pub fn spawn(s: Spawn) -> Result<()> {
         }
         (Placement::Session, _) => {
             let mut args = vec!["new-session", "-d", "-P", "-F", "#{pane_id}", "-c", cwd];
-            if let Some(name) = &s.name {
+            if let Some(name) = s.session.as_ref().or(s.name.as_ref()) {
                 args.extend(["-s", name]);
             }
             args.extend(shell_args);
@@ -472,6 +488,17 @@ pub fn spawn(s: Spawn) -> Result<()> {
     Ok(())
 }
 
+fn validate_session_placement(placement: Placement, session: Option<&str>) -> Result<()> {
+    if let Some(session) = session {
+        match placement {
+            Placement::Pane => bail!("--session requires --in window or --in session"),
+            Placement::Session => sessions::validate_name(session)?,
+            Placement::Window => {}
+        }
+    }
+    Ok(())
+}
+
 /// Keep the command name literal so interactive aliases/functions apply. Arguments
 /// are shell data, and after the agent returns a fresh login shell owns the terminal.
 fn shell_launch(shell: &str, command: &str, args: &[String]) -> String {
@@ -493,6 +520,14 @@ fn shell_quote(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_session_placement_is_unambiguous() {
+        assert!(validate_session_placement(Placement::Pane, Some("api")).is_err());
+        assert!(validate_session_placement(Placement::Window, Some("existing.name")).is_ok());
+        assert!(validate_session_placement(Placement::Session, Some("new.name")).is_err());
+        assert!(validate_session_placement(Placement::Session, Some("new-api")).is_ok());
+    }
     #[test]
     fn launch_arguments_round_trip_through_shell() {
         // Exercise the generated shell program, including newlines, command
