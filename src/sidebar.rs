@@ -1345,6 +1345,7 @@ mod tests {
             all_agents: vec![agent("%1", State::Working)],
             ..Sidebar::default()
         };
+        sidebar.navigation.order = vec!["%1".into()];
         sidebar.rebuild();
         for key in [
             KeyCode::Char('q'),

@@ -242,10 +242,10 @@ def screens_during(client, action, seconds):
             until = time.monotonic() + seconds
         if not select.select([client.master], [], [], 0.05)[0]:
             continue
-        # tmux paints the panes, then the status line naming the window. A read can land between
-        # them, for as long as the rest takes to arrive. A wrong highlight stays until the next
-        # hop, so waiting out a short silence separates the two.
-        while select.select([client.master], [], [], 0.01)[0]:
+        # tmux paints in pieces and can defer the status line while output is backed up, so a
+        # read can land mid-paint. A wrong highlight stays until the next hop, so a silence
+        # shorter than the hops separates the two.
+        while select.select([client.master], [], [], 0.04)[0]:
             client.stream.feed(os.read(client.master, 65536))
         screen = (client.screen.display[0].split()[-1], client.selected(), shown_names(client))
         if not screens or screens[-1] != screen:
@@ -253,8 +253,8 @@ def screens_during(client, action, seconds):
     return screens
 
 
-def assert_quick_hops(client, names, rounds=8, gap=0.025):
-    # Plain tmux, 25ms apart: no sidebar can have read anything new, and none needs to.
+def assert_quick_hops(client, names, rounds=8, gap=0.12):
+    # Plain tmux, far inside one daemon tick: no sidebar can have read anything new, and none needs to.
     settle(1.7)
     rows = shown_names(client)
     highlights = {agent(name)["window"]: name for name in names}

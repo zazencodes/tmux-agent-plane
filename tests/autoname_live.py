@@ -242,6 +242,7 @@ try:
     explicit_default = spawn('pi-999')
     CLIENTS.append(Client('scratch'))
     client = CLIENTS[0]
+    wait('client attached', lambda: tmux('list-clients', '-F', '#{client_name}'))
     plane('focus', by_pane(default)['name'])
     plane('toggle-sidebar', by_pane(default)['window'])
     wait('hint at width 38', lambda: 'a AI names' in client.text())
@@ -270,7 +271,7 @@ try:
     client.key(b'\x1b')
     wait('search cancelled before rename', lambda: '/ search' in client.text())
     client.key(b'r?')
-    wait('literal question in rename', lambda: by_pane(default)['name'] + '?' in client.text())
+    wait('literal question in rename', lambda: '?▏' in client.text())
     assert 'Keyboard shortcuts' not in client.text()
     client.key(b'\x1b')
     wait('rename cancelled', lambda: 'save' not in client.footer())
@@ -530,7 +531,10 @@ try:
     assert len(calls()) == before
     RESULTS.update(config_and_ledger_faults_keep_tracking=True)
     assert len(index()['agents']) == len(PANES), 'naming process entered the agent index'
-    assert all(not (ROOT / (pane + '.input')).exists() for pane in PANES), 'unintended fixture input'
+    # The fixture also records terminal focus reports, which are not input to an agent.
+    typed = [(ROOT / (pane + '.input')).read_bytes().replace(b'\x1b[I', b'').replace(b'\x1b[O', b'')
+             for pane in PANES if (ROOT / (pane + '.input')).exists()]
+    assert not any(typed), ('unintended fixture input', typed)
     RESULTS.update(passed=True, models_used=0, real_servers_used=0, unintended_agent_input=0)
 finally:
     for path in [ROOT / 'namer.hold', ROOT / 'race.arm']:

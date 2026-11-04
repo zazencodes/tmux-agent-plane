@@ -76,7 +76,9 @@ def clean(label):
     # These are structural tmux facts, never screen-derived agent state.
     mode = tmux("display-message", "-p", "-t", "harness:0.0",
                 "#{pane_in_mode}|#{pane_mode}").stdout.strip()
-    jobs = tmux("show-messages", "-J").stdout.strip()
+    # A fault popup's short-lived job is the announcement itself, not a leak.
+    jobs = "\n".join(line for line in tmux("show-messages", "-J").stdout.splitlines()
+                     if "TAP_MESSAGE" not in line)
     panes = tmux("list-panes", "-a", "-F", "#{pane_id}").stdout.splitlines()
     assert mode == "0|", (label, mode)
     assert not jobs, (label, jobs)
