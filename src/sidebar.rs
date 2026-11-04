@@ -2,7 +2,7 @@
 
 use crate::agents::{ProcessTable, RawState, ScanContext};
 use crate::commands;
-use crate::index::{self, Agent, Index, RecentEvent, State, WindowView};
+use crate::index::{self, Agent, Index, Kind, RecentEvent, State, WindowView};
 use crate::lifecycle;
 use crate::navigation::{CLIENT_FORMAT, Client, guard_destination, parse_client};
 use crate::tmux;
@@ -197,6 +197,22 @@ struct OrganizeConfirmation {
     client: Client,
 }
 
+/// The kinds `n` offers. Antigravity needs a task to start, and this picker starts agents empty.
+const NEW_AGENT_KINDS: [Kind; 5] = [
+    Kind::Claude,
+    Kind::Codex,
+    Kind::Pi,
+    Kind::Opencode,
+    Kind::Grok,
+];
+
+/// The project is pinned when `n` is pressed; rows moving underneath cannot retarget it.
+struct NewAgent {
+    session: String,
+    cwd: String,
+    selected: usize,
+}
+
 fn organize_accepts(key: KeyEvent) -> bool {
     key.modifiers.is_empty() && matches!(key.code, KeyCode::Enter | KeyCode::Char(' ' | 'y'))
 }
@@ -359,6 +375,7 @@ struct Sidebar {
     notice: Option<String>,
     killing: Option<KillConfirmation>,
     organizing: Option<OrganizeConfirmation>,
+    new_agent: Option<NewAgent>,
     /// Hide successfully closed panes until the daemon has removed them from the index.
     closed: HashSet<String>,
     /// The order `s` chose, on its way to the daemon.
@@ -768,13 +785,59 @@ impl Sidebar {
         lifecycle::organize(&confirmation.settings)
     }
 
+    /// While the picker is open it consumes every key: Enter starts, Esc or `n` cancels.
+    fn new_agent_key(&mut self, key: KeyEvent, own: &str) -> bool {
+        if let Some(picker) = &mut self.new_agent {
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    picker.selected = (picker.selected + 1) % NEW_AGENT_KINDS.len();
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    picker.selected =
+                        (picker.selected + NEW_AGENT_KINDS.len() - 1) % NEW_AGENT_KINDS.len();
+                }
+                KeyCode::Enter => {
+                    let picker = self.new_agent.take().expect("picker is open");
+                    if let Err(error) = start_new_agent(&picker, own) {
+                        self.notice = Some(format!("{error:#}"));
+                    }
+                }
+                KeyCode::Esc | KeyCode::Char('n') => self.new_agent = None,
+                _ => {}
+            }
+            return true;
+        }
+        if key.code != KeyCode::Char('n')
+            || !key.modifiers.is_empty()
+            || self.editing.is_some()
+            || self.navigation.search.is_some()
+            || self.killing.is_some()
+            || self.organizing.is_some()
+        {
+            return false;
+        }
+        self.notice = None;
+        match self.selected() {
+            Some(agent) => {
+                self.new_agent = Some(NewAgent {
+                    session: agent.session.clone(),
+                    cwd: agent.cwd.clone(),
+                    selected: 0,
+                })
+            }
+            None => self.notice = Some("select an agent to choose its project".into()),
+        }
+        true
+    }
+
     fn help_key(&mut self, key: KeyEvent) -> bool {
         self.help.key(
             key,
             self.editing.is_none()
                 && self.navigation.search.is_none()
                 && !self.auto_name.open
-                && self.organizing.is_none(),
+                && self.organizing.is_none()
+                && self.new_agent.is_none(),
         )
     }
 
@@ -894,7 +957,32 @@ fn switch_command(sidebar: &Sidebar, own: &str, focus: bool) -> Result<Option<Ve
     let Some(agent) = sidebar.selected() else {
         return Ok(None);
     };
-    let window_target = format!("={}:{}", agent.session, agent.window);
+    switch_to(own, &agent.session, &agent.window, &agent.pane, focus)
+}
+
+/// Start the chosen agent in a new window of the pinned project and take the client there.
+/// Checks the client first, so a refused move creates nothing.
+fn start_new_agent(picker: &NewAgent, own: &str) -> Result<()> {
+    let session = crate::sessions::destination(&picker.session)?;
+    let clients = clients()?;
+    let client = input_client(&clients, own)?;
+    guard_destination(&clients, client, &session, "")?;
+    let (window, pane) =
+        commands::open_agent_window(NEW_AGENT_KINDS[picker.selected], &session, &picker.cwd)?;
+    let command = switch_to(own, &picker.session, &window, &pane, true)?
+        .context("focus always switches the client")?;
+    let command: Vec<_> = command.iter().map(String::as_str).collect();
+    tmux::run(&command).map(drop)
+}
+
+fn switch_to(
+    own: &str,
+    session: &str,
+    window: &str,
+    target_pane: &str,
+    focus: bool,
+) -> Result<Option<Vec<String>>> {
+    let window_target = format!("={session}:{window}");
     // Resolve the indexed session explicitly: a pane can be linked into several sessions.
     let context = parse_switch_context(&tmux::run(&[
         "list-clients",
@@ -920,14 +1008,14 @@ fn switch_command(sidebar: &Sidebar, own: &str, focus: bool) -> Result<Option<Ve
         "left\x1f#{pane_id}\x1f#{pane_last}",
     ])?)?;
     let client = input_client(&context.clients, own)?;
-    guard_destination(&context.clients, client, &context.session, &agent.window)?;
+    guard_destination(&context.clients, client, &context.session, window)?;
     let destination = match context.sidebar {
         Some(pane) => pane,
         None => add(&window_target)?,
     };
     // Enter lands on the agent. Preview stays in this sidebar, so neither agent keys nor seen
     // state are manufactured.
-    let pane = if focus { agent.pane.as_str() } else { own };
+    let pane = if focus { target_pane } else { own };
     let switch = [
         "switch-client".to_string(),
         "-c".to_string(),
@@ -1019,10 +1107,17 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
                 // Setup consumes its keys before navigation/kill, including Enter.
                 if sidebar.killing.is_none()
                     && sidebar.organizing.is_none()
+                    && sidebar.new_agent.is_none()
                     && sidebar.editing.is_none()
                     && sidebar.navigation.search.is_none()
                     && sidebar.auto_name.key(key)
                 {
+                    if !event::poll(Duration::ZERO)? {
+                        break;
+                    }
+                    continue;
+                }
+                if sidebar.new_agent_key(key, &own) {
                     if !event::poll(Duration::ZERO)? {
                         break;
                     }
@@ -1123,6 +1218,12 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
                 .organizing
                 .as_ref()
                 .map(|organize| organize_footer(organize, f.area().width as usize))
+        })
+        .or_else(|| {
+            sidebar
+                .new_agent
+                .as_ref()
+                .map(|picker| new_agent_footer(picker, f.area().width as usize))
         });
     let footer_height = confirmation.as_ref().map_or(2, |lines| lines.len() as u16);
     let [list_area, help_area] =
@@ -1199,13 +1300,32 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let footer = confirmation.map_or_else(
         || {
             Text::from(vec![
-                hints(&[("c", "configure"), ("o", "organize all")]),
+                hints(&[("n", "new"), ("c", "configure"), ("o", "organize all")]),
                 footer(sidebar, inner + 2, index::now_ms()),
             ])
         },
         Text::from,
     );
     f.render_widget(Paragraph::new(footer), help_area);
+}
+
+fn new_agent_footer(picker: &NewAgent, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::styled(
+        truncate(&format!(" new agent in {}", picker.session), width),
+        Style::default().fg(TEXT).bold(),
+    )];
+    lines.extend(NEW_AGENT_KINDS.iter().enumerate().map(|(row, kind)| {
+        if row == picker.selected {
+            Line::styled(
+                truncate(&format!(" ▌ {}", kind.as_str()), width),
+                Style::default().fg(TEXT).bold(),
+            )
+        } else {
+            Line::styled(truncate(&format!("   {}", kind.as_str()), width), SUBTEXT)
+        }
+    }));
+    lines.push(hints(&[("⏎", "start"), ("esc", "cancel")]));
+    lines
 }
 
 fn organize_footer(confirmation: &OrganizeConfirmation, width: usize) -> Vec<Line<'static>> {
@@ -1468,6 +1588,43 @@ mod tests {
         ] {
             assert!(!organize_accepts(KeyEvent::from(code)));
         }
+    }
+
+    #[test]
+    fn new_agent_picker_pins_the_project_and_consumes_its_keys() {
+        let mut sidebar = showing(vec![agent("%1", State::Idle)]);
+        let selected = sidebar.selected().unwrap().session.clone();
+        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('n')), "%9"));
+        assert_eq!(sidebar.new_agent.as_ref().unwrap().session, selected);
+        for code in [KeyCode::Char('x'), KeyCode::Char('q'), KeyCode::Char('?')] {
+            assert!(sidebar.new_agent_key(KeyEvent::from(code), "%9"));
+        }
+        assert!(sidebar.killing.is_none());
+        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Up), "%9"));
+        assert_eq!(
+            sidebar.new_agent.as_ref().unwrap().selected,
+            NEW_AGENT_KINDS.len() - 1
+        );
+        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Down), "%9"));
+        assert_eq!(sidebar.new_agent.as_ref().unwrap().selected, 0);
+        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Esc), "%9"));
+        assert!(sidebar.new_agent.is_none());
+        assert!(!sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('j')), "%9"));
+    }
+
+    #[test]
+    fn new_agent_kinds_all_start_without_a_task() {
+        for kind in NEW_AGENT_KINDS {
+            assert!((kind.adapter().launch)(None).is_ok());
+        }
+    }
+
+    #[test]
+    fn new_agent_needs_a_selected_project() {
+        let mut sidebar = showing(vec![]);
+        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('n')), "%9"));
+        assert!(sidebar.new_agent.is_none());
+        assert!(sidebar.notice.is_some());
     }
 
     #[test]

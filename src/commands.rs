@@ -488,6 +488,36 @@ pub fn spawn(s: Spawn) -> Result<()> {
     Ok(())
 }
 
+/// Start an interactive agent in a new background window of an existing session, for a person to
+/// work in. Returns the window and pane ids.
+pub fn open_agent_window(kind: Kind, session: &str, cwd: &str) -> Result<(String, String)> {
+    let launch = (kind.adapter().launch)(None)?;
+    let cwd = std::path::Path::new(cwd).canonicalize()?;
+    let cwd = cwd.to_str().expect("cwd is UTF-8");
+    let shell = tmux::default_shell(Some(session))?;
+    let command = shell_launch(&shell, launch.command, &launch.args);
+    let target = format!("{session}:");
+    let output = tmux::run(&[
+        "new-window",
+        "-d",
+        "-P",
+        "-F",
+        "#{window_id} #{pane_id}",
+        "-c",
+        cwd,
+        "-t",
+        &target,
+        &shell,
+        "-ilc",
+        &command,
+    ])?;
+    let (window, pane) = output
+        .trim()
+        .split_once(' ')
+        .context("unexpected new-window output")?;
+    Ok((window.to_string(), pane.to_string()))
+}
+
 fn validate_session_placement(placement: Placement, session: Option<&str>) -> Result<()> {
     if let Some(session) = session {
         match placement {

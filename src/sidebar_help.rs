@@ -20,6 +20,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("r", "Rename selected agent"),
     ("x", "Confirm kill of agent"),
     ("c", "Configure"),
+    ("n", "New agent in selected project"),
     ("o", "Organize all agents"),
     ("?", "Keyboard shortcuts"),
     ("q", "Close all sidebars"),

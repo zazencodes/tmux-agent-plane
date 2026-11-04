@@ -158,9 +158,12 @@ These are tmux key names (`C` is Ctrl, `M` is Alt). The defaults leave tmux's pr
 | `x` | Ask to kill the selected agent’s pane. The footer pins its name/state; `Enter` or lowercase `y` confirms; `?` temporarily shows help; other keys cancel without replay. Refuses to end your attached session; warns if a remote session would end |
 | `r` | Rename the agent (sidebar), starting from its current name. `Ctrl-W` deletes a word, `Ctrl-U` clears, `Enter` saves, `Esc` cancels |
 | `c` | Configure, in the sidebar. AI naming: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `d` disables naming, `Esc` goes back or closes |
+| `n` | Start a new agent in the selected agent's project. Pick the kind with arrows or `j`/`k`, then `Enter`: it opens in a new window of that session, in that agent's directory, and takes you there. `Esc` or `n` cancels |
 | `o` | Organize all agents across every tmux session. The selected ready agent coordinates the task; Enter, Space or `y` confirms the footer prompt; other keys cancel |
 | `?` | Show every sidebar shortcut. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search and rename |
 | `q` | Close the sidebar everywhere; in the popup, letters are search text |
+
+`n` offers Claude Code, Codex, Pi, OpenCode and Grok Build. Antigravity needs a first task to start, so use `spawn agy "<task>"` for it. Pi, OpenCode and Grok Build always appear in the picker, but are tracked only once their [optional integrations](#more-agents) are set up. Like `Enter`, `n` refuses a session another client is using.
 
 An agent in a linked window has one index row, displayed under the first session by name. It counts as visible when its pane is visible through any link.
 
