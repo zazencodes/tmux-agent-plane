@@ -106,6 +106,12 @@ fn request(path: &Path, command: &str) -> Result<()> {
     Ok(())
 }
 
+/// Hand the daemon the row order chosen by a sidebar's `s`. Once this returns, any tick stamped
+/// later publishes it.
+pub fn set_order(order: &[String]) -> Result<()> {
+    request(&socket_path()?, &format!("order {}", order.join(" ")))
+}
+
 fn control(action: Action) -> Result<()> {
     let lock = open_lock("lifecycle.lock")?;
     flock(&lock, libc::LOCK_EX)?;

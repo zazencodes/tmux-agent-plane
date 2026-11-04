@@ -5,6 +5,11 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Changed
+
+- Stop sidebars polling tmux: an idle sidebar now runs no tmux commands and writes to its pane only when something on screen changed, so open sidebars cost next to nothing however many windows you have
+- Show the agent state, the highlight and a re-sort from another sidebar up to about a second and a half after they change; the sidebar you press `s` in still re-sorts at once, and a window with an agent active is still right the moment you arrive
+
 ### Fixed
 
 - Keep one agent order in every sidebar: rows no longer change as you move between windows and sessions, and `s` re-sorts them everywhere

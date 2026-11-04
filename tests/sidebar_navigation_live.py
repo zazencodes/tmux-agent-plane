@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import termios
+import threading
 import time
 
 import pyte
@@ -181,9 +182,18 @@ def sidebar_pane(window):
     return next(line.split()[0] for line in lines.splitlines() if line.endswith(" 1"))
 
 
-def input_bytes(name):
-    path = ROOT / (agent(name)["pane"] + ".input")
+def raw_input_bytes(pane):
+    path = ROOT / (pane + ".input")
     return path.read_bytes() if path.exists() else b""
+
+
+def typed(pane):
+    # Fixtures report focus. Moving a client between agents legitimately produces these.
+    return raw_input_bytes(pane).replace(b"\x1b[I", b"").replace(b"\x1b[O", b"")
+
+
+def input_bytes(name):
+    return typed(agent(name)["pane"])
 
 
 def query(client, value):
@@ -221,9 +231,131 @@ def frames_after(client, action, seconds=1.0):
     return frames
 
 
+def screens_during(client, action, seconds):
+    """Every screen the terminal is left on while action runs, as (window, selected, rows)."""
+    client.drain()
+    screens = []
+    finished = action()
+    until = None
+    while until is None or time.monotonic() < until:
+        if until is None and finished():
+            until = time.monotonic() + seconds
+        if not select.select([client.master], [], [], 0.05)[0]:
+            continue
+        # tmux paints the panes, then the status line naming the window. A read can land between
+        # them, for as long as the rest takes to arrive. A wrong highlight stays until the next
+        # hop, so waiting out a short silence separates the two.
+        while select.select([client.master], [], [], 0.01)[0]:
+            client.stream.feed(os.read(client.master, 65536))
+        screen = (client.screen.display[0].split()[-1], client.selected(), shown_names(client))
+        if not screens or screens[-1] != screen:
+            screens.append(screen)
+    return screens
+
+
+def assert_quick_hops(client, names, rounds=8, gap=0.025):
+    # Plain tmux, 25ms apart: no sidebar can have read anything new, and none needs to.
+    settle(1.7)
+    rows = shown_names(client)
+    highlights = {agent(name)["window"]: name for name in names}
+    client_name = client.context()[0]
+    hops = [[TMUX, "-S", str(ROOT / "t.sock"), "switch-client", "-c", client_name, "-t",
+             f"={agent(name)['session']}:{agent(name)['window']}.{agent(name)['pane']}"]
+            for _ in range(rounds) for name in names]
+
+    def hop():
+        def run():
+            for command in hops:
+                started = time.monotonic()
+                subprocess.run(command, env=ENV, check=True, capture_output=True, timeout=8)
+                time.sleep(max(0, gap - (time.monotonic() - started)))
+        thread = threading.Thread(target=run)
+        thread.start()
+        return lambda: not thread.is_alive()
+
+    screens = screens_during(client, hop, 0.3)
+    (ROOT / "quick-hops.json").write_text(json.dumps(screens, indent=2) + "\n")
+    windows = {window for window, _, _ in screens}
+    assert windows >= set(highlights), (windows, highlights)
+    for window, shown, shown_rows in screens:
+        assert window in highlights, (window, screens)
+        assert shown == highlights[window], (window, shown, screens)
+        assert shown_rows == rows, (rows, shown_rows)
+    return len(screens)
+
+
+def assert_lone_sidebar_closes():
+    window = tmux("new-window", "-d", "-t", "=scratch:", "-P", "-F", "#{window_id}", "/bin/sh")
+    plane("follow-sidebar", window)
+    sidebar = sidebar_pane(window)
+    panes = tmux("list-panes", "-t", window, "-F", "#{pane_id}").split()
+    shell = next(pane for pane in panes if pane != sidebar)
+    tmux("kill-pane", "-t", shell)
+    wait("lone sidebar's window closes",
+         lambda: window not in tmux("list-windows", "-a", "-F", "#{window_id}").split())
+    calls = [json.loads(line) for line in (ROOT / "tmux.calls").read_text().splitlines()]
+    assert ["kill-pane", "-t", sidebar] in calls, "the daemon closes it"
+    assert "sidebar:close" not in (STATE / "daemon.log").read_text()
+
+
+def assert_sort_everywhere(client, names):
+    # One press: on screen at once, never undone while the daemon catches up, then everywhere.
+    sidebar = client.context()[1]
+    selection = client.selected()
+    change("nav-work", "blocked", 0)
+    # `s` sorts what is on screen, so wait for the badge rather than the index.
+    wait("new attention", lambda: any("nav-work" in line and "blocked" in line
+                                      for line in client.text().splitlines()))
+    before = shown_names(client)
+    expected = ranked_names()
+    assert expected != before, expected
+    pressed = time.monotonic()
+
+    def press():
+        client.key(b"s")
+        return lambda: time.monotonic() > pressed + 2.5
+
+    screens = screens_during(client, press, 0)
+    (ROOT / "sort-frames.json").write_text(json.dumps(screens, indent=2) + "\n")
+    first = next(i for i, screen in enumerate(screens) if screen[2] == expected)
+    assert all(screen[2] == expected for screen in screens[first:]), screens
+    assert client.selected() == selection
+    panes = [agent(name)["pane"] for name in expected]
+    wait("daemon publishes the order", lambda: index()["order"] == panes)
+    assert_sidebars_agree_on_arrival(client, names)
+    tmux("switch-client", "-c", client.context()[0], "-t", sidebar)
+    wait("back after sort", lambda: client.context()[1] == sidebar)
+    assert shown_names(client) == expected
+    # Back to the states the rest of this proof starts from.
+    change("nav-work", "working", 0)
+    wait("working again", lambda: any("nav-work" in line and "working" in line
+                                      for line in client.text().splitlines()))
+    client.key(b"s")
+    wait("sorted again", lambda: shown_names(client) == ranked_names())
+
+
+def assert_idle_runs_only_the_daemon(seconds=10):
+    # Windows full of sidebars, nothing changing: all that runs is the daemon's one snapshot.
+    settle(2.5)
+    before = len((ROOT / "tmux.calls").read_text().splitlines())
+    settle(seconds)
+    calls = [json.loads(line) for line in (ROOT / "tmux.calls").read_text().splitlines()[before:]]
+    (ROOT / "idle-calls.json").write_text(json.dumps(calls, indent=2) + "\n")
+    assert all(call[:2] == ["list-panes", "-a"] for call in calls), calls
+    assert seconds - 2 <= len(calls) <= seconds + 2, len(calls)
+    return len(calls)
+
+
 def assert_sidebars_agree_on_arrival(client, names):
     # Moving with plain tmux lands on other sidebars: same rows, current agent, in every frame.
-    settle(0.7)
+    # That needs the agent active on arrival. A window whose keyboard was left in its sidebar
+    # shows the last agent used, and selecting a pane on arrival is news to its sidebar.
+    # Start outside them all: a move within the client's own window is no arrival.
+    if client.context()[2] in [agent(name)["window"] for name in names]:
+        tmux("switch-client", "-c", client.context()[0], "-t", "=scratch:0")
+    for name in names:
+        tmux("select-pane", "-t", agent(name)["pane"])
+    settle(1.7)
     rows = shown_names(client)
     trace = []
     for name in names:
@@ -239,6 +371,7 @@ def assert_sidebars_agree_on_arrival(client, names):
             assert shown_window != window or shown == name, (name, frames)
         assert frames[-1][1] == (window, name), frames
         assert shown_names(client) == rows, (rows, shown_names(client))
+        wait("last agent used " + name, lambda name=name: index()["last_agent"] == agent(name)["pane"])
 
 
 def assert_no_stale_preview_frame(client):
@@ -586,7 +719,12 @@ try:
     client.key(b"s")
     wait("attention order", lambda: shown_names(client) == ranked_names())
     assert_sidebars_agree_on_arrival(client, ["nav-work", "nav-idle", "nav-away"])
+    hop_screens = assert_quick_hops(client, ["nav-work", "nav-idle", "nav-away"])
+    idle_calls = assert_idle_runs_only_the_daemon()
     tmux("switch-client", "-c", client.context()[0], "-t", start_sidebar)
+    wait("in the first sidebar", lambda: client.context()[1] == start_sidebar)
+    selected(client, "nav-away")  # the last agent used
+    assert_sort_everywhere(client, ["nav-work", "nav-idle", "nav-away"])
     selected(client, "nav-away")  # the last agent used
     original = client.context()
     client.key(b"j")
@@ -790,6 +928,7 @@ try:
     assert client.context() == source_context
     client.snapshot("failed-switch-keeps-panes")
     (ROOT / "switch.fail").unlink()
+    assert_lone_sidebar_closes()
     extended_results = extra_checks(client)
     # Rename cancellation when its original target leaves: never rename the next row.
     query(client, "nav-idle")
@@ -808,8 +947,7 @@ try:
     assert "v off" in client.text() and "f all" in client.text()
     wait("event expired", lambda: index().get("recent_event") is None and "jump" in client.footer())
     for name, pane in FIXTURES.items():
-        path = ROOT / (pane + '.input')
-        value = path.read_bytes() if path.exists() else b''
+        value = typed(pane)
         assert value == (b'x' if name == 'nav-done' else b''), (name, value)
     calls = [json.loads(line) for line in (ROOT / "tmux.calls").read_text().splitlines()]
     first_preview = next(i for i, call in enumerate(calls) if call[0] == "swap-pane")
@@ -824,6 +962,8 @@ try:
     assert "[scan:" not in daemon_log, "closing an agent must not fault its kind: " + daemon_log
     assert not any(call[0] in ("copy-mode", "clock-mode") for call in calls)
     RESULTS = {**extended_results, "passed": True, "native_fixtures": len(FIXTURES), "models_used": 0,
+        "quick_hop_screens": hop_screens, "idle_commands_in_10s": idle_calls, "lone_sidebar_closes": True,
+        "sort_everywhere_without_snap_back": True,
         "same_window": True, "cross_window_and_session": True, "view_off_selects_only": True,
         "burst_jjj_exact_net_movement": True, "timed_stream_seven_j_exact_net_movement": True,
         "arrow_selection_identity": True, "timed_mixed_text_arrows_backspace_order": True,
