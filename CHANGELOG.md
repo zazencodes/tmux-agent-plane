@@ -5,6 +5,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+## 0.4.2 - 2026-11-03
+
 ### Added
 
 - Subtle periodic settings reviews for enabled AI naming: compare saved settings with the installed preset, keep or change them, and configure or permanently disable the 90-day reminders
