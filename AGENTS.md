@@ -19,7 +19,7 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 
 ## Rules
 
-- Create worktrees inside this checkout at `.worktrees/<branch>`. Keep all project checkouts under this folder; remove clean, merged worktrees when no live agent uses them.
+- Create worktrees under the primary checkout's `.worktrees/<branch>`, including when working from a linked worktree. Keep all project checkouts inside the primary checkout; remove clean, merged worktrees when no live agent uses them.
 - Always stage and commit completed work in reasonable, coherent chunks as part of the task, following the `git-commit-conventions` skill, without waiting for the user to ask. Keep unrelated work out of those commits.
 - Prefer reliable native live signals without configuration (session/state files, titles, process tree or local APIs). An official mode such as Grok leader may be opt-in. When native signals are insufficient, use the official hook/plugin/extension API to publish per-session state. Ship publishers/configuration examples under `extensions/<kind>/`; install publishers by symlink plus required host configuration, documented in README More agents. Missing optional publisher files or leader socket leaves that kind untracked without errors or extra setup. Use one canonical method per kind; no fallback paths or screen scraping.
 - Fail loudly: withdraw faulty kinds/observations, keep healthy tracking, and persist errors/recovery in daemon.log with degraded status. Process/pane snapshot, index and log failures remain fatal; stale index reads fail.
