@@ -222,7 +222,7 @@ fn paste(pane: &str, text: &str) -> Result<()> {
 }
 
 /// Names are one word, unique, and never look like a pane id.
-fn check_name(index: &Index, name: &str, pane: Option<&str>) -> Result<()> {
+pub(crate) fn check_name(index: &Index, name: &str, pane: Option<&str>) -> Result<()> {
     if name.is_empty() || name.chars().any(char::is_whitespace) || name.starts_with('%') {
         bail!("agent names are one word, without spaces, not starting with %: {name:?}");
     }
@@ -413,10 +413,14 @@ pub fn spawn(s: Spawn) -> Result<()> {
     };
     let pane = pane.trim().to_string();
 
+    let explicit_name = s.name.is_some();
     let name = s
         .name
         .unwrap_or_else(|| format!("{}-{}", s.kind.as_str(), pane.trim_start_matches('%')));
-    tmux::run(&["set-option", "-p", "-t", &pane, "@agent-plane-name", &name])?;
+    // An unset option preserves default-name provenance for optional AI naming.
+    if explicit_name {
+        tmux::run(&["set-option", "-p", "-t", &pane, "@agent-plane-name", &name])?;
+    }
     if let Some(me) = &me {
         tmux::run(&["set-option", "-p", "-t", &pane, "@agent-plane-parent", me])?;
     }

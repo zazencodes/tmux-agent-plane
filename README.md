@@ -32,7 +32,7 @@ Claude Code, Codex and Antigravity use native signals. Pi and OpenCode use publi
 - **A sidebar of agents.** `prefix + S` opens a live list of every agent down the left of every window, in every session, and puts you in it: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar is there too. Close it once and it closes everywhere.
 - **Peek before you jump.** `prefix + A` opens the agent list in a popup with a large live preview of the selected agent's screen.
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
-- **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`.
+- **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`. Optional AI naming can name the remaining default-named agents; press `a` in the sidebar to set it up.
 - **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. A spawned agent records its parent when caller identity is known.
 - **Your agents, unchanged.** Spawned agents start in a normal shell, so your aliases and flags apply, and the shell stays when the agent exits.
 
@@ -141,6 +141,7 @@ Run your agents as usual. Then ask any of them things like:
 | `Enter` | Jump to the agent. The sidebar stays open; the popup closes |
 | `x` | Ask to kill the selected agent’s pane. The footer pins its name/state; `Enter` or lowercase `y` confirms, every other key cancels without replay. Refuses to end your attached session; warns if a remote session would end |
 | `r` | Rename the agent (sidebar), starting from its current name. `Ctrl-W` deletes a word, `Ctrl-U` clears, `Enter` saves, `Esc` cancels |
+| `a` | Open AI naming setup in the sidebar: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `h` permanently hides the setup hint, `d` disables naming, `Esc` goes back or closes |
 | `q` | Close: the sidebar everywhere, or the popup (also `Esc`) |
 
 An agent in a linked window has one index row, displayed under the first session by name. It counts as visible when its pane is visible through any link.
@@ -177,6 +178,39 @@ Desktop notifications keep the task or blocked detail and work with the sidebar 
 | `grok` | `grok -- '<task>'` |
 
 All kinds except agy can be spawned without a task. `spawn agy` requires a task and fails immediately if it is missing: agy publishes no state until its first turn. An agy started by hand appears once you send its first message; before then, use `read <pane-id>` and `keys <pane-id> ...`. Pi and OpenCode need their opt-in publisher installed before `spawn` can detect them; Grok needs leader mode.
+
+### Optional AI naming
+
+AI naming is **off by default**. With it off, no naming command runs and no task data is sent. The sidebar shows a muted `a AI names · optional setup` line above its usual footer. Press `a`, then `h` to hide that hint permanently; `a` still opens setup later. Reopen other existing sidebars to refresh their cached hint.
+
+Press `a` and choose `1` Claude Code, `2` Codex, `3` Pi, `4` OpenCode, `5` Antigravity (`agy`), `6` Grok Build, or `7` for a custom command. Setup checks the executable is installed without running it, shows the command and data disclosure, and requires `Enter` to enable. `Esc` goes back or closes; `a`, then `d` disables naming. For Antigravity, authenticate `agy` normally first, then use **`a`, `5`, `Enter`**. Setup itself never calls a model or changes folder trust.
+
+The one configuration file is `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/config.json`. Setup writes it; the daemon reads changes on its existing tick, without a restart. An Antigravity configuration looks like:
+
+```json
+{
+  "auto_name": {
+    "enabled": true,
+    "hide_hint": false,
+    "command": [
+      "agy", "--print", "--output-format", "text",
+      "--disable-slash-commands", "--mode", "plan", "--sandbox",
+      "--print-timeout", "55s", "{prompt}"
+    ],
+    "output": "text"
+  }
+}
+```
+
+A custom `command` is a JSON array containing an executable on the daemon's `PATH` (or an absolute path) and literal arguments. Exactly one argument must be `"{prompt}"`; it is replaced with the naming instruction and task JSON. No shell interprets the command. The custom command must run noninteractively, use no tools, and print just the name to stdout; use `"output": "text"`. The OpenCode preset uses `"output": "opencode"` to extract text events from its JSON output. Unknown fields and malformed configuration produce a daemon diagnostic. With no file, naming stays off and the hint is visible.
+
+**What is sent:** the eligible agent's task title, working-directory path (`cwd`), and blocked detail. These are passed as JSON in the prompt to your chosen CLI; its configured AI provider may receive them. tmux-agent-plane sends no screen capture or file contents. The command uses your CLI's existing authentication and model/provider configuration. Review these before enabling. Custom commands must follow the same no-tools contract.
+
+Naming waits for a title of at least eight bytes containing two words, excluding generic startup titles. It applies to every supported agent kind. Only agents with their generated `<kind>-<pane number>` name and no explicit pane name qualify. A name assigned with `--name`, `r` or `rename` stays yours, even if it resembles a generated name. Default names assigned by older versions already have an explicit pane option and are preserved; newly spawned agents leave that option unset. A live tmux condition checks the pane process, unassigned name and uniqueness across all sessions immediately before applying, so a racing manual rename wins.
+
+The daemon runs one naming process at a time, outside tmux with closed stdin and a private working directory under its state directory. Each eligible pane/process lifetime gets **one attempt**, recorded before launch in `${XDG_STATE_HOME:-$HOME/.local/state}/tmux-agent-plane/auto-name.json`, including across daemon restarts. There is a 60-second timeout and a 16 KiB limit on each output stream. A failure pauses new naming attempts for 60 seconds, never retries the failed agent, and persists a deduplicated `auto-name:worker` diagnostic in `daemon.log` with degraded status. Tracking continues. An explicit configuration change acknowledges the active naming fault and clears the pause; it does not repeat reserved attempts.
+
+AI output must be two or three lowercase words joined by hyphens, each starting with a letter, at most 20 ASCII characters and unique. A single terminal newline is allowed; quotes, markdown, whitespace, commentary and duplicate names fail. Names are never repaired. Built-in commands use their noninteractive modes and restrict tools where the CLI provides that control; they run away from project folders and never alter your trust settings. No extra tmux commands run on idle naming ticks or while naming is disabled.
 
 ### CLI
 

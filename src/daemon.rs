@@ -89,6 +89,8 @@ fn run_inner() -> Result<()> {
     let mut recent_event: Option<RecentEvent> = None;
     // Diagnostic announcements use only tmux and are never sent through notification retry.
     let mut announcements = Announcements::default();
+    // Optional naming runs outside tmux and never blocks this loop.
+    let mut auto_name = None;
 
     loop {
         if SHUTDOWN.load(Ordering::Relaxed) {
@@ -100,6 +102,7 @@ fn run_inner() -> Result<()> {
         let batch = fold(&mut prev, detect::detect(&panes)?, &panes, now);
         let agents = batch.values;
         let mut issues = batch.issues;
+        issues.extend(crate::autoname::tick(&mut auto_name, &agents, &panes, now));
         recent_event = recent_event.filter(|event| event.is_live(now));
         for agent in &agents {
             if let Some(message) = transition_message(

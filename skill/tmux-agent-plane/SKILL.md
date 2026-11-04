@@ -24,6 +24,8 @@ tmux-agent-plane rename self <name>
 
 A name is one short kebab-case word for the work, 2 to 3 words joined by `-`, at most 20 characters: `auth-refactor`, `billing-tests`, `release-notes`. Never rename an agent the user has already named.
 
+Optional AI auto-naming is off by default and configured by the user with `a` in the sidebar. It only names agents with a meaningful title and an unassigned default name. Explicit `--name`, `rename` and sidebar `r` assignments are always preserved.
+
 ## Caller identity
 
 Codex tool shells can inherit `TMUX_PANE` from a shared app-server. Their `CODEX_THREAD_ID`/`CODEX_SESSION_ID` identifies a thread, but current published files do not reliably associate that thread with its TUI pane. Never use `$TMUX_PANE` from a Codex tool shell. `list` works and marks no caller row for Codex. Use explicit agent names supplied in your task. If your own name is unknown, ask the lead to identify/name you. The CLI fails on Codex self references (including the inherited pane value) and `spawn --in pane`, since it cannot safely choose a caller pane. Use `spawn --in window` or `spawn --in session`; these work and record no parent (`parent: null`). Do not unset Codex identity variables to bypass this error. Other callers may use `self`.

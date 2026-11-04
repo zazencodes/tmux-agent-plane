@@ -1,4 +1,7 @@
 mod agents;
+mod autoname;
+mod autoname_config;
+mod autoname_setup;
 mod commands;
 mod daemon;
 mod detect;

@@ -376,6 +376,8 @@ fn session_endings(window: &str, attached_session: &str, windows: &str) -> Resul
 
 #[derive(Default)]
 struct Sidebar {
+    // Auto-naming setup is local UI state; it never performs periodic work.
+    auto_name: crate::autoname_setup::Setup,
     all_agents: Vec<Agent>,
     agents: Vec<Agent>,
     navigation: Navigation,
@@ -942,6 +944,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
     // This is the native sidebar process's own pane, never a caller inferred by the CLI.
     let own = std::env::var("TMUX_PANE")?;
     let mut sidebar = Sidebar::default();
+    sidebar.auto_name.load();
     let mut refreshed = None;
     loop {
         if refreshed.is_none_or(|at: Instant| at.elapsed() >= REFRESH) {
@@ -971,6 +974,17 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
                 if let Event::Key(key) = event::read()?
                     && key.kind == KeyEventKind::Press
                 {
+                    // Setup consumes its keys before navigation/kill, including Enter.
+                    if sidebar.killing.is_none()
+                        && sidebar.editing.is_none()
+                        && sidebar.navigation.search.is_none()
+                        && sidebar.auto_name.key(key)
+                    {
+                        if !event::poll(Duration::ZERO)? {
+                            break;
+                        }
+                        continue;
+                    }
                     if sidebar.kill_key(key, &own) {
                         if !event::poll(Duration::ZERO)? {
                             break;
@@ -1038,11 +1052,18 @@ fn truncate(s: &str, width: usize) -> String {
 }
 
 fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
+    if sidebar.auto_name.open {
+        sidebar.auto_name.draw(f);
+        return;
+    }
     let confirmation = sidebar
         .killing
         .as_ref()
         .map(|kill| kill_footer(kill, f.area().width as usize));
-    let footer_height = confirmation.as_ref().map_or(1, |lines| lines.len() as u16);
+    let hint = sidebar.auto_name.hint() && confirmation.is_none();
+    let footer_height = confirmation
+        .as_ref()
+        .map_or(1 + u16::from(hint), |lines| lines.len() as u16);
     let [list_area, help_area] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(footer_height)]).areas(f.area());
     let inner = list_area.width.saturating_sub(2) as usize;
@@ -1115,7 +1136,14 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     }
 
     let footer = confirmation.map_or_else(
-        || Text::from(footer(sidebar, inner + 2, index::now_ms())),
+        || {
+            let mut lines = Vec::new();
+            if hint {
+                lines.push(Line::styled(" a AI names · optional setup", SUBTEXT));
+            }
+            lines.push(footer(sidebar, inner + 2, index::now_ms()));
+            Text::from(lines)
+        },
         Text::from,
     );
     f.render_widget(Paragraph::new(footer), help_area);
