@@ -13,6 +13,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, List, ListItem, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
+use std::collections::BTreeSet;
 use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
@@ -201,6 +202,34 @@ fn event_loop(terminal: &mut DefaultTerminal, client: &str) -> Result<Option<Age
     }
 }
 
+/// Colours for the group column, clear of the state colours so neither reads as the other.
+const GROUP_COLOURS: [Color; 8] = [
+    Color::Rgb(0x89, 0xb4, 0xfa), // blue
+    Color::Rgb(0xfa, 0xb3, 0x87), // peach
+    Color::Rgb(0x94, 0xe2, 0xd5), // teal
+    Color::Rgb(0xf9, 0xe2, 0xaf), // yellow
+    Color::Rgb(0xf5, 0xc2, 0xe7), // pink
+    Color::Rgb(0x89, 0xdc, 0xeb), // sky
+    Color::Rgb(0xb4, 0xbe, 0xfe), // lavender
+    Color::Rgb(0xf2, 0xcd, 0xcd), // flamingo
+];
+
+/// Colour by position among all sessions, so groups differ until the palette runs out and
+/// searching or filtering rows never recolours one.
+fn group_colour(agents: &[Agent], session: &str) -> Color {
+    let sessions: BTreeSet<&str> = agents.iter().map(|a| a.session.as_str()).collect();
+    let position = sessions.iter().position(|s| *s == session).unwrap_or(0);
+    GROUP_COLOURS[position % GROUP_COLOURS.len()]
+}
+
+/// The window and pane: the group column already names the session.
+fn place(agent: &Agent) -> &str {
+    agent
+        .location
+        .strip_prefix(&format!("{}:", agent.session))
+        .unwrap_or(&agent.location)
+}
+
 fn draw(f: &mut Frame, app: &mut App) {
     if app.sidebar.help.open {
         app.sidebar.help.draw(f);
@@ -267,7 +296,8 @@ fn draw(f: &mut Frame, app: &mut App) {
     };
     let name_width =
         column(|a| &a.name).max(renaming.as_ref().map_or(0, |typed| typed.chars().count()));
-    let location_width = column(|a| &a.location);
+    let group_width = column(|a| &a.session);
+    let place_width = column(place);
     let row_width = list_area.width.saturating_sub(2) as usize;
     let items: Vec<ListItem> = sidebar
         .agents
@@ -292,7 +322,11 @@ fn draw(f: &mut Frame, app: &mut App) {
                     format!("{:<7} {:>4}  ", a.state.as_str(), age(a.state_since)),
                     state_style(a.state),
                 ),
-                Span::styled(format!("{:<location_width$}  ", a.location), OVERLAY),
+                Span::styled(
+                    format!("{:<group_width$} ", a.session),
+                    group_colour(&sidebar.all_agents, &a.session),
+                ),
+                Span::styled(format!("{:<place_width$}  ", place(a)), OVERLAY),
                 Span::styled(
                     if a.state == State::Blocked {
                         a.detail.as_deref().unwrap_or(&a.title).to_string()
@@ -720,6 +754,34 @@ mod tests {
         let _ = press(&mut app, KeyCode::Esc);
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         assert!(!screen(&terminal).contains("new agent in work"));
+    }
+
+    #[test]
+    fn group_column_names_each_session_in_a_colour_that_filtering_cannot_change() {
+        let mut app = app();
+        app.sidebar.all_agents[1].session = "zeta".into();
+        app.sidebar.all_agents[1].location = "zeta:2.1".into();
+        app.sidebar.rebuild();
+        let work = group_colour(&app.sidebar.all_agents, "work");
+        let zeta = group_colour(&app.sidebar.all_agents, "zeta");
+        assert_ne!(work, zeta);
+        for state in [State::Blocked, State::Done, State::Working, State::Idle] {
+            assert!(!GROUP_COLOURS.contains(&colour(state)));
+        }
+        let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let shown = screen(&terminal);
+        assert!(shown.contains("zeta 2.1") && !shown.contains("zeta:2.1"));
+        let buffer = terminal.backend().buffer().clone();
+        let cell = (0..buffer.area.height)
+            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+            .find(|&(x, y)| {
+                (0..4).all(|i| buffer[(x + i, y)].symbol() == &"zeta"[i as usize..=i as usize])
+            })
+            .unwrap();
+        assert_eq!(buffer[cell].fg, zeta);
+        type_query(&mut app, "quartz");
+        assert_eq!(group_colour(&app.sidebar.all_agents, "zeta"), zeta);
     }
 
     #[test]

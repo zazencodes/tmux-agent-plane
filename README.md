@@ -182,7 +182,7 @@ The view/filter/query controls stay visible above the list. Filters and search c
 
 ### tmux fuzzy picker
 
-Press `prefix + f` from any pane. It opens on the list, sessions together. `j`/`k`, Up/Down or Ctrl-J/Ctrl-K browse, and the screen preview updates inside the popup. Periodic state updates preserve the selected pane. Enter focuses that exact pane in the client that opened the picker, across sessions; `q`, Esc or Ctrl-C closes and leaves your original pane and session selected. Browsing never switches sessions.
+Press `prefix + f` from any pane. It opens on the list, grouped by session: each row names its session in a colour of its own, next to the window and pane. `j`/`k`, Up/Down or Ctrl-J/Ctrl-K browse, and the screen preview updates inside the popup. Periodic state updates preserve the selected pane. Enter focuses that exact pane in the client that opened the picker, across sessions; `q`, Esc or Ctrl-C closes and leaves your original pane and session selected. Browsing never switches sessions.
 
 Press `/` to search. The search box appears and letters become text: a case-insensitive fuzzy query across agent names, task titles and blocked details, including queries spanning those fields. Stronger matches appear first; Ctrl-J/Ctrl-K or Up/Down browse them. Backspace edits, Ctrl-W deletes a word and Ctrl-U clears. Enter keeps the query and returns to the list, so the next Enter focuses; Esc cancels the edit. On the list, Esc clears a kept query first, then closes.
 

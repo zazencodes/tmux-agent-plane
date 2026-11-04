@@ -8,6 +8,7 @@ before 1.0, a breaking change bumps the minor version.
 ### Added
 
 - The `prefix + f` agent picker has the sidebar's actions: `n` new, `x` kill, `r` rename, `o` organize, `f` filter, `s` sort, `c` configure and `?` shortcuts
+- The agent picker lists rows by session and shows each session name in its own colour
 - Browse with Ctrl-J/Ctrl-K in the agent picker, and while editing a search in the sidebar
 - Start a new agent from the sidebar: press `n`, pick the kind, and it opens in a new window of the selected agent's project and directory, with you in it
 - Organize project sessions from the sidebar: press `o`, then Enter or Space to group all agents across every session using the configured background AI command; opening or canceling runs nothing

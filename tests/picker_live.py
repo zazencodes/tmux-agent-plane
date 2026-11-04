@@ -191,6 +191,15 @@ try:
     # Blank canvas and panel background must use terminal default, despite popup-style.
     assert client.screen.buffer[4][65].bg == 'default', client.screen.buffer[4][65]
     assert client.screen.buffer[20][65].bg == 'default', client.screen.buffer[20][65]
+    # Sessions sit in their own coloured column, separate from window and pane.
+    def group_cell(session):
+        client.drain()
+        for y, line in enumerate(client.screen.display):
+            found = re.search(r'(?<=\s)' + session + r'(?=\s+\d+\.\d+\s)', line)
+            if found:
+                return client.screen.buffer[y][found.start()].fg
+        raise AssertionError(client.text())
+    assert group_cell('cedar-review') != group_cell('quartz-build')
     # Plain and control vim keys browse from the list, and a state refresh keeps the row.
     browse = {}
     for key, label in ((b'j', 'j'), (b'k', 'k'), (b'\n', 'ctrl-j'), (b'\x0b', 'ctrl-k'), (b'\x1b[B', 'down'), (b'\x1b[A', 'up')):
@@ -351,7 +360,7 @@ try:
     for row in rows.values():
         path = ROOT / (row['pane'] + '.input')
         assert not path.exists() or path.read_bytes().replace(b'\x1b[I', b'').replace(b'\x1b[O', b'') == b''
-    print('PASS: lowercase binding; command mode by default; j/k, Ctrl-J/K and arrows; / search only; empty/no-match Enter; fuzzy name/title/detail and spanning queries; refresh selection; Esc/Ctrl-C/q; help, filter, sort, organize, rename, kill and new from the popup; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
+    print('PASS: lowercase binding; command mode by default; j/k, Ctrl-J/K and arrows; / search only; empty/no-match Enter; fuzzy name/title/detail and spanning queries; refresh selection; Esc/Ctrl-C/q; group column; help, filter, sort, organize, rename, kill and new from the popup; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
     print('Evidence:', ROOT, flush=True)
 finally:
     for name in SPAWNED:
