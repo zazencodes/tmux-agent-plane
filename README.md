@@ -30,7 +30,7 @@ Claude Code, Codex and Antigravity use native signals. Pi and OpenCode use publi
 - **Every agent, every session.** One daemon watches every pane in every tmux session and keeps a single index of the agents in them: name, state, task, location and working directory.
 - **Know what needs you.** The status bar counts agents by state. An agent that finishes or blocks while you are looking elsewhere shows a five-second notice in every open sidebar footer and sends a desktop notification, and stays `done` until you look at it.
 - **A sidebar of agents.** Your sidebar key (default `prefix + S`) opens a live list of every agent down the left of every window, in every session, and puts you in it: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar is there too. Close it once and it closes everywhere.
-- **Peek before you jump.** `prefix + A` opens the agent list in a popup with a large live preview of the selected agent's screen.
+- **Search and peek before you jump.** `prefix + a` opens a fuzzy agent picker with a large live preview. Type to search names and descriptions across every session, browse with arrows, and press Enter to focus.
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
 - **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`. Optional AI naming can name the remaining default-named agents; press `a` in the sidebar to set it up.
 - **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. A spawned agent records its parent when caller identity is known.
@@ -69,7 +69,7 @@ set -g @plugin 'zazencodes/tmux-agent-plane'
 
 Without TPM, clone the repo and add `run-shell /path/to/tmux-agent-plane/tmux-agent-plane.tmux` to `~/.tmux.conf`.
 
-The plugin starts the daemon once the first session exists, binds `prefix + S` to the sidebar and `prefix + A` to the agent list popup, and sets a `session-created[90]` hook to start the watcher and `session-window-changed[90]` and `client-session-changed[90]` hooks that bring the open sidebar to each window you visit. A `window-layout-changed[90]` hook closes a sidebar as soon as its last other pane disappears. To use another sidebar key, set it before the plugin loads:
+The plugin starts the daemon once the first session exists, binds `prefix + S` to the sidebar and `prefix + a` to the agent list popup, and sets a `session-created[90]` hook to start the watcher and `session-window-changed[90]` and `client-session-changed[90]` hooks that bring the open sidebar to each window you visit. A `window-layout-changed[90]` hook closes a sidebar as soon as its last other pane disappears. To use another sidebar key, set it before the plugin loads:
 
 ```tmux
 set -g @agent-plane-sidebar-key Space   # replaces tmux's next-layout binding
@@ -131,8 +131,8 @@ Run your agents as usual. Then ask any of them things like:
 | Key | Action |
 | --- | --- |
 | Sidebar key (default `prefix + S`) | Open the sidebar in every window and move into it; close it everywhere when it is open |
-| `prefix + A` | Open the agent list popup, with a preview |
-| `j` `k` / `↓` `↑` | Move selection; in sidebar view mode, preview the selected agent’s window/session |
+| `prefix + a` | Open the fuzzy agent picker, ready to type, with a live screen preview |
+| `↓` `↑` | Move selection; in sidebar view mode, preview the selected agent’s window/session. The sidebar also accepts `j` / `k` |
 | `v` | Toggle sidebar view mode (off initially): preview while keeping keyboard input in the sidebar |
 | `s` | Re-sort agents within each session by attention, then longest in state; keep the selected pane |
 | `f` | Cycle sidebar state filter: All → Blocked → Done → Working → Idle → All, skipping states with no search matches when pressed |
@@ -143,7 +143,7 @@ Run your agents as usual. Then ask any of them things like:
 | `r` | Rename the agent (sidebar), starting from its current name. `Ctrl-W` deletes a word, `Ctrl-U` clears, `Enter` saves, `Esc` cancels |
 | `c` | Configure, in the sidebar. AI naming: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `d` disables naming, `Esc` goes back or closes |
 | `?` | Show every sidebar shortcut. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search and rename |
-| `q` | Close: the sidebar everywhere, or the popup (also `Esc`) |
+| `q` | Close the sidebar everywhere; in the popup, letters are search text |
 
 An agent in a linked window has one index row, displayed under the first session by name. It counts as visible when its pane is visible through any link.
 
@@ -158,6 +158,12 @@ An idle sidebar runs no tmux commands: it reads the daemon's index twice a secon
 The view/filter/query controls stay visible above the list. Filters and search combine; a filter stays selected if its last match changes state or exits, until you press `F` again. Search updates as you type and pauses view mode, including arrow navigation, so editing stays in the current sidebar. With `v` on, the mode row shows `paused` and the footer offers `Enter` to preview. `Enter` keeps the query and previews the final selection when view mode is on; another `Enter` deliberately jumps to the selected agent. `Esc` while editing restores the previous query and selection; outside editing it clears search. While editing, letters such as `V`, `F`, `r` and `q` are query text.
 
 `x` closes the agent's pane using the same operation as `tmux-agent-plane kill`. It does not issue `kill-session`. The confirmation takes priority over notices and event footers, with separate name/state lines in narrow sidebars. It is pinned to the target's native identity and state; an exited, changed or renamed agent requires a new confirmation. After a successful kill, selection moves to the next visible agent (or the previous one at the end). Killing a final pane may naturally remove its window; if that would also end a remote session, the prompt names the session. Ending the originating client's attached session is refused.
+
+### tmux fuzzy picker
+
+Press `prefix + a` from any pane. The search field is active immediately: type a case-insensitive fuzzy query across existing agent names, task titles and blocked details, including queries spanning those fields. Stronger matches appear first; Up/Down browses them and the screen preview updates inside the popup. Periodic state updates preserve the selected pane. Enter focuses that exact pane in the client that opened the picker, across sessions; Esc or Ctrl-C cancels and leaves your original pane and session selected. Browsing never switches sessions. Backspace edits, Ctrl-W deletes a word and Ctrl-U clears. With no matches, Enter leaves the picker open.
+
+The popup inherits the terminal background and uses its palette for the selected row, even when a tmux theme configures other popup colors. The plugin supplies the originating client to `tmux-agent-plane ui --client <client-name>`.
 
 ### Neovim Telescope picker
 
@@ -255,7 +261,7 @@ AI output must be two or three lowercase words joined by hyphens, each starting 
 | `toggle-sidebar <window>` | What the sidebar key does, from a window (a window or pane id) |
 | `follow-sidebar <window>` | Add the sidebar to a window while it is open. The plugin runs it when a window comes on screen |
 | `sidebar` | The sidebar's agent list, run in the sidebar pane |
-| `ui` | The agent list popup |
+| `ui --client <client-name>` | The fuzzy agent picker popup (the plugin supplies the client) |
 | `daemon start` | Start the detached watcher; the plugin runs this automatically |
 | `daemon restart` | Gracefully restart the watcher using the current binary |
 | `daemon stop` | Gracefully stop the watcher |

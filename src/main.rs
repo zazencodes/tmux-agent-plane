@@ -32,8 +32,12 @@ enum Cmd {
         #[command(subcommand)]
         action: lifecycle::Action,
     },
-    /// Open the agent list with a live preview; Enter jumps to the agent
-    Ui,
+    /// Fuzzy-search agents with a live preview; Enter focuses the selected pane
+    Ui {
+        /// tmux client that opened the popup (supplied by the plugin)
+        #[arg(long)]
+        client: String,
+    },
     /// Run the always-on agent list (shown in the sidebar pane)
     Sidebar,
     /// Show a daemon message until a key press or 10 seconds (shown in a popup)
@@ -134,7 +138,7 @@ enum Cmd {
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Cmd::Daemon { action } => lifecycle::run(action),
-        Cmd::Ui => ui::run(),
+        Cmd::Ui { client } => ui::run(&client),
         Cmd::Sidebar => sidebar::run(),
         Cmd::Notice => popup::notice(),
         Cmd::ToggleSidebar { window } => sidebar::toggle(&commands::target_pane(&window)?),
