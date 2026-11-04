@@ -145,6 +145,16 @@ def wait(label, condition):
     raise AssertionError(f'{label}: {ROOT}')
 
 
+def open_picker():
+    """A state change may have a notification popup up, which takes keys until it times out."""
+    def opened():
+        if '▌' not in client.text():
+            client.key(b'\x01f')
+            time.sleep(.4)
+        return '▌' in client.text()
+    wait('picker opens', opened)
+
+
 def query(client, value, selected):
     """Edit the search, entering search mode the first time."""
     if '› ' not in client.text():
@@ -372,10 +382,56 @@ try:
     assert {a['name']: a['session'] for a in agents()} == placed
     client.key(b'\x1b')
     wait('closed after organize', lambda: 'via agy' not in client.text() and '▌' not in client.text())
+    untouched_client = client.context()
+    # Tab: keys reach exactly the selected agent, as typed, until Tab again.
+    plane('spawn', 'pi', '--in', 'session', '--cwd', str(ROOT), '--name', 'talk-target')
+    SPAWNED.append('talk-target')
+    target = next(a for a in agents() if a['name'] == 'talk-target')['pane']
+    received = lambda: (ROOT / (target + '.input')).read_bytes().replace(b'\x1b[I', b'').replace(b'\x1b[O', b'') if (ROOT / (target + '.input')).exists() else b''
+    open_picker()
+    query(client, 'talk', 'talk-target')
+    client.key(b'\t')
+    wait('talking from search', lambda: 'typing here' in client.text() and 'back to the menu' in client.text())
+    # The agent's cursor shows where it really is, inside the preview.
+    client.drain()
+    ready = 'Native Pi fixture ' + target
+    row, column = next((y, line.index(ready)) for y, line in enumerate(client.screen.display) if ready in line)
+    flag, x, y = tmux('display-message', '-p', '-t', target, '#{cursor_flag} #{cursor_x} #{cursor_y}').split()
+    wait('cursor in the preview', lambda: (client.screen.cursor.x, client.screen.cursor.y) == (column + int(x), row + int(y)))
+    keys = [(b'hi;\xc3\xa9', b'hi;\xc3\xa9'), (b'\r', b'\r'), (b'\x1b[A', b'\x1b[A'), (b'\x1b[Z', b'\x1b[Z'),
+            (b'\x03', b'\x03'), (b'\x1b;', b'\x1b;'), (b'xqj/n', b'xqj/n'), (b'\x7f', b'\x7f'), (b'\x1b', b'\x1b')]
+    expected = b''
+    for sent, arrives in keys:
+        client.key(sent)
+        expected += arrives
+        wait('agent received ' + repr(sent), lambda: received() == expected)
+        time.sleep(.6)  # Let a lone Escape end before the next key.
+    assert 'typing here' in client.text() and client.context() == untouched_client
+    client.key(b'\t')
+    wait('back to the menu', lambda: 'typing here' not in client.text() and 'back to the menu' not in client.text())
+    # Back in the frozen-or-live search: letters are search text again and reach no agent.
+    client.key(b'z')
+    wait('search text again', lambda: '› talkz' in client.text())
+    time.sleep(.3)
+    assert received() == expected
+    client.key(b'\x1b')
+    wait('search cancelled', lambda: '› ' not in client.text())
+    client.key(b'\x1b')
+    wait('closed after talking', lambda: 'j/k browse' not in client.text())
+    # A pane that exits while you are typing to it ends the mode, with no retargeting.
+    open_picker()
+    query(client, 'talk', 'talk-target')
+    client.key(b'\t')
+    wait('talking again', lambda: 'typing here' in client.text())
+    plane('kill', 'talk-target')
+    SPAWNED.remove('talk-target')
+    wait('left when the agent exited', lambda: 'typing here' not in client.text())
+    client.key(b'\x03')
+    wait('closed after exit', lambda: 'search names' not in client.text() and 'j/k browse' not in client.text())
     for row in rows.values():
         path = ROOT / (row['pane'] + '.input')
         assert not path.exists() or path.read_bytes().replace(b'\x1b[I', b'').replace(b'\x1b[O', b'') == b''
-    print('PASS: lowercase binding; command mode by default; j/k, Ctrl-J/K and arrows; / search only; empty/no-match Enter; fuzzy name/title/detail and spanning queries; refresh selection; Esc/Ctrl-C/q; group column; help, filter, sort, organize, rename, kill and new from the popup; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
+    print('PASS: lowercase binding; command mode by default; j/k, Ctrl-J/K and arrows; / search only; empty/no-match Enter; fuzzy name/title/detail and spanning queries; refresh selection; Esc/Ctrl-C/q; group column; help, filter, sort, organize, rename, kill and new from the popup; Tab typing to the pinned agent with exact bytes, cursor and exit; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
     print('Evidence:', ROOT, flush=True)
 finally:
     for name in SPAWNED:

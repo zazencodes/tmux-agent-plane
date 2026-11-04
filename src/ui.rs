@@ -4,7 +4,7 @@ use crate::index::{self, Agent, State};
 use crate::sidebar::{Origin, Sidebar, confirmation_footer, status_footer};
 use crate::tmux;
 use ansi_to_tui::IntoText;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use nucleo_matcher::pattern::{Atom, AtomKind, CaseMatching, Normalization};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -18,6 +18,8 @@ use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
 const REFRESH: Duration = Duration::from_millis(500);
+/// How often the preview follows an agent while you are typing to it.
+const TALK_REFRESH: Duration = Duration::from_millis(40);
 
 pub(crate) fn colour(state: State) -> Color {
     match state {
@@ -74,11 +76,78 @@ pub(crate) fn rank(matcher: &mut Matcher, query: &str, agents: &[Agent]) -> Vec<
     matches.into_iter().map(|(_, agent)| agent).collect()
 }
 
+/// `send-keys` arguments for a key, or None for one tmux has no name for. Plain characters go
+/// as bytes: as text, a trailing `;` would end the tmux command.
+fn tmux_key(key: KeyEvent) -> Option<Vec<String>> {
+    let modifiers = key.modifiers;
+    if let KeyCode::Char(c) = key.code
+        && !modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        let mut bytes = [0; 4];
+        let bytes = c.encode_utf8(&mut bytes).bytes();
+        let mut args = vec!["-H".to_string()];
+        args.extend(bytes.map(|byte| format!("{byte:02x}")));
+        return Some(args);
+    }
+    let base = match key.code {
+        KeyCode::Char(' ') => "Space".to_string(),
+        KeyCode::Char(';') => "\\;".to_string(),
+        KeyCode::Char(c) => c.to_string(),
+        KeyCode::Enter => "Enter".to_string(),
+        KeyCode::Esc => "Escape".to_string(),
+        KeyCode::Backspace => "BSpace".to_string(),
+        KeyCode::Delete => "DC".to_string(),
+        KeyCode::Insert => "IC".to_string(),
+        KeyCode::Up => "Up".to_string(),
+        KeyCode::Down => "Down".to_string(),
+        KeyCode::Left => "Left".to_string(),
+        KeyCode::Right => "Right".to_string(),
+        KeyCode::Home => "Home".to_string(),
+        KeyCode::End => "End".to_string(),
+        KeyCode::PageUp => "PPage".to_string(),
+        KeyCode::PageDown => "NPage".to_string(),
+        KeyCode::F(n) => format!("F{n}"),
+        KeyCode::BackTab => return Some(vec!["BTab".to_string()]),
+        _ => return None,
+    };
+    let mut name = String::new();
+    if modifiers.contains(KeyModifiers::CONTROL) {
+        name.push_str("C-");
+    }
+    if modifiers.contains(KeyModifiers::ALT) {
+        name.push_str("M-");
+    }
+    if modifiers.contains(KeyModifiers::SHIFT) && !matches!(key.code, KeyCode::Char(_)) {
+        name.push_str("S-");
+    }
+    name.push_str(&base);
+    Some(vec![name])
+}
+
+/// One tmux command for a burst of keys, in order.
+fn send_keys_command(pane: &str, keys: &[KeyEvent]) -> Vec<String> {
+    let mut command = Vec::new();
+    for args in keys.iter().filter_map(|key| tmux_key(*key)) {
+        if !command.is_empty() {
+            command.push(";".to_string());
+        }
+        command.extend(["send-keys", "-t", pane].map(String::from));
+        command.extend(args);
+    }
+    command
+}
+
 /// The sidebar's list and actions, in a popup with a large preview.
 struct App {
     sidebar: Sidebar,
     client: String,
     preview: Text<'static>,
+    /// The agent your keys go to, pinned when Tab was pressed.
+    talking: Option<String>,
+    /// Keys read but not yet sent to that agent.
+    outgoing: Vec<KeyEvent>,
+    /// The agent's cursor on its own screen, when it shows one.
+    cursor: Option<(u16, u16)>,
 }
 
 impl App {
@@ -89,15 +158,83 @@ impl App {
             sidebar,
             client: client.to_string(),
             preview: Text::default(),
+            talking: None,
+            outgoing: Vec::new(),
+            cursor: None,
         }
     }
 
     fn refresh(&mut self) {
         self.sidebar.refresh(Origin::Popup(&self.client));
+        self.keep_talking_to_selection();
         self.update_preview();
     }
 
+    /// Keys only ever reach the pinned agent: if a refresh moved the selection, stop.
+    fn keep_talking_to_selection(&mut self) {
+        let selected = self.sidebar.selected().map(|agent| agent.pane.as_str());
+        if self.talking.is_some() && self.talking.as_deref() != selected {
+            self.stop_talking("agent left the list; back to the menu".to_string());
+        }
+    }
+
+    fn stop_talking(&mut self, notice: String) {
+        self.talking = None;
+        self.outgoing.clear();
+        self.cursor = None;
+        self.sidebar.notice = Some(notice);
+    }
+
+    fn send_outgoing(&mut self) {
+        let Some(pane) = &self.talking else {
+            return;
+        };
+        let command = send_keys_command(pane, &self.outgoing);
+        self.outgoing.clear();
+        if command.is_empty() {
+            return;
+        }
+        let command: Vec<_> = command.iter().map(String::as_str).collect();
+        if let Err(error) = tmux::run(&command) {
+            self.stop_talking(format!("{error:#}"));
+        }
+    }
+
+    /// The agent's screen and cursor, read in one tmux command.
+    fn update_talking_preview(&mut self, pane: &str) -> Result<()> {
+        let output = tmux::run(&[
+            "capture-pane",
+            "-e",
+            "-p",
+            "-t",
+            pane,
+            ";",
+            "display-message",
+            "-p",
+            "-t",
+            pane,
+            "#{cursor_flag} #{cursor_x} #{cursor_y}",
+        ])?;
+        let (screen, cursor) = output
+            .trim_end_matches('\n')
+            .rsplit_once('\n')
+            .context("unexpected capture output")?;
+        self.preview = screen.into_text()?;
+        self.cursor = match cursor.split(' ').collect::<Vec<_>>().as_slice() {
+            ["1", x, y] => Some((x.parse()?, y.parse()?)),
+            ["0", _, _] => None,
+            _ => bail!("unexpected cursor: {cursor:?}"),
+        };
+        Ok(())
+    }
+
     fn update_preview(&mut self) {
+        if let Some(pane) = self.talking.clone() {
+            if let Err(error) = self.update_talking_preview(&pane) {
+                self.stop_talking(format!("{error:#}"));
+            }
+            return;
+        }
         self.preview = match self.sidebar.selected() {
             Some(agent) => match tmux::capture(&agent.pane, true, None) {
                 Ok(screen) => screen
@@ -110,6 +247,16 @@ impl App {
     }
 
     fn key(&mut self, key: KeyEvent) -> ControlFlow<Option<Agent>> {
+        if self.talking.is_some() {
+            if key.code == KeyCode::Tab {
+                self.send_outgoing();
+                self.talking = None;
+                self.cursor = None;
+            } else {
+                self.outgoing.push(key);
+            }
+            return ControlFlow::Continue(());
+        }
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             return ControlFlow::Break(None);
         }
@@ -120,6 +267,14 @@ impl App {
             } else {
                 ControlFlow::Continue(())
             };
+        }
+        if key.code == KeyCode::Tab {
+            if self.sidebar.editing.is_none()
+                && let Some(agent) = self.sidebar.selected()
+            {
+                self.talking = Some(agent.pane.clone());
+            }
+            return ControlFlow::Continue(());
         }
         // `/` again freezes the search: its matches stay, and the keys are commands again.
         if self.sidebar.navigation.search.is_some()
@@ -189,18 +344,36 @@ fn event_loop(terminal: &mut DefaultTerminal, client: &str) -> Result<Option<Age
     let mut refreshed = Instant::now();
     loop {
         terminal.draw(|f| draw(f, &mut app))?;
-        if event::poll(Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-        {
-            if let ControlFlow::Break(jump) = app.key(key) {
-                return Ok(jump);
+        let wait = if app.talking.is_some() {
+            TALK_REFRESH
+        } else {
+            Duration::from_millis(100)
+        };
+        let mut pressed = false;
+        if event::poll(wait)? {
+            // While talking, send everything already typed in one go.
+            loop {
+                if let Event::Key(key) = event::read()?
+                    && key.kind == KeyEventKind::Press
+                {
+                    pressed = true;
+                    if let ControlFlow::Break(jump) = app.key(key) {
+                        return Ok(jump);
+                    }
+                    if let Some(order) = app.sidebar.unsent_order.take() {
+                        // On screen first: the daemon's control thread answers within its poll
+                        // interval.
+                        terminal.draw(|f| draw(f, &mut app))?;
+                        app.sidebar.send_order(&order);
+                    }
+                }
+                if app.talking.is_none() || !event::poll(Duration::ZERO)? {
+                    break;
+                }
             }
-            if let Some(order) = app.sidebar.unsent_order.take() {
-                // On screen first: the daemon's control thread answers within its poll interval.
-                terminal.draw(|f| draw(f, &mut app))?;
-                app.sidebar.send_order(&order);
-            }
+            app.send_outgoing();
+        }
+        if pressed || app.talking.is_some() {
             app.update_preview();
         }
         if refreshed.elapsed() >= REFRESH {
@@ -284,7 +457,7 @@ fn draw(f: &mut Frame, app: &mut App) {
                 ),
             );
         f.render_widget(search, search_area);
-        if searching && search_area.width >= 3 && search_area.height >= 3 {
+        if searching && app.talking.is_none() && search_area.width >= 3 && search_area.height >= 3 {
             f.set_cursor_position((search_area.x + 1 + cursor - scroll, search_area.y + 1));
         }
     }
@@ -366,9 +539,17 @@ fn draw(f: &mut Frame, app: &mut App) {
             if let (State::Blocked, Some(detail)) = (a.state, &a.detail) {
                 title.push(Span::styled(format!(" · {detail}"), colour(State::Blocked)));
             }
+            if app.talking.is_some() {
+                title.push(Span::styled(" · typing here", LAVENDER));
+            }
             title.push(Span::raw(" "));
-            panel(Line::from(title))
-                .title_top(Line::styled(format!(" {} ", a.cwd), OVERLAY).right_aligned())
+            let block = panel(Line::from(title))
+                .title_top(Line::styled(format!(" {} ", a.cwd), OVERLAY).right_aligned());
+            if app.talking.is_some() {
+                block.border_style(LAVENDER)
+            } else {
+                block
+            }
         }
         None => panel(Line::from(" preview ")),
     };
@@ -394,23 +575,41 @@ fn draw(f: &mut Frame, app: &mut App) {
         (None, Some(_)) => {
             // Show the bottom of the screen, where the agent's prompt and status live.
             let mut lines = app.preview.lines.clone();
-            while lines.last().is_some_and(|l| l.width() == 0) {
+            // The cursor's own row stays, even when it is blank.
+            let keep = app.cursor.map_or(0, |(_, y)| usize::from(y) + 1);
+            while lines.len() > keep && lines.last().is_some_and(|l| l.width() == 0) {
                 lines.pop();
+            }
+            if lines.len() < keep {
+                lines.resize(keep, Line::default());
             }
             let inner_height = preview_area.height.saturating_sub(2) as usize;
             let start = lines.len().saturating_sub(inner_height);
             let preview = Paragraph::new(Text::from(lines[start..].to_vec())).block(block);
             f.render_widget(preview, preview_area);
+            if let Some((x, y)) = app.cursor
+                && usize::from(y) >= start
+                && x < preview_area.width.saturating_sub(2)
+                && inner_height > 0
+            {
+                f.set_cursor_position((
+                    preview_area.x + 1 + x,
+                    preview_area.y + 1 + (usize::from(y) - start) as u16,
+                ));
+            }
         }
     }
 
     let footer = confirmation.map_or_else(
         || {
             let sidebar = &app.sidebar;
-            Text::from(if sidebar.notice.is_none() && searching {
+            Text::from(if app.talking.is_some() {
+                hints(&[("tab", "back to the menu"), ("keys", "go to the agent")])
+            } else if sidebar.notice.is_none() && searching {
                 hints(&[
                     ("type", "search"),
                     ("^j/^k", "browse"),
+                    ("tab", "type to agent"),
                     ("/ ⏎", "freeze"),
                     ("esc", "cancel"),
                     ("^w ^u", "clear"),
@@ -421,6 +620,7 @@ fn draw(f: &mut Frame, app: &mut App) {
                         ("j/k", "browse"),
                         ("/", "search"),
                         ("⏎", "focus"),
+                        ("tab", "type to agent"),
                         ("?", "keys"),
                         ("n", "new"),
                         ("x", "kill"),
@@ -713,6 +913,126 @@ mod tests {
         let _ = press(&mut app, KeyCode::Char('w'));
         assert_eq!(app.sidebar.navigation.query, "cedarw");
         assert_eq!(selected(&app), "cedar-worker");
+    }
+
+    #[test]
+    fn tab_sends_every_key_to_the_pinned_agent_until_tab_again() {
+        let mut app = app();
+        assert!(press(&mut app, KeyCode::Tab).is_continue());
+        assert_eq!(app.talking.as_deref(), Some("%10"));
+        // Nothing here may act on the list or close the popup, including Esc, q and Ctrl-C.
+        for code in [
+            KeyCode::Char('x'),
+            KeyCode::Char('q'),
+            KeyCode::Char('j'),
+            KeyCode::Char('/'),
+            KeyCode::Esc,
+            KeyCode::Enter,
+        ] {
+            assert!(press(&mut app, code).is_continue());
+        }
+        assert!(ctrl(&mut app, 'c').is_continue());
+        assert_eq!(app.outgoing.len(), 7);
+        assert_eq!(selected(&app), "cedar-review");
+        assert!(app.sidebar.navigation.search.is_none());
+        let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(screen(&terminal).contains("typing here"));
+        assert!(screen(&terminal).contains("back to the menu"));
+        // Never send: these panes belong to whatever tmux server runs the tests.
+        app.outgoing.clear();
+        assert!(press(&mut app, KeyCode::Tab).is_continue());
+        assert!(app.talking.is_none());
+        let _ = press(&mut app, KeyCode::Char('j'));
+        assert_eq!(selected(&app), "quartz-build");
+    }
+
+    #[test]
+    fn tab_returns_to_a_search_and_needs_an_agent() {
+        let mut app = app();
+        type_query(&mut app, "quartz");
+        assert!(press(&mut app, KeyCode::Tab).is_continue());
+        assert_eq!(app.talking.as_deref(), Some("%11"));
+        let _ = press(&mut app, KeyCode::Tab);
+        let _ = press(&mut app, KeyCode::Char('z'));
+        assert_eq!(app.sidebar.navigation.query, "quartzz");
+        type_query(&mut app, "does not exist");
+        let _ = press(&mut app, KeyCode::Tab);
+        assert!(app.talking.is_none());
+    }
+
+    #[test]
+    fn tab_is_not_taken_during_a_rename_or_a_prompt() {
+        let mut app = app();
+        let _ = press(&mut app, KeyCode::Char('r'));
+        let _ = press(&mut app, KeyCode::Tab);
+        assert!(app.talking.is_none());
+        let _ = press(&mut app, KeyCode::Esc);
+        let _ = press(&mut app, KeyCode::Char('n'));
+        let _ = press(&mut app, KeyCode::Tab);
+        assert!(app.talking.is_none());
+    }
+
+    #[test]
+    fn talking_stops_when_a_refresh_moves_the_selection() {
+        let mut app = app();
+        let _ = press(&mut app, KeyCode::Tab);
+        let _ = press(&mut app, KeyCode::Char('x'));
+        app.sidebar.all_agents.remove(0);
+        app.sidebar.rebuild();
+        app.keep_talking_to_selection();
+        assert!(app.talking.is_none());
+        assert!(app.outgoing.is_empty());
+        assert!(
+            app.sidebar
+                .notice
+                .as_deref()
+                .unwrap()
+                .contains("left the list")
+        );
+    }
+
+    #[test]
+    fn keys_become_exact_tmux_arguments() {
+        let name = |code, modifiers| tmux_key(KeyEvent::new(code, modifiers)).unwrap();
+        let none = KeyModifiers::NONE;
+        assert_eq!(name(KeyCode::Char('a'), none), ["-H", "61"]);
+        assert_eq!(name(KeyCode::Char('A'), KeyModifiers::SHIFT), ["-H", "41"]);
+        assert_eq!(name(KeyCode::Char(';'), none), ["-H", "3b"]);
+        assert_eq!(name(KeyCode::Char('é'), none), ["-H", "c3", "a9"]);
+        assert_eq!(name(KeyCode::Char('c'), KeyModifiers::CONTROL), ["C-c"]);
+        assert_eq!(name(KeyCode::Char('f'), KeyModifiers::ALT), ["M-f"]);
+        assert_eq!(name(KeyCode::Char(';'), KeyModifiers::ALT), ["M-\\;"]);
+        assert_eq!(name(KeyCode::Char(' '), KeyModifiers::CONTROL), ["C-Space"]);
+        assert_eq!(name(KeyCode::Enter, none), ["Enter"]);
+        assert_eq!(name(KeyCode::Enter, KeyModifiers::SHIFT), ["S-Enter"]);
+        assert_eq!(name(KeyCode::Esc, none), ["Escape"]);
+        assert_eq!(name(KeyCode::Backspace, none), ["BSpace"]);
+        assert_eq!(name(KeyCode::BackTab, KeyModifiers::SHIFT), ["BTab"]);
+        assert_eq!(name(KeyCode::Up, none), ["Up"]);
+        assert_eq!(name(KeyCode::F(5), none), ["F5"]);
+        assert!(tmux_key(KeyEvent::from(KeyCode::CapsLock)).is_none());
+        assert_eq!(
+            send_keys_command(
+                "%1",
+                &[
+                    KeyEvent::from(KeyCode::Char('a')),
+                    KeyEvent::from(KeyCode::Enter)
+                ]
+            ),
+            [
+                "send-keys",
+                "-t",
+                "%1",
+                "-H",
+                "61",
+                ";",
+                "send-keys",
+                "-t",
+                "%1",
+                "Enter"
+            ]
+        );
     }
 
     #[test]

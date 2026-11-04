@@ -161,6 +161,7 @@ These are tmux key names (`C` is Ctrl, `M` is Alt). The defaults leave tmux's pr
 | `c` | Configure, in the sidebar. AI naming: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `d` disables naming, `Esc` goes back or closes |
 | `n` | Start a new agent in the selected agent's project. Pick the kind with arrows or `j`/`k`, then `Enter`: it opens in a new window of that session, in that agent's directory, and takes you there. `Esc` or `n` cancels |
 | `o` | Organize all agents across every tmux session. The selected ready agent coordinates the task; Enter, Space or `y` confirms the footer prompt; other keys cancel |
+| `Tab` | In the popup, type to the selected agent inside the preview; `Tab` again returns to the menu |
 | `?` | Show every sidebar shortcut. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search and rename |
 | `q` | Close the sidebar everywhere; close the popup |
 
@@ -187,6 +188,8 @@ Press `prefix + f` from any pane. It opens on the list, grouped by session: each
 Press `/` to search. The search box appears and letters become text: a case-insensitive fuzzy query across agent names, task titles and blocked details, including queries spanning those fields. Stronger matches appear first; Ctrl-J/Ctrl-K or Up/Down browse them. Backspace edits, Ctrl-W deletes a word and Ctrl-U clears. Press `/` again to freeze the search: its matches and selection stay, and your keys are commands again, so `n` or `x` act on the selected match. A third `/` resumes editing. Enter freezes too, so the next Enter focuses; Esc cancels the edit. A `/` cannot be part of a picker query. On the list, Esc clears a kept query first, then closes.
 
 The sidebar's actions work on the selected agent, with the same prompts and checks: `n` new agent, `x` kill, `r` rename, `o` organize, `f` state filter, `s` sort, `c` configure and `?` shortcuts. `n` closes the picker and takes you to the new agent. `v` is sidebar-only, since the picker always previews.
+
+Press `Tab` to type to the selected agent without leaving the picker. The preview gets a coloured border and follows the agent live, with its cursor, and every key goes to that agent: Enter, Esc, Ctrl-C and letters included, so you can give it a task or answer a prompt. `Tab` again returns to the menu or search you came from. The agent stays pinned: if it exits or leaves the list, the picker returns to the menu and sends nothing elsewhere. `Tab` itself never reaches the agent, and Shift-Tab does. The preview shows the agent's screen at its own size, so a pane wider than the popup is cut off on the right. Shift-Enter and each newline in a multi-line paste arrive as Enter, so they submit; for multi-line input, press `Enter` from the menu to jump to the agent's pane.
 
 The popup inherits the terminal background and uses its palette for the selected row, even when a tmux theme configures other popup colors. The plugin supplies the originating client to `tmux-agent-plane ui --client <client-name>`.
 

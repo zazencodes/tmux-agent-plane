@@ -23,6 +23,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("c", "Configure"),
     ("n", "New agent in selected project"),
     ("o", "Organize all agents"),
+    ("tab", "Picker: type to the agent"),
     ("?", "Keyboard shortcuts"),
     ("q", "Close sidebars or picker"),
     ("ctrl-w", "Delete word in an edit"),
