@@ -19,7 +19,8 @@ int main(void) {
     cfmakeraw(&terminal);
     if (tcsetattr(STDIN_FILENO, TCSANOW, &terminal)) return 2;
     if (fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK)) return 3;
-    printf("Native Pi fixture %s ready\r\n", pane);
+    // Report focus like a real agent, so a focus event reaching a hidden pane shows up as input.
+    printf("\033[?1004hNative Pi fixture %s ready\r\n", pane);
     fflush(stdout);
     for (;;) {
         char bytes[4096];

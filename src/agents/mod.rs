@@ -421,7 +421,9 @@ mod tests {
             pane_index: 0,
             cwd: directory.to_string_lossy().into_owned(),
             title: "⠼ synthetic task".into(),
-            visible: false,
+            active: false,
+            viewed: false,
+            sidebar: false,
             name: "fixture".into(),
             parent: String::new(),
         }];

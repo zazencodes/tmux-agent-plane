@@ -391,7 +391,9 @@ mod tests {
             pane_index: 0,
             cwd: "/scratch/shared".into(),
             title: "unrelated title".into(),
-            visible: false,
+            active: false,
+            viewed: false,
+            sidebar: false,
             name: String::new(),
             parent: String::new(),
         }

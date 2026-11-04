@@ -4,7 +4,7 @@
 use crate::agents::RawState;
 use crate::detect::{self, Detected};
 use crate::diagnostics::{self, Active, Batch, Issue};
-use crate::index::{self, Agent, Index, RecentEvent, State};
+use crate::index::{self, Agent, Index, RecentEvent, State, WindowView};
 use crate::popup::{self, Announcements};
 use crate::tmux;
 use anyhow::{Context, Result, bail};
@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::os::fd::AsRawFd;
 use std::process::Command;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -21,10 +22,17 @@ const TICK: Duration = Duration::from_secs(1);
 const STATUS_OPTION: &str = "@agent_plane_status";
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+/// The row order a sidebar's `s` asked for, adopted by the next tick.
+static REQUESTED_ORDER: Mutex<Option<Vec<String>>> = Mutex::new(None);
 
 /// Called by the lifecycle worker's signal/control handlers.
 pub fn request_shutdown() {
     SHUTDOWN.store(true, Ordering::Relaxed);
+}
+
+/// Called by the lifecycle control handler. A tick that starts after this returns adopts `order`.
+pub fn request_order(order: Vec<String>) {
+    *REQUESTED_ORDER.lock().expect("order lock") = Some(order);
 }
 
 /// Persist and surface a fatal daemon/lifecycle error without desktop notification recursion.
@@ -80,7 +88,10 @@ fn run_inner() -> Result<()> {
         return Err(error).context("locking daemon index");
     }
     diagnostics::record("daemon", "active")?;
-    let mut prev: HashMap<String, Agent> = index::read_any()?
+    let previous = index::read_any()?;
+    let mut order = previous.as_ref().map_or_else(Vec::new, |i| i.order.clone());
+    let mut last_agent = previous.as_ref().and_then(|i| i.last_agent.clone());
+    let mut prev: HashMap<String, Agent> = previous
         .map(|i| i.agents.into_iter().map(|a| (a.pane.clone(), a)).collect())
         .unwrap_or_default();
     let mut presentation = Presentation::default();
@@ -96,13 +107,23 @@ fn run_inner() -> Result<()> {
         if SHUTDOWN.load(Ordering::Relaxed) {
             return Ok(());
         }
-        let panes = tmux::list_panes().context("listing tmux panes")?;
+        // Stamp the index before reading anything, so `updated_at` never postdates what it says:
+        // a sidebar compares it with the moment of a key press or an acknowledged sort.
         let now = index::now_ms();
+        let requested_order = REQUESTED_ORDER.lock().expect("order lock").take();
+        let panes = tmux::list_panes().context("listing tmux panes")?;
         let before = prev.clone();
         let batch = fold(&mut prev, detect::detect(&panes)?, &panes, now);
         let agents = batch.values;
         let mut issues = batch.issues;
         issues.extend(crate::autoname::tick(&mut auto_name, &agents, &panes, now));
+        for pane in lone_sidebars(&panes) {
+            if let Err(error) = close_sidebar(pane) {
+                issues.push(Issue::new(format!("sidebar:close:{pane}"), error));
+            }
+        }
+        order = next_order(order, requested_order, &agents, &panes);
+        last_agent = last_used(last_agent, &before, &agents, &panes);
         recent_event = recent_event.filter(|event| event.is_live(now));
         for agent in &agents {
             if let Some(message) = transition_message(
@@ -121,6 +142,9 @@ fn run_inner() -> Result<()> {
             updated_at: now,
             agents: agents.clone(),
             recent_event: recent_event.clone(),
+            windows: windows(&panes),
+            order: order.clone(),
+            last_agent: last_agent.clone(),
         })
         .context("writing agent index")?;
         // Use the last diagnostic snapshot for presentation, then fold this attempt's issues
@@ -141,6 +165,83 @@ fn run_inner() -> Result<()> {
         }
         std::thread::sleep(TICK);
     }
+}
+
+/// One record per window, read from its active pane: tmux keeps exactly one per window.
+fn windows(panes: &[tmux::Pane]) -> Vec<WindowView> {
+    panes
+        .iter()
+        .filter(|pane| pane.active)
+        .map(|pane| WindowView {
+            id: pane.window.clone(),
+            active_pane: pane.id.clone(),
+            viewed: pane.viewed,
+            sidebar: panes
+                .iter()
+                .find(|p| p.window == pane.window && p.sidebar)
+                .map(|p| p.id.clone()),
+        })
+        .collect()
+}
+
+/// Rows never move: arrivals append. A live pane keeps its place while its agent is away, so an
+/// agent withdrawn by a brief scan fault returns to the same row. Only `s` rewrites the list.
+fn next_order(
+    current: Vec<String>,
+    requested: Option<Vec<String>>,
+    agents: &[Agent],
+    panes: &[tmux::Pane],
+) -> Vec<String> {
+    let mut order = requested.unwrap_or(current);
+    order.retain(|pane| panes.iter().any(|p| &p.id == pane));
+    if order.is_empty() {
+        return index::rank(agents);
+    }
+    for agent in agents {
+        if !order.contains(&agent.pane) {
+            order.push(agent.pane.clone());
+        }
+    }
+    order
+}
+
+/// The agent a client arrived at most recently. Several clients take turns by arrival, so one
+/// staying put never takes it back from another that has moved.
+fn last_used(
+    last: Option<String>,
+    before: &HashMap<String, Agent>,
+    agents: &[Agent],
+    panes: &[tmux::Pane],
+) -> Option<String> {
+    let visible = || agents.iter().filter(|a| a.visible);
+    visible()
+        .find(|a| !before.get(&a.pane).is_some_and(|b| b.visible))
+        .map(|a| a.pane.clone())
+        .or_else(|| last.filter(|pane| panes.iter().any(|p| &p.id == pane)))
+        .or_else(|| visible().next().map(|a| a.pane.clone()))
+}
+
+/// Sidebars in windows whose other panes are gone. Leaving one lets tmux close the window.
+fn lone_sidebars(panes: &[tmux::Pane]) -> Vec<&str> {
+    panes
+        .iter()
+        .filter(|pane| {
+            pane.sidebar && panes.iter().filter(|p| p.window == pane.window).count() == 1
+        })
+        .map(|pane| pane.id.as_str())
+        .collect()
+}
+
+/// A pane that went away since the snapshot needed no closing: that is not a fault.
+fn close_sidebar(pane: &str) -> Result<()> {
+    let Err(error) = tmux::run(&["kill-pane", "-t", pane]) else {
+        return Ok(());
+    };
+    let panes = tmux::run(&["list-panes", "-a", "-F", "#{pane_id}"])?;
+    if panes.lines().any(|line| line == pane) {
+        return Err(error);
+    }
+    Ok(())
 }
 
 /// Status writes and client refreshes are presentation; none can invalidate tracking.
@@ -268,7 +369,7 @@ fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Result<Agent> {
         .context("agent completion count overflowed")?;
     let unseen = before.is_some_and(|a| a.state == State::Done) || completed > 0;
     let state = match State::from(d.state) {
-        State::Idle if unseen && !d.pane.visible => State::Done,
+        State::Idle if unseen && !d.pane.visible() => State::Done,
         other => other,
     };
     // Some agents temporarily replace their task title while waiting.
@@ -276,6 +377,7 @@ fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Result<Agent> {
         Some(a) if d.preserve_title => a.title.clone(),
         _ => d.title,
     };
+    let visible = d.pane.visible();
     let name = if d.pane.name.is_empty() {
         format!("{}-{}", d.kind.as_str(), d.pane.id.trim_start_matches('%'))
     } else {
@@ -301,7 +403,7 @@ fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Result<Agent> {
         completions,
         reported_completions: d.completed_turns,
         completion_epoch: d.completion_epoch,
-        visible: d.pane.visible,
+        visible,
     })
 }
 
@@ -427,7 +529,9 @@ mod tests {
             pane_index: 1,
             cwd: "/tmp".into(),
             title: "Task".into(),
-            visible,
+            active: visible,
+            viewed: visible,
+            sidebar: false,
             name: String::new(),
             parent: String::new(),
         };
@@ -523,6 +627,144 @@ mod tests {
                 .update_with("segment", |_| Ok(()), || Ok(Vec::new()), |_| unreachable!())
                 .is_empty()
         );
+    }
+
+    fn pane(id: &str, window: &str) -> Pane {
+        let mut pane = observation(RawState::Idle, false).pane;
+        pane.id = id.into();
+        pane.window = window.into();
+        pane
+    }
+
+    fn agent_in(id: &str, state: RawState, since: u64) -> Agent {
+        let mut d = observation(state, false);
+        d.pane.id = id.into();
+        advance(None, d, since).unwrap()
+    }
+
+    fn panes(ids: &[&str]) -> Vec<Pane> {
+        ids.iter().map(|id| pane(id, "@1")).collect()
+    }
+
+    #[test]
+    fn windows_report_active_pane_viewing_and_their_sidebar() {
+        let mut agent = pane("%1", "@1");
+        agent.active = true;
+        agent.viewed = true;
+        let mut sidebar = pane("%2", "@1");
+        sidebar.viewed = true;
+        sidebar.sidebar = true;
+        let mut hidden = pane("%3", "@2");
+        hidden.active = true;
+        hidden.sidebar = true;
+        assert_eq!(
+            windows(&[agent, sidebar, hidden]),
+            [
+                WindowView {
+                    id: "@1".into(),
+                    active_pane: "%1".into(),
+                    viewed: true,
+                    sidebar: Some("%2".into()),
+                },
+                WindowView {
+                    id: "@2".into(),
+                    active_pane: "%3".into(),
+                    viewed: false,
+                    sidebar: Some("%3".into()),
+                },
+            ]
+        );
+        assert!(windows(&[pane("%4", "@3")]).is_empty());
+        let mut bare = pane("%4", "@3");
+        bare.active = true;
+        assert_eq!(windows(&[bare])[0].sidebar, None);
+    }
+
+    #[test]
+    fn order_starts_ranked_appends_arrivals_keeps_withdrawn_and_only_s_rewrites() {
+        let idle = agent_in("%1", RawState::Idle, 0);
+        let blocked = agent_in("%2", RawState::Blocked, 0);
+        let live = panes(&["%1", "%2", "%3"]);
+        let order = next_order(Vec::new(), None, &[idle.clone(), blocked.clone()], &live);
+        assert_eq!(order, ["%2", "%1"]);
+        // A state change never moves a row.
+        let now_blocked = agent_in("%1", RawState::Blocked, 0);
+        let order = next_order(order, None, &[now_blocked.clone(), blocked.clone()], &live);
+        assert_eq!(order, ["%2", "%1"]);
+        // Arrivals append, whatever their state.
+        let arrival = agent_in("%3", RawState::Blocked, 0);
+        let order = next_order(
+            order,
+            None,
+            &[idle.clone(), blocked.clone(), arrival.clone()],
+            &live,
+        );
+        assert_eq!(order, ["%2", "%1", "%3"]);
+        // Withdrawn by a fault with its pane alive: keeps its place, and returns to it.
+        let order = next_order(order, None, std::slice::from_ref(&arrival), &live);
+        assert_eq!(order, ["%2", "%1", "%3"]);
+        // `s` replaces the list; agents the request does not know still append.
+        let order = next_order(
+            order,
+            Some(vec!["%3".into(), "%1".into()]),
+            &[blocked, arrival],
+            &live,
+        );
+        assert_eq!(order, ["%3", "%1", "%2"]);
+        // A closed pane is forgotten: tmux never reuses its id within a server.
+        let order = next_order(order, None, &[idle], &panes(&["%1", "%3"]));
+        assert_eq!(order, ["%3", "%1"]);
+    }
+
+    #[test]
+    fn last_used_follows_arrivals_and_forgets_closed_panes() {
+        let live = panes(&["%1", "%2"]);
+        let viewed = |id: &str, on: bool| {
+            let mut agent = agent_in(id, RawState::Idle, 0);
+            agent.visible = on;
+            agent
+        };
+        let before = |agents: &[Agent]| -> HashMap<String, Agent> {
+            agents.iter().map(|a| (a.pane.clone(), a.clone())).collect()
+        };
+        // First sight of a viewed agent.
+        let on_one = [viewed("%1", true), viewed("%2", false)];
+        let last = last_used(None, &HashMap::new(), &on_one, &live);
+        assert_eq!(last.as_deref(), Some("%1"));
+        // Nobody looking: it stays.
+        let on_none = [viewed("%1", false), viewed("%2", false)];
+        let last = last_used(last, &before(&on_one), &on_none, &live);
+        assert_eq!(last.as_deref(), Some("%1"));
+        // A second client arrives elsewhere: the arrival wins, and the first never takes it back.
+        let on_both = [viewed("%1", true), viewed("%2", true)];
+        let last = last_used(Some("%1".into()), &before(&on_one), &on_both, &live);
+        assert_eq!(last.as_deref(), Some("%2"));
+        let last = last_used(last, &before(&on_both), &on_both, &live);
+        assert_eq!(last.as_deref(), Some("%2"));
+        // A restart reads its previous agents back: still viewed is no new arrival.
+        let last = last_used(Some("%1".into()), &before(&on_one), &on_one, &live);
+        assert_eq!(last.as_deref(), Some("%1"));
+        // Upgrading from an index with no record of it: whoever is on screen.
+        assert_eq!(
+            last_used(None, &before(&on_one), &on_one, &live).as_deref(),
+            Some("%1")
+        );
+        // A closed pane is forgotten.
+        assert_eq!(
+            last_used(Some("%9".into()), &before(&on_none), &on_none, &live),
+            None
+        );
+    }
+
+    #[test]
+    fn only_a_window_holding_nothing_but_a_sidebar_is_lone() {
+        let mut sidebar = pane("%1", "@1");
+        sidebar.sidebar = true;
+        let beside = pane("%2", "@1");
+        assert!(lone_sidebars(&[sidebar.clone(), beside]).is_empty());
+        assert_eq!(lone_sidebars(std::slice::from_ref(&sidebar)), ["%1"]);
+        let plain = pane("%3", "@2");
+        assert!(lone_sidebars(&[plain]).is_empty());
     }
 
     fn batch(values: Vec<Detected>, issues: Vec<Issue>) -> Batch<Detected> {
@@ -739,7 +981,9 @@ mod tests {
                 pane_index: 1,
                 cwd: "/tmp".into(),
                 title: "Action Required".into(),
-                visible: false,
+                active: false,
+                viewed: false,
+                sidebar: false,
                 name: String::new(),
                 parent: String::new(),
             },

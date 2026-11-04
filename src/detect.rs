@@ -104,7 +104,9 @@ mod tests {
             pane_index: 0,
             cwd: "/tmp".into(),
             title: "task".into(),
-            visible: false,
+            active: false,
+            viewed: false,
+            sidebar: false,
             name: String::new(),
             parent: String::new(),
         }

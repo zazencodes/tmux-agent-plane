@@ -172,7 +172,9 @@ mod tests {
                 pane_index: 0,
                 cwd: "/same/cwd".into(),
                 title: "Ignored title".into(),
-                visible: false,
+                active: false,
+                viewed: false,
+                sidebar: false,
                 name: String::new(),
                 parent: String::new(),
             };

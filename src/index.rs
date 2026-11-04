@@ -128,6 +128,47 @@ pub struct Index {
     /// Latest off-screen transition. Never restored by a restarted daemon.
     #[serde(default)]
     pub recent_event: Option<RecentEvent>,
+    /// Every tmux window. Sidebars learn their surroundings here: idle, they run no tmux.
+    #[serde(default)]
+    pub windows: Vec<WindowView>,
+    /// Pane ids in the row order every sidebar shows. Survives a daemon restart.
+    #[serde(default)]
+    pub order: Vec<String>,
+    /// The agent a client most recently viewed as the active pane. Survives a daemon restart.
+    #[serde(default)]
+    pub last_agent: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct WindowView {
+    /// tmux window id, e.g. `@104`.
+    pub id: String,
+    pub active_pane: String,
+    /// The window is the current one of an attached session.
+    pub viewed: bool,
+    /// The window's sidebar pane, while it has one.
+    pub sidebar: Option<String>,
+}
+
+/// Pane ids by attention, per session: blocked, done, working, idle, longest in state first.
+pub fn rank(agents: &[Agent]) -> Vec<String> {
+    let attention = |state| match state {
+        State::Blocked => 0,
+        State::Done => 1,
+        State::Working => 2,
+        State::Idle => 3,
+    };
+    let mut agents: Vec<_> = agents.iter().collect();
+    agents.sort_by_key(|a| {
+        (
+            &a.session,
+            attention(a.state),
+            a.state_since,
+            &a.location,
+            &a.pane,
+        )
+    });
+    agents.into_iter().map(|a| a.pane.clone()).collect()
 }
 
 pub const EVENT_LIFETIME_MS: u64 = 5_000;
@@ -261,6 +302,7 @@ mod tests {
     fn old_index_has_no_event_and_invalid_event_states_fail() {
         let old: Index = serde_json::from_str(r#"{"updated_at":1,"agents":[]}"#).unwrap();
         assert!(old.recent_event.is_none());
+        assert!(old.windows.is_empty() && old.order.is_empty() && old.last_agent.is_none());
         for state in ["working", "idle", "unknown"] {
             let value = serde_json::json!({
                 "updated_at": 1, "agents": [], "recent_event": {

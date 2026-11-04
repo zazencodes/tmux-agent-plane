@@ -289,6 +289,9 @@ impl Runtime {
             updated_at: index::now_ms(),
             agents: agents.to_vec(),
             recent_event: None,
+            windows: Vec::new(),
+            order: Vec::new(),
+            last_agent: None,
         };
         let name = validate_output(&index, agent, output)?;
         if panes.iter().any(|p| p.id != pane && p.name == name) {
@@ -489,6 +492,9 @@ mod tests {
             updated_at: 0,
             agents: vec![agent.clone()],
             recent_event: None,
+            windows: Vec::new(),
+            order: Vec::new(),
+            last_agent: None,
         };
         for name in [
             "payment-tests",
