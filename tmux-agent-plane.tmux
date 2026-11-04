@@ -51,10 +51,10 @@ tmux set-hook -g 'client-session-changed[90]' "$follow"
 # run-shell -C runs tmux commands directly; ## defers the condition until that target is set.
 tmux set-hook -g 'window-layout-changed[90]' \
   'run-shell -C "if-shell -F -t #{hook_window} '\''##{&&:##{==:##{window_panes},1},##{==:##{@agent-plane-sidebar},1}}'\'' '\''kill-pane -t #{hook_window}'\''"'
-# prefix + a: searchable agents with a large preview. Inherit the terminal's
+# prefix + f: searchable agents with a large preview. Inherit the terminal's
 # colours even when a tmux theme sets a separate popup background.
 # Expand the opening client here: display-popup does not expand its shell command.
-tmux bind-key a run-shell -C 'display-popup -E -w 90% -h 85% -s "bg=terminal,fg=terminal" -S "fg=terminal" -T " agents " "tmux-agent-plane ui --client #{q:client_name}"'
+tmux bind-key f run-shell -C 'display-popup -E -w 90% -h 85% -s "bg=terminal,fg=terminal" -S "fg=terminal" -T " agents " "tmux-agent-plane ui --client #{q:client_name}"'
 
 # Initial tmux.conf runs before the first session exists. Start from the session
 # hook once there are panes to scan; reloading the plugin also starts an existing

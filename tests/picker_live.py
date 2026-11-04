@@ -159,14 +159,14 @@ try:
     tmux('set-option', '-g', 'popup-style', 'bg=#1e1e2e,fg=#cdd6f4')
     tmux('set-option', '-as', 'terminal-features', ',xterm-256color:RGB')
     subprocess.run(['bash', str(SOURCE / 'tmux-agent-plane.tmux')], env=ENV, check=True)
-    binding = next(line for line in tmux('list-keys', '-T', 'prefix').splitlines() if re.search(r'-T prefix a\s', line))
+    binding = next(line for line in tmux('list-keys', '-T', 'prefix').splitlines() if re.search(r'-T prefix f\s', line))
     assert 'bg=terminal,fg=terminal' in binding and '--client' in binding, binding
     client, other = Client('origin'), Client('other')
     CLIENTS += [client, other]
     wait('attached', lambda: len(tmux('list-clients').splitlines()) == 2)
     origin, untouched = client.context(), other.context()
     wait('index', lambda: (ROOT / 's/tmux-agent-plane/agents.json').exists())
-    client.key(b'\x01a')
+    client.key(b'\x01f')
     wait('empty picker', lambda: 'no agents running' in client.text())
     client.key(b'\r')
     time.sleep(.15)
@@ -179,7 +179,7 @@ try:
     rows = {row['name']: row for row in agents()}
     (ROOT / (rows['quartz-build']['pane'] + '.command')).write_text('blocked 0 0')
     wait('blocked publisher', lambda: next(a for a in agents() if a['name'] == 'quartz-build')['state'] == 'blocked')
-    client.key(b'\x01a')
+    client.key(b'\x01f')
     wait('picker', lambda: client.selected() == 'quartz-build')
     client.snapshot('all-agents')
     # Blank canvas and panel background must use terminal default, despite popup-style.
@@ -206,14 +206,14 @@ try:
     client.key(b'\x1b')
     wait('cancelled', lambda: 'search names / descriptions' not in client.text())
     assert client.context() == origin
-    client.key(b'\x01a')
+    client.key(b'\x01f')
     wait('reopen fresh', lambda: client.selected() == 'quartz-build' and '› quartz' not in client.text())
     client.key(b'qjk')
     wait('literal letters', lambda: '› qjk' in client.text())
     client.key(b'\x03')
     wait('ctrl-c cancel', lambda: 'search names / descriptions' not in client.text())
     assert client.context() == origin
-    client.key(b'\x01a')
+    client.key(b'\x01f')
     wait('reopen for focus', lambda: client.selected() == 'quartz-build')
     query(client, 'cdrrv', 'cedar-review')
     # Another client remains attached and active while the picker focuses its own client.

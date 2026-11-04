@@ -13,7 +13,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
-- Open the tmux agent picker with lowercase `prefix + a`; type immediately to fuzzy-search names and descriptions, browse ranked matches with arrows, Enter to focus the exact pane in the originating client, or Esc/Ctrl-C to cancel
+- Open the tmux agent picker with lowercase `prefix + f` (replacing tmux’s window finder); type immediately to fuzzy-search names and descriptions, browse ranked matches with arrows, Enter to focus the exact pane in the originating client, or Esc/Ctrl-C to cancel
 - Let the agent picker inherit the terminal background, with selection using the terminal palette
 - Fuzzy search sidebar rows by name and description together, allowing gaps and abbreviations while ignoring case; task, blocked detail, location and directory stay searchable, and matching rows keep their order
 
