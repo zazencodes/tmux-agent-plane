@@ -126,12 +126,26 @@ Run your agents as usual. Then ask any of them things like:
 - "Spawn a Codex agent in a new window to migrate the billing tests, and tell me when it's done."
 - "You're the super agent: split this refactor across three agents, one per package, and review their work."
 
+### Direct agent navigation
+
+Press **Alt + ↑ / ↓** (Option + ↑ / ↓ on macOS) to focus the previous or next agent directly, without entering the sidebar or pressing the tmux prefix. The keys work with the sidebar open or closed, follow its global order across sessions, and wrap at either end. Sidebar search and state filters do not limit this navigation. From a shell or sidebar pane, ↓ starts at the first agent and ↑ at the last. Ordinary arrow keys keep going to the active application.
+
+The binding targets the exact tmux client that received the key. It refuses a destination session or linked window another client is using. To choose other direct bindings, set these before the plugin loads, then reload the plugin:
+
+```tmux
+set -g @agent-plane-previous-key C-M-Up
+set -g @agent-plane-next-key C-M-Down
+```
+
+These are tmux key names (`C` is Ctrl, `M` is Alt). The defaults leave tmux's prefix-then-Alt-arrow bindings available for resizing. Your window manager and terminal must pass the chosen keys through to tmux.
+
 ### Sidebar and agent list
 
 | Key | Action |
 | --- | --- |
 | Sidebar key (default `prefix + S`) | Open the sidebar in every window and move into it; close it everywhere when it is open |
 | `prefix + a` | Open the fuzzy agent picker, ready to type, with a live screen preview |
+| `Alt + ↑` / `Alt + ↓` | Focus previous/next agent directly, across sessions; no prefix or sidebar focus needed |
 | `↓` `↑` | Move selection; in sidebar view mode, preview the selected agent’s window/session. The sidebar also accepts `j` / `k` |
 | `v` | Toggle sidebar view mode (off initially): preview while keeping keyboard input in the sidebar |
 | `s` | Re-sort agents within each session by attention, then longest in state; keep the selected pane |
@@ -256,6 +270,7 @@ AI output must be two or three lowercase words joined by hyphens, each starting 
 | `wait <agent> [--timeout S]` | Wait until the agent is not working |
 | `rename <agent> <name>` | Name an agent: one word, unique. `self` requires a known caller |
 | `focus <agent>` | Show the agent on your screen |
+| `cycle next\|previous --client CLIENT` | Direct key binding: focus the adjacent agent in global sidebar order for the exact invoking tmux client |
 | `kill <agent>` | Close the agent's pane |
 | `spawn claude\|codex\|pi\|opencode\|agy\|grok ["<task>"] [--in pane\|window\|session] [--cwd DIR] [--name NAME] [--wait] [--timeout S]` | Start an agent. `--in pane` (default) splits the caller's pane |
 | `toggle-sidebar <window>` | What the sidebar key does, from a window (a window or pane id) |

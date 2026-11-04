@@ -229,6 +229,116 @@ def previewed(client, name):
     wait("preview " + name, arrived)
 
 
+def assert_cycle_keys(client):
+    """Exercise actual prefixless key delivery, live cursor selection and client guards."""
+    def order():
+        snapshot = index()
+        agents = {a['pane']: a for a in snapshot['agents']}
+        return sorted([agents[pane] for pane in snapshot['order'] if pane in agents],
+                      key=lambda a: a['session'])
+
+    def here():
+        return client.context()[1]
+
+    modifier = 3
+
+    def hop(direction):
+        ordered = [a['pane'] for a in order()]
+        origin = here()
+        if origin in ordered:
+            delta = 1 if direction == 'next' else -1
+            expected = ordered[(ordered.index(origin) + delta) % len(ordered)]
+        else:
+            expected = ordered[0 if direction == 'next' else -1]
+        client.key(f'\x1b[1;{modifier}{"B" if direction == "next" else "A"}'.encode())
+        wait('direct key ' + direction, lambda: here() == expected)
+        return expected
+
+    bindings = tmux('list-keys', '-T', 'root')
+    assert 'M-Up' in bindings and 'cycle previous --client' in bindings
+    assert 'M-Down' in bindings and 'cycle next --client' in bindings
+    before = {name: input_bytes(name) for name in FIXTURES}
+    visited = {hop('next') for _ in range(4)}
+    assert visited == {a['pane'] for a in order()}
+    hop('previous')
+    ordered = [a['pane'] for a in order()]
+    origin = here()
+    expected = ordered[(ordered.index(origin) + 11) % len(ordered)]
+    client.key(b'\x1b[1;3B' * 11)
+    wait('rapid keys advance from live pane', lambda: here() == expected)
+    settle(0.7)
+    assert here() == expected
+    for name in FIXTURES:
+        assert input_bytes(name) == before[name], (name, input_bytes(name))
+    # Unmodified arrows keep reaching the terminal application.
+    selected_name = next(a['name'] for a in index()['agents'] if a['pane'] == here())
+    client.key(b'\x1b[A\x1b[B')
+    wait('ordinary arrows reach the agent', lambda: b'\x1b[A\x1b[B' in input_bytes(selected_name))
+    # A second client keeps its session and pane. Shared target sessions are refused.
+    away = agent('nav-away').copy()
+    if here() == away['pane']:
+        hop('next')
+    secondary = Client(away['session'])
+    CLIENTS.append(secondary)
+    wait('second client attached', lambda: len(tmux('list-clients', '-F', '#{client_name}').splitlines()) == 2)
+    secondary_origin = secondary.context()
+    # Drive only the first client until the next step would enter the occupied session.
+    ordered = [a['pane'] for a in order()]
+    predecessor = ordered[(ordered.index(away['pane']) - 1) % len(ordered)]
+    for _ in range(len(ordered)):
+        if here() == predecessor:
+            break
+        # Previous avoids crossing the occupied destination from the other side.
+        hop('previous')
+    assert here() == predecessor
+    first_origin = client.context()
+    denied = subprocess.run([str(BINARY), 'cycle', 'next', '--client', client.context()[0]],
+                            env=ENV, text=True, capture_output=True, timeout=10)
+    assert denied.returncode != 0 and 'shared with another client' in denied.stderr, denied
+    assert client.context() == first_origin and secondary.context() == secondary_origin
+    missing = subprocess.run([str(BINARY), 'cycle', 'next', '--client', 'missing-client'],
+                             env=ENV, text=True, capture_output=True, timeout=10)
+    assert missing.returncode != 0 and 'no longer attached' in missing.stderr
+    secondary.close()
+    CLIENTS.remove(secondary)
+    hop('next')
+    # Departure between index updates fails without guessing a different target.
+    plane('kill', 'nav-done')
+    SPAWNED.remove('nav-done')
+    wait('departed row withdrawn', lambda: not any(a['name'] == 'nav-done' for a in index()['agents']))
+    hop('next')
+    hop('previous')
+    # Direct bindings work when the sidebar is open, and keep focus in an agent.
+    plane('toggle-sidebar', agent('nav-work')['window'])
+    wait('sidebars open', lambda: all(w['sidebar'] for w in index()['windows']))
+    hop('next')
+    assert here() in [a['pane'] for a in order()]
+    # Rebinding on plugin reload removes its old keys and preserves user replacements.
+    tmux('set-option', '-g', '@agent-plane-previous-key', 'C-M-Up')
+    tmux('set-option', '-g', '@agent-plane-next-key', 'C-M-Down')
+    subprocess.run(['bash', str(SOURCE.parent / 'tmux-agent-plane.tmux')], env=ENV, check=True)
+    bindings = tmux('list-keys', '-T', 'root')
+    assert not any(' M-Up ' in row or ' M-Down ' in row for row in bindings.splitlines())
+    modifier = 7
+    hop('next')
+    hop('previous')
+    tmux('bind-key', '-n', 'C-M-Up', 'display-message', 'user-owned-binding')
+    tmux('set-option', '-gu', '@agent-plane-previous-key')
+    tmux('set-option', '-gu', '@agent-plane-next-key')
+    subprocess.run(['bash', str(SOURCE.parent / 'tmux-agent-plane.tmux')], env=ENV, check=True)
+    bindings = tmux('list-keys', '-T', 'root')
+    assert any('C-M-Up' in row and 'user-owned-binding' in row for row in bindings.splitlines())
+    assert not any('C-M-Down' in row for row in bindings.splitlines())
+    modifier = 3
+    hop('next')
+    client.snapshot('cycle-keys')
+    return {'prefixless_modifier_arrows': True, 'plain_arrows_preserved': True,
+            'cross_session_wrap': True, 'rapid_keys': 11, 'no_modifier_input_leak': True,
+            'explicit_client': True, 'shared_target_refused': True, 'departed_row': True,
+            'works_with_sidebar_open': True, 'custom_keys_reload': True,
+            'user_rebinding_preserved': True}
+
+
 def assert_fuzzy_search(client):
     baseline = shown_names(client)
     origin = client.context()
@@ -814,6 +924,9 @@ try:
     change("nav-done", "idle", 1)
     change("nav-away", "blocked", 0)
     wait("states", lambda: agent("nav-done")["state"] == "done" and agent("nav-away")["state"] == "blocked")
+    if "--cycle-only" in sys.argv[2:]:
+        RESULTS = {"passed": True, **assert_cycle_keys(client)}
+        sys.exit(0)
     plane("toggle-sidebar", agent("nav-work")["window"])
     wait("sidebar controls", lambda: "v off" in client.text() and "f all" in client.text())
     selected(client, "nav-work")  # the agent it was opened from

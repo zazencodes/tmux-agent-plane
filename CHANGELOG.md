@@ -7,6 +7,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
+- Focus the previous or next agent directly with Alt+↑/↓, across sessions and without entering the sidebar; configure the keys with `@agent-plane-previous-key` and `@agent-plane-next-key`
 - A Neovim Telescope picker for tracked agent sessions: fuzzy-search names, task titles and blocked details, browse with arrows, and press Enter to focus the selected pane
 
 ### Changed

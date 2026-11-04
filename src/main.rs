@@ -8,6 +8,7 @@ mod detect;
 mod diagnostics;
 mod index;
 mod lifecycle;
+mod navigation;
 mod popup;
 mod sidebar;
 mod sidebar_help;
@@ -100,6 +101,14 @@ enum Cmd {
         /// Agent name or pane id
         target: String,
     },
+    /// Focus the next or previous agent without entering the sidebar
+    Cycle {
+        #[arg(value_enum)]
+        direction: navigation::Direction,
+        /// Exact tmux client name, supplied by the invoking key binding
+        #[arg(long)]
+        client: String,
+    },
     /// Close an agent's pane, ending the agent
     Kill {
         /// Agent name or pane id
@@ -155,6 +164,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Keys { target, keys } => commands::keys(&target, &keys),
         Cmd::Rename { target, name } => commands::rename(&target, &name),
         Cmd::Focus { target } => commands::focus(&target),
+        Cmd::Cycle { direction, client } => navigation::cycle(direction, &client),
         Cmd::Kill { target } => commands::kill(&target),
         Cmd::Wait { target, timeout } => commands::wait(&target, timeout),
         Cmd::Spawn {

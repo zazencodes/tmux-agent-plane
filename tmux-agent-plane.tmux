@@ -14,6 +14,33 @@ fi
 # and move into it; close it everywhere when you are in it.
 sidebar_key="$(tmux show-option -gqv @agent-plane-sidebar-key)"
 tmux bind-key "${sidebar_key:-S}" run-shell "tmux-agent-plane toggle-sidebar '#{window_id}'"
+# Direct navigation keeps keyboard input in the agent; no sidebar focus is needed.
+# run-shell is synchronous so repeated keys resolve the live client in order.
+previous_key="$(tmux show-option -gqv @agent-plane-previous-key)"
+next_key="$(tmux show-option -gqv @agent-plane-next-key)"
+previous_key="${previous_key:-M-Up}"
+next_key="${next_key:-M-Down}"
+if [ "$previous_key" = "$next_key" ]; then
+  tmux display-message "tmux-agent-plane: previous and next keys must differ"
+  exit 1
+fi
+# Reloading after a key change removes only bindings this plugin still owns.
+bindings="$(tmux list-keys -T root)"
+for direction in previous next; do
+  old_key="$(tmux show-option -gqv "@agent-plane-bound-$direction-key")"
+  if [ -n "$old_key" ]; then
+    while IFS= read -r binding; do
+      case "$binding" in
+        *" -T root $old_key "*"tmux-agent-plane cycle $direction --client "*)
+          tmux unbind-key -n "$old_key" ;;
+      esac
+    done <<< "$bindings"
+  fi
+done
+tmux bind-key -n "$previous_key" run-shell "tmux-agent-plane cycle previous --client #{q:client_name}"
+tmux bind-key -n "$next_key" run-shell "tmux-agent-plane cycle next --client #{q:client_name}"
+tmux set-option -g @agent-plane-bound-previous-key "$previous_key"
+tmux set-option -g @agent-plane-bound-next-key "$next_key"
 # While the sidebar is open, a window gets one when it comes on screen (new windows, sessions).
 # A fixed hook index, so reloading tmux.conf replaces these hooks and keeps any of your own.
 follow="run-shell -b \"tmux-agent-plane follow-sidebar '#{window_id}'\""

@@ -4,6 +4,7 @@ use crate::agents::{ProcessTable, RawState, ScanContext};
 use crate::commands;
 use crate::index::{self, Agent, Index, RecentEvent, State, WindowView};
 use crate::lifecycle;
+use crate::navigation::{CLIENT_FORMAT, Client, guard_destination, parse_client};
 use crate::tmux;
 use crate::ui::{
     LAVENDER, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, counts, hints, icon,
@@ -751,32 +752,6 @@ impl Sidebar {
     }
 }
 
-/// list-clients expands these fields in each client's context, including active-pane clients.
-struct Client {
-    name: String,
-    pid: String,
-    session: String,
-    window: String,
-    pane: String,
-}
-
-const CLIENT_FORMAT: &str =
-    "#{client_name}\x1f#{client_pid}\x1f#{session_id}\x1f#{window_id}\x1f#{pane_id}";
-
-fn parse_client(line: &str) -> Result<Client> {
-    let fields: Vec<_> = line.split('\x1f').collect();
-    if fields.len() != 5 {
-        bail!("unexpected client context: {line:?}");
-    }
-    Ok(Client {
-        name: fields[0].into(),
-        pid: fields[1].into(),
-        session: fields[2].into(),
-        window: fields[3].into(),
-        pane: fields[4].into(),
-    })
-}
-
 fn clients() -> Result<Vec<Client>> {
     tmux::run(&["list-clients", "-F", CLIENT_FORMAT])?
         .lines()
@@ -791,22 +766,6 @@ fn input_client<'a>(clients: &'a [Client], pane: &str) -> Result<&'a Client> {
         bail!("multiple clients in sidebar; use a separate session");
     }
     Ok(client)
-}
-
-/// Sessions share their current window, and linked windows share their active pane.
-/// Explicit -c alone does not isolate those changes. Refuse to disturb another client.
-fn guard_destination(
-    clients: &[Client],
-    client: &Client,
-    session: &str,
-    window: &str,
-) -> Result<()> {
-    if clients.iter().any(|other| {
-        other.name != client.name && (other.session == session || other.window == window)
-    }) {
-        bail!("target shared with another client; use a separate session");
-    }
-    Ok(())
 }
 
 /// What a switch must check, read in one tmux command: each command costs a process.
