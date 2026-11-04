@@ -8,13 +8,14 @@ use ratatui::widgets::Paragraph;
 
 /// Keep labels as individual whitespace-separated keys, so coverage can check them.
 const SHORTCUTS: &[(&str, &str)] = &[
-    ("j k ↑ ↓", "Move selection"),
-    ("enter", "Jump to agent"),
+    ("j k", "Move selection"),
+    ("↑ ↓", "Move / search / scroll review"),
+    ("enter", "Jump / keep search / save"),
     ("v", "Toggle window previews"),
     ("s", "Re-sort agents"),
     ("f", "Cycle state filter"),
     ("/", "Search agents"),
-    ("esc", "Clear search / cancel edit"),
+    ("esc", "Clear / cancel / close"),
     ("r", "Rename selected agent"),
     ("x", "Confirm kill of agent"),
     ("a", "Set up AI names"),
@@ -24,13 +25,13 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("ctrl-u", "Clear text in an edit"),
     ("bksp", "Delete character in an edit"),
     ("space", "Rename: insert hyphen"),
-    ("↑ ↓", "Search: move selection"),
-    ("enter", "Edit: keep search / save name"),
     ("enter y", "Kill: confirm (esc cancels)"),
     ("1-7", "AI setup: choose command"),
     ("h", "AI setup: hide hint"),
     ("d", "AI setup: disable names"),
-    ("esc", "AI setup: back / close"),
+    ("k", "Review: keep settings"),
+    ("c", "Review: change via setup"),
+    ("h", "Review: reminders off"),
 ];
 
 #[derive(Default)]

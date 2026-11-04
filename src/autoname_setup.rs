@@ -1,5 +1,7 @@
 //! Sidebar-local setup; no model process runs during configuration.
 use crate::autoname_config::{self as config, Config, Output};
+use crate::{index, settings_review as reviews};
+use anyhow::{Context, Result, bail};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::{
@@ -15,17 +17,100 @@ pub struct Setup {
     output: Output,
     custom: Option<String>,
     error: Option<String>,
+    config_error: Option<String>,
+    due: Option<&'static str>,
+    active: Option<&'static reviews::Setting>,
+    review: Option<reviews::Screen>,
 }
 
 impl Setup {
-    /// Called once on sidebar startup and when deliberately opening setup, never on a timer.
-    pub fn load(&mut self) {
+    /// Read on the sidebar's existing slow refresh. The return value lets callers redraw
+    /// only when configuration, errors or due state changed, including the time boundary.
+    pub fn refresh(&mut self) -> bool {
         match config::read() {
             Ok(config) => {
-                self.config = config;
-                self.error = None;
+                let error_changed = self.config_error.take().is_some();
+                self.accept_config(config, index::now_ms()) || error_changed
             }
-            Err(error) => self.error = Some(format!("{error:#}")),
+            Err(error) => {
+                let message = format!("{error:#}");
+                let changed = self.config_error.as_ref() != Some(&message) || self.due.is_some();
+                self.config_error = Some(message);
+                self.due = None;
+                changed
+            }
+        }
+    }
+
+    fn accept_config(&mut self, config: Config, now: u64) -> bool {
+        let due = reviews::due(&config, now).map(|setting| setting.id);
+        let changed = self.config != config || self.due != due;
+        self.config = config;
+        self.due = due;
+        changed
+    }
+
+    pub fn load(&mut self) {
+        self.refresh();
+    }
+
+    pub fn flags(&self) -> Vec<String> {
+        let mut flags = Vec::new();
+        if self.hint() {
+            flags.push(" a AI names · optional setup".into());
+        }
+        if let Some(setting) = reviews::SETTINGS
+            .iter()
+            .find(|setting| Some(setting.id) == self.due)
+        {
+            flags.push(format!(" {} {} · review due", setting.key, setting.label));
+        }
+        flags
+    }
+
+    pub(crate) fn menu(&mut self) {
+        self.open = true;
+        self.review = None;
+        self.command = None;
+        self.custom = None;
+        self.error = None;
+    }
+
+    fn review_action(&mut self, action: reviews::Action) {
+        let setting = self.review.as_ref().unwrap().setting;
+        match action {
+            reviews::Action::Close => {
+                self.review = None;
+                self.open = false;
+            }
+            reviews::Action::Change => (setting.open_setup)(self),
+            reviews::Action::Keep | reviews::Action::Hide => {
+                let result: Result<Config> = (|| {
+                    let mut config = config::read()?;
+                    if matches!(action, reviews::Action::Keep) {
+                        let current = (setting.values)(&config).current;
+                        if !(setting.configured)(&config)
+                            || current != self.review.as_ref().unwrap().current
+                        {
+                            bail!("settings changed; close and review again");
+                        }
+                        reviews::reviewed(&mut config, setting.id, index::now_ms());
+                    } else {
+                        config.reviews.enabled = false;
+                    }
+                    config::write(&config)?;
+                    Ok(config)
+                })();
+                match result {
+                    Ok(config) => {
+                        self.accept_config(config, index::now_ms());
+                        self.review = None;
+                        self.open = false;
+                        self.error = None;
+                    }
+                    Err(error) => self.error = Some(format!("{error:#}")),
+                }
+            }
         }
     }
 
@@ -36,13 +121,30 @@ impl Setup {
     /// True consumes the key, so setup Enter never jumps to an agent behind the screen.
     pub fn key(&mut self, key: KeyEvent) -> bool {
         if !self.open {
-            if key.code != KeyCode::Char('a') || !key.modifiers.is_empty() {
+            if !key.modifiers.is_empty() {
                 return false;
             }
+            let KeyCode::Char(c) = key.code else {
+                return false;
+            };
+            let Some(setting) = reviews::SETTINGS.iter().find(|setting| setting.key == c) else {
+                return false;
+            };
             self.load();
-            self.open = true;
-            self.command = None;
-            self.custom = None;
+            self.active = Some(setting);
+            self.error = None;
+            if self.due == Some(setting.id) {
+                self.open = true;
+                self.review = Some(reviews::Screen::new(setting, &self.config));
+            } else {
+                (setting.open_setup)(self);
+            }
+            return true;
+        }
+        if let Some(review) = &mut self.review {
+            if let Some(action) = review.key(key) {
+                self.review_action(action);
+            }
             return true;
         }
         if key.code == KeyCode::Esc {
@@ -85,15 +187,20 @@ impl Setup {
             }
         } else if self.command.is_some() {
             if key.code == KeyCode::Enter && key.modifiers.is_empty() {
-                let mut config = self.config.clone();
-                config.auto_name.enabled = true;
-                config.auto_name.command = self.command.clone().unwrap();
-                config.auto_name.output = self.output;
-                match config::executable(&config.auto_name.command)
-                    .and_then(|_| config::write(&config))
-                {
-                    Ok(()) => {
-                        self.config = config;
+                let result: Result<Config> = (|| {
+                    let mut config = config::read()?;
+                    config.auto_name.enabled = true;
+                    config.auto_name.command = self.command.clone().unwrap();
+                    config.auto_name.output = self.output;
+                    let setting = self.active.context("setup has no reviewable setting")?;
+                    reviews::reviewed(&mut config, setting.id, index::now_ms());
+                    config::executable(&config.auto_name.command)?;
+                    config::write(&config)?;
+                    Ok(config)
+                })();
+                match result {
+                    Ok(config) => {
+                        self.accept_config(config, index::now_ms());
                         self.open = false;
                         self.command = None;
                     }
@@ -127,6 +234,10 @@ impl Setup {
                         if key.code == KeyCode::Char('h') {
                             config.auto_name.hide_hint = true;
                         } else {
+                            let setting = self.active.context("setup has no reviewable setting")?;
+                            if (setting.configured)(&config) {
+                                reviews::reviewed(&mut config, setting.id, index::now_ms());
+                            }
                             config.auto_name.enabled = false;
                         }
                         config::write(&config)?;
@@ -134,7 +245,7 @@ impl Setup {
                     });
                     match result {
                         Ok(config) => {
-                            self.config = config;
+                            self.accept_config(config, index::now_ms());
                             self.open = false;
                         }
                         Err(error) => self.error = Some(format!("{error:#}")),
@@ -146,7 +257,14 @@ impl Setup {
         true
     }
 
-    pub fn draw(&self, frame: &mut Frame) {
+    pub fn draw(&mut self, frame: &mut Frame) {
+        if let Some(review) = &mut self.review {
+            review.draw(
+                frame,
+                self.config_error.as_deref().or(self.error.as_deref()),
+            );
+            return;
+        }
         let mut text = format!(
             "AI auto-naming · {}\n\n",
             if self.config.auto_name.enabled {
@@ -169,7 +287,7 @@ impl Setup {
         } else {
             text.push_str("Choose the AI command you use:\n\n1 Claude Code\n2 Codex\n3 Pi\n4 OpenCode\n5 Antigravity (agy)\n6 Grok Build\n7 Custom command\n\nh Hide setup hint permanently\nd Disable auto-naming\nesc Close\n\nNo AI runs until you review and\nenable. Your CLI's authentication\napplies. Presets select a low-cost\nmodel and its lowest verified effort.");
         }
-        if let Some(error) = &self.error {
+        if let Some(error) = self.config_error.as_ref().or(self.error.as_ref()) {
             text.push_str(&format!("\n\nError: {error}"));
         }
         frame.render_widget(
@@ -207,9 +325,59 @@ mod tests {
         assert!(!setup.key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)));
     }
     #[test]
+    fn refresh_reports_boundary_and_shared_review_date_changes_without_a_new_timer() {
+        let day = reviews::DAY_MS;
+        let mut config = Config::default();
+        config.auto_name.enabled = true;
+        config.auto_name.command = config::preset('5').unwrap();
+        reviews::reviewed(&mut config, "auto_name", day);
+        let mut one = Setup::default();
+        let mut two = Setup::default();
+        assert!(one.accept_config(config.clone(), 91 * day - 1));
+        assert!(!one.accept_config(config.clone(), 91 * day - 1));
+        assert!(one.accept_config(config.clone(), 91 * day));
+        assert!(one.flags()[0].contains("review due"));
+        assert!(
+            one.flags()
+                .iter()
+                .all(|flag| ratatui::text::Line::from(flag.as_str()).width() <= 38)
+        );
+        two.accept_config(config.clone(), 91 * day);
+        assert_eq!(one.flags(), two.flags());
+        reviews::reviewed(&mut config, "auto_name", 91 * day);
+        assert!(one.accept_config(config.clone(), 91 * day));
+        assert!(two.accept_config(config, 91 * day));
+        assert!(one.flags().is_empty() && two.flags().is_empty());
+    }
+
+    #[test]
+    fn leaving_a_review_or_change_without_saving_keeps_it_due() {
+        let day = reviews::DAY_MS;
+        let mut config = Config::default();
+        config.auto_name.enabled = true;
+        config.auto_name.command = config::preset('5').unwrap();
+        reviews::reviewed(&mut config, "auto_name", day);
+        for action in [reviews::Action::Close, reviews::Action::Change] {
+            let mut setup = Setup::default();
+            setup.accept_config(config.clone(), 91 * day);
+            setup.open = true;
+            setup.active = Some(&reviews::SETTINGS[0]);
+            setup.review = Some(reviews::Screen::new(&reviews::SETTINGS[0], &config));
+            setup.review_action(action);
+            assert_eq!(setup.config.reviews.last_reviewed["auto_name"], day);
+            assert!(setup.flags()[0].contains("review due"));
+            if setup.open {
+                setup.key(KeyEvent::from(KeyCode::Esc));
+            }
+            assert!(!setup.open);
+            assert_eq!(setup.config, config);
+        }
+    }
+
+    #[test]
     fn setup_fits_a_38_column_sidebar() {
         use ratatui::{Terminal, backend::TestBackend};
-        let setup = Setup {
+        let mut setup = Setup {
             open: true,
             command: config::preset('5'),
             ..Setup::default()

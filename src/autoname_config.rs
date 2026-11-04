@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub auto_name: AutoName,
+    pub reviews: crate::settings_review::Preferences,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -50,6 +51,7 @@ fn read_path(path: &Path) -> Result<Config> {
 
 fn parse(bytes: &[u8]) -> Result<Config> {
     let config: Config = serde_json::from_slice(bytes)?;
+    config.reviews.validate_at(crate::index::now_ms())?;
     if config.auto_name.enabled || !config.auto_name.command.is_empty() {
         validate_command(&config.auto_name.command)?;
     }
@@ -377,6 +379,14 @@ mod tests {
             br#"{"unknown":true}"#,
             br#"{"auto_name":{"command":["foo","prefix {prompt}"]}}"#,
             br#"{"auto_name":{"output":"json"}}"#,
+            br#"{"reviews":{"interval_days":0}}"#,
+            br#"{"reviews":{"interval_days":"90"}}"#,
+            br#"{"reviews":{"enabled":null}}"#,
+            br#"{"reviews":{"last_reviewed":{"auto_name":"yesterday"}}}"#,
+            br#"{"reviews":{"last_reviewed":{"auto_name":null}}}"#,
+            br#"{"reviews":{"last_reviewed":{"auto_name":-1}}}"#,
+            br#"{"reviews":{"last_reviewed":{"auto_name":1.5}}}"#,
+            br#"{"reviews":{"last_reviewed":{"auto_name":18446744073709551615}}}"#,
         ] {
             assert!(parse(bytes).is_err());
         }

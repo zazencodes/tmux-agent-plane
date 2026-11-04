@@ -295,7 +295,7 @@ impl Runtime {
             bail!("AI name {name:?} is already assigned");
         }
         // Re-read consent immediately before application, including edits made outside setup.
-        if &config::read()? != config {
+        if config::read()?.auto_name != config.auto_name {
             return Ok(());
         }
         // if-shell -F evaluates the *live* option in the same tmux command queue as the

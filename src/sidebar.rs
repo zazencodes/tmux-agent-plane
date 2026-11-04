@@ -959,6 +959,8 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
     let mut refreshed = None;
     loop {
         if refreshed.is_none_or(|at: Instant| at.elapsed() >= REFRESH) {
+            // Configuration and review dates use this existing refresh, with no tmux calls.
+            sidebar.auto_name.refresh();
             // Refresh may change selection when an agent vanishes. Only input triggers preview.
             let observation = observe(&own)?;
             if observation.alone {
@@ -1082,10 +1084,14 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         .killing
         .as_ref()
         .map(|kill| kill_footer(kill, f.area().width as usize));
-    let hint = sidebar.auto_name.hint() && confirmation.is_none();
+    let flags = if confirmation.is_none() {
+        sidebar.auto_name.flags()
+    } else {
+        Vec::new()
+    };
     let footer_height = confirmation
         .as_ref()
-        .map_or(1 + u16::from(hint), |lines| lines.len() as u16);
+        .map_or(1 + flags.len() as u16, |lines| lines.len() as u16);
     let [list_area, help_area] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(footer_height)]).areas(f.area());
     let inner = list_area.width.saturating_sub(2) as usize;
@@ -1160,8 +1166,8 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let footer = confirmation.map_or_else(
         || {
             let mut lines = Vec::new();
-            if hint {
-                lines.push(Line::styled(" a AI names · optional setup", SUBTEXT));
+            for flag in flags {
+                lines.push(Line::styled(flag, SUBTEXT));
             }
             lines.push(footer(sidebar, inner + 2, index::now_ms()));
             Text::from(lines)

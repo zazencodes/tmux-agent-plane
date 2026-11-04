@@ -10,6 +10,7 @@ PTY decoding asserts UI only. Agent state comes exclusively from native fixtures
 Evidence persists in /tmp/tap-auto-*. Agent jobs use the branch CLI.
 """
 import fcntl
+from collections import Counter
 import json
 import os
 from pathlib import Path
@@ -244,6 +245,7 @@ try:
     plane('focus', by_pane(default)['name'])
     plane('toggle-sidebar', by_pane(default)['window'])
     wait('hint at width 38', lambda: 'a AI names' in client.text())
+    assert 'review due' not in client.text()
     settle(2)
     assert not calls() and not automatic_commands()
     RESULTS['off_no_model_or_extra_naming_tmux_commands'] = True
@@ -294,7 +296,7 @@ try:
         client.snapshot('shortcuts-short-' + str(page))
         client.key(b'q')
         wait('short help close', lambda: 'v off' in client.text())
-    assert 'Move selection' in seen_help and 'AI setup: back / close' in seen_help
+    assert 'Move selection' in seen_help and 'Review: reminders off' in seen_help
     assert 'Set up AI names' in seen_help
     tmux('resize-window', '-t', window, '-y', original_height)
     wait('full height restored', lambda: '? keys' in client.footer())
@@ -328,6 +330,94 @@ try:
     assert set(call['data']) == {'title', 'cwd', 'detail'}
     RESULTS.update(setup_by_real_keypress=True, agy_preset_fixture_only=True, consent_before_execution=True,
                    default_renamed=True, explicit_names_preserved=True, detached_no_input=True)
+    # Review reminders are local UI state shared through the config file, never AI calls.
+    initial_config = json.loads(CONFIG.read_text())
+    assert initial_config['reviews']['interval_days'] == 90
+    assert initial_config['reviews']['last_reviewed']['auto_name'] > 0
+    assert 'review due' not in client.text()
+    second = Client('keep-name')
+    CLIENTS.append(second)
+    def sidebar_in(window):
+        rows = tmux('list-panes', '-t', window, '-F', '#{pane_id} #{@agent-plane-sidebar}')
+        return next(line.split()[0] for line in rows.splitlines() if line.endswith(' 1'))
+    tmux('select-pane', '-t', sidebar_in(by_pane(preserved)['window']))
+    wait('second sidebar visible', lambda: 'v off' in second.text())
+    settle(2)
+    def idle_profile():
+        before = len((ROOT / 'tmux.calls').read_text().splitlines())
+        settle(3.2)
+        return Counter((ROOT / 'tmux.calls').read_text().splitlines()[before:])
+    fresh_profile = idle_profile()
+    def set_old_review(stale_pin=False):
+        config = json.loads(CONFIG.read_text())
+        config['reviews']['enabled'] = True
+        config['reviews']['last_reviewed']['auto_name'] = 1
+        if stale_pin:
+            args = config['auto_name']['command']
+            args[args.index('--model') + 1] = 'gemini-old-pin'
+        temporary = CONFIG.with_suffix('.tmp')
+        temporary.write_text(json.dumps(config))
+        temporary.replace(CONFIG)
+    review_calls_start = len((ROOT / 'tmux.calls').read_text().splitlines())
+    set_old_review(stale_pin=True)
+    wait('review due in both sidebars', lambda: 'a AI names · review due' in client.text() and 'a AI names · review due' in second.text())
+    due_profile = idle_profile()
+    assert set(due_profile) <= set(fresh_profile), (fresh_profile, due_profile)
+    assert all(abs(due_profile[key] - fresh_profile[key]) <= 2 for key in fresh_profile), (fresh_profile, due_profile)
+    (ROOT / 'review-idle-profiles.json').write_text(json.dumps({'fresh': dict(fresh_profile), 'due': dict(due_profile)}, indent=2))
+    client.key(b'a')
+    wait('review shows current and installed preset', lambda: 'Review AI names' in client.text() and 'gemini-old-pin' in client.text() and 'gemini-3.8-flash' in client.text() and 'Thinking: low' in client.text())
+    assert 'k keep · c change · h reminders off' in client.text()
+    client.snapshot('settings-review-current-and-preset')
+    client.key(b'\x1b')
+    wait('Esc leaves review due', lambda: 'a AI names · review due' in client.text())
+    assert json.loads(CONFIG.read_text())['reviews']['last_reviewed']['auto_name'] == 1
+    # Leaving the change flow without saving also leaves the old review date.
+    client.key(b'ac')
+    wait('review opens existing setup flow', lambda: '5 Antigravity (agy)' in client.text())
+    client.key(b'\x1b')
+    wait('cancelled change stays due', lambda: 'a AI names · review due' in client.text())
+    assert json.loads(CONFIG.read_text())['reviews']['last_reviewed']['auto_name'] == 1
+    kept_command = json.loads(CONFIG.read_text())['auto_name']['command']
+    client.key(b'ak')
+    wait('keep clears both sidebars without restarting', lambda: 'v off' in client.text() and 'review due' not in client.text() and 'review due' not in second.text())
+    kept = json.loads(CONFIG.read_text())
+    assert kept['reviews']['last_reviewed']['auto_name'] > 1
+    assert kept['auto_name']['command'] == kept_command, 'keep silently changed the model'
+    # Completing setup through the change action updates both the command and review date.
+    set_old_review()
+    wait('second review due', lambda: 'review due' in client.text() and 'review due' in second.text())
+    client.key(b'ac5')
+    wait('preset review before enabling', lambda: 'enter enable' in client.text() and 'Model: gemini-3.8-flash' in client.text())
+    client.key(b'\r')
+    wait('changed setup marks reviewed in both sidebars', lambda: 'v off' in client.text() and 'review due' not in client.text() and 'review due' not in second.text())
+    changed = json.loads(CONFIG.read_text())
+    assert changed['reviews']['last_reviewed']['auto_name'] > 1
+    assert changed['auto_name']['command'][2] == 'gemini-3.8-flash'
+    # Disabling reviews is separate from hiding the setup hint and survives new processes.
+    set_old_review()
+    wait('review due before turning reminders off', lambda: 'review due' in client.text() and 'review due' in second.text())
+    client.key(b'ah')
+    wait('review reminders turned off', lambda: not json.loads(CONFIG.read_text())['reviews']['enabled'] and 'review due' not in client.text() and 'review due' not in second.text())
+    disabled_reviews = json.loads(CONFIG.read_text())
+    assert disabled_reviews['auto_name']['hide_hint'] == initial_config['auto_name']['hide_hint']
+    assert disabled_reviews['reviews']['last_reviewed']['auto_name'] == 1
+    window = by_pane(default)['window']
+    plane('toggle-sidebar', window)
+    plane('toggle-sidebar', window)
+    tmux('select-pane', '-t', sidebar_in(by_pane(preserved)['window']))
+    wait('review preference persists after reopening', lambda: 'v off' in client.text() and 'v off' in second.text())
+    assert 'review due' not in client.text() and 'review due' not in second.text()
+    review_commands = [json.loads(line) for line in (ROOT / 'tmux.calls').read_text().splitlines()[review_calls_start:]]
+    assert not any(args[0] == 'display-popup' for args in review_commands)
+    assert len(calls()) == 1, 'review ran an AI command'
+    second.close()
+    CLIENTS.remove(second)
+    RESULTS.update(review_flag_in_two_sidebars=True, review_current_vs_preset=True,
+                   review_Esc_and_cancel_do_not_mark=True, review_keep_clears_all_sidebars=True,
+                   review_change_setup_marks_reviewed=True, review_off_survives_reopening=True,
+                   review_fresh_config_no_reminder=True, review_no_AI_or_popups=True,
+                   review_idle_tmux_profiles_unchanged=True)
     # Exercise custom configuration in the actual sidebar as well.
     client.key(b'a7')
     wait('custom editor', lambda: 'Custom noninteractive command' in client.text())
@@ -413,8 +503,11 @@ try:
     client.key(b'\x1b')
     RESULTS['missing_command_visible_tracking_healthy'] = True
     # Explicit disabling is also persisted by the sidebar flow.
+    before_disable_review = json.loads(CONFIG.read_text())['reviews']['last_reviewed']['auto_name']
     client.key(b'ad')
     wait('disabled saved', lambda: not json.loads(CONFIG.read_text())['auto_name']['enabled'])
+    assert json.loads(CONFIG.read_text())['reviews']['last_reviewed']['auto_name'] > before_disable_review
+    RESULTS['explicit_disable_marks_reviewed'] = True
     before = len(calls())
     late = spawn()
     settle(2)
