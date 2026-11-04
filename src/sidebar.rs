@@ -199,9 +199,7 @@ struct OrganizeConfirmation {
 }
 
 fn organize_accepts(key: KeyEvent) -> bool {
-    !key.modifiers
-        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-        && matches!(key.code, KeyCode::Char('a' | 'A'))
+    key.modifiers.is_empty() && key.code == KeyCode::Char('a')
 }
 
 fn organizer_ready(agent: &Agent) -> Result<()> {
@@ -731,7 +729,7 @@ impl Sidebar {
         commands::kill_pane(&current.pane)
     }
 
-    /// Only A dispatches; every other closing key is consumed in this sidebar.
+    /// Only a dispatches; every other closing key is consumed in this sidebar.
     fn organize_key(&mut self, key: KeyEvent, own: &str) -> bool {
         if let Some(confirmation) = self.organizing.take() {
             self.notice = None;
@@ -745,10 +743,8 @@ impl Sidebar {
             }
             return true;
         }
-        if !matches!(key.code, KeyCode::Char('o' | 'O'))
-            || key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        if key.code != KeyCode::Char('o')
+            || !key.modifiers.is_empty()
             || self.editing.is_some()
             || self.navigation.search.is_some()
             || self.killing.is_some()
@@ -787,7 +783,7 @@ impl Sidebar {
     fn confirm_organize(&self, confirmation: &OrganizeConfirmation, own: &str) -> Result<()> {
         let clients = clients()?;
         if input_client(&clients, own)? != &confirmation.client {
-            bail!("confirmation client changed; press O again");
+            bail!("confirmation client changed; press o again");
         }
         let index = index::read()?;
         let current = index
@@ -796,11 +792,11 @@ impl Sidebar {
             .find(|a| a.pane == confirmation.agent.pane)
             .context("organizer exited; select it again")?;
         if !same_action_target(&confirmation.agent, current) {
-            bail!("organizer changed; press O again");
+            bail!("organizer changed; press o again");
         }
         organizer_ready(current)?;
         if action_identity(current)? != confirmation.codex_pid {
-            bail!("organizer process changed; press O again");
+            bail!("organizer process changed; press o again");
         }
         commands::send(&current.pane, &organize_task(current), false, false, None)
     }
@@ -1234,7 +1230,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let footer = confirmation.map_or_else(
         || {
             Text::from(vec![
-                hints(&[("c", "configure"), ("O", "organize")]),
+                hints(&[("c", "configure"), ("o", "organize")]),
                 footer(sidebar, inner + 2, index::now_ms()),
             ])
         },
@@ -1268,7 +1264,7 @@ fn draw_organize(f: &mut Frame, confirmation: &OrganizeConfirmation) {
     ];
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
     f.render_widget(
-        Paragraph::new(hints(&[("A", "organize"), ("esc", "cancel")])),
+        Paragraph::new(hints(&[("a", "organize"), ("esc", "cancel")])),
         footer,
     );
 }
@@ -1467,9 +1463,10 @@ mod tests {
                 matches!(state, State::Idle | State::Done)
             );
         }
+        assert!(organize_accepts(KeyEvent::from(KeyCode::Char('a'))));
+        assert!(!organize_accepts(KeyEvent::from(KeyCode::Char('A'))));
         for code in [KeyCode::Char('a'), KeyCode::Char('A')] {
-            assert!(organize_accepts(KeyEvent::from(code)));
-            assert!(organize_accepts(KeyEvent::new(code, KeyModifiers::SHIFT)));
+            assert!(!organize_accepts(KeyEvent::new(code, KeyModifiers::SHIFT)));
             assert!(!organize_accepts(KeyEvent::new(
                 code,
                 KeyModifiers::CONTROL
@@ -1489,6 +1486,7 @@ mod tests {
             KeyCode::Char('c'),
             KeyCode::Char('j'),
             KeyCode::Char('O'),
+            KeyCode::Char('A'),
             KeyCode::Char('?'),
         ] {
             let mut sidebar = Sidebar {
@@ -1517,7 +1515,7 @@ mod tests {
                 .map(|x| terminal.backend().buffer()[(x, height - 1)].symbol())
                 .collect();
             assert!(
-                row.contains("A organize") && row.contains("esc cancel"),
+                row.contains("a organize") && row.contains("esc cancel"),
                 "{row}"
             );
             assert!(!sidebar.help_key(KeyEvent::from(KeyCode::Char('?'))));

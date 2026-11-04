@@ -168,14 +168,14 @@ try:
     harness = infra('display-message', '-p', '-t', '=harness:', '#{window_id}')
     plane('toggle-sidebar', harness)
     client = Client()
-    wait('sidebar controls', lambda: 'O organize' in client.text())
+    wait('sidebar controls', lambda: 'o organize' in client.text())
     sidebar = infra('list-panes', '-t', harness, '-F', '#{pane_id} #{@agent-plane-sidebar}')
     sidebar = next(row.split()[0] for row in sidebar.splitlines() if row.endswith(' 1'))
     client.keys(b'/organizer-fixture\r')
     wait('selected fixture', lambda: 'organizer-fixture' in client.text() and 'type to search' not in client.text())
     baseline_input, baseline_calls = inputs(), input_calls()
-    for key in (b'\x1b', b'\r', b'q', b'x', b'c', b'j', b'O', b'?'):
-        client.keys(b'O')
+    for key in (b'\x1b', b'\r', b'q', b'x', b'c', b'j', b'o', b'O', b'A', b'?'):
+        client.keys(b'o')
         wait('confirmation', lambda: 'Organize all projects?' in client.text())
         assert 'Organizer: organizer-fixture' in client.text()
         client.snapshot('confirmation')
@@ -183,26 +183,27 @@ try:
         wait('cancelled', lambda: 'Organize all projects?' not in client.text())
         assert inputs() == baseline_input and input_calls() == baseline_calls, key
         assert infra('display-message', '-p', '-t', harness, '#{pane_id}') == sidebar
-    proof('O opens a named organizer confirmation; cancellation keys are consumed with no input or focus changes')
+    proof('o opens a named organizer confirmation; cancellation keys are consumed with no input or focus changes')
 
-    client.keys(b'/O')
-    wait('literal O search', lambda: 'organizer-fixtureO' in client.text())
+    client.keys(b'/o')
+    wait('literal o search', lambda: 'organizer-fixtureo' in client.text())
     assert 'Organize all projects?' not in client.text()
     client.keys(b'\x1b')
-    wait('search closed', lambda: 'type to search' not in client.text())
-    client.keys(b'rO')
+    wait('search closed', lambda: '⏎ jump' in client.text())
+    client.keys(b'ro')
     time.sleep(.15)
     client.drain()
     assert 'Organize all projects?' not in client.text()
     client.keys(b'\x1b')
-    proof('O remains literal in search and rename edits')
+    wait('rename closed', lambda: '⏎ jump' in client.text())
+    proof('o remains literal in search and rename edits')
 
     for native, indexed in (('working', 'working'), ('blocked', 'blocked')):
         state(selected, native)
         wait('organizer ' + indexed, lambda: agent('organizer-fixture')['state'] == indexed)
         wait('sidebar readiness state', lambda: any('organizer-fixture' in row and indexed in row
                                                      for row in client.text().splitlines()))
-        client.keys(b'O')
+        client.keys(b'o')
         wait('readiness refusal', lambda: 'select an idle or done organizer' in client.text())
         assert 'Organize all projects?' not in client.text()
         assert inputs() == baseline_input and input_calls() == baseline_calls
@@ -210,11 +211,11 @@ try:
     wait('ready again', lambda: agent('organizer-fixture')['state'] == 'idle')
     wait('ready sidebar', lambda: any('organizer-fixture' in row and 'idle' in row
                                       for row in client.text().splitlines()))
-    client.keys(b'O')
+    client.keys(b'o')
     wait('open before state change', lambda: 'Organize all projects?' in client.text())
     state(selected, 'blocked')
     wait('blocked while confirming', lambda: agent('organizer-fixture')['state'] == 'blocked')
-    client.keys(b'A')
+    client.keys(b'a')
     wait('changed organizer refusal', lambda: 'organizer changed' in client.text())
     assert inputs() == baseline_input and input_calls() == baseline_calls
     proof('working/blocked organizers and state changes after opening cannot receive the request')
@@ -223,21 +224,21 @@ try:
     wait('ready for identity test', lambda: agent('organizer-fixture')['state'] == 'idle')
     wait('ready sidebar for identity', lambda: any('organizer-fixture' in row and 'idle' in row
                                                    for row in client.text().splitlines()))
-    client.keys(b'O')
+    client.keys(b'o')
     wait('open before identity change', lambda: 'Organize all projects?' in client.text())
     state(selected, 'idle', identity=1)
     old_id = selected['session_id']
     wait('new native identity', lambda: agent('organizer-fixture')['session_id'] != old_id)
-    client.keys(b'A')
+    client.keys(b'a')
     wait('native identity refusal', lambda: 'organizer changed' in client.text())
     assert inputs() == baseline_input and input_calls() == baseline_calls
     proof('native identity changes cannot silently retarget a confirmed request')
 
-    client.keys(b'O')
+    client.keys(b'o')
     wait('open before second client', lambda: 'Organize all projects?' in client.text())
     other_client = Client()
     wait('two clients', lambda: len(infra('list-clients', '-F', '#{client_name}').splitlines()) == 2)
-    client.keys(b'A')
+    client.keys(b'a')
     wait('shared input refused', lambda: 'multiple clients in sidebar' in client.text())
     assert inputs() == baseline_input and input_calls() == baseline_calls
     other_client.close()
@@ -246,12 +247,12 @@ try:
 
     client.keys(b'o')
     wait('lowercase open', lambda: 'Organize all projects?' in client.text())
-    client.keys(b'A')
+    client.keys(b'a')
     path = ROOT / (selected['pane'] + '.input')
     wait('request delivered once', lambda: path.exists() and path.read_bytes().endswith(b'\r'))
     wait('dispatch notice', lambda: 'asked organizer-fixture to organize' in client.text())
     client.snapshot('requested')
-    client.keys(b'A')
+    client.keys(b'a')
     time.sleep(.15)
     client.drain()
     request = path.read_bytes()
@@ -263,7 +264,7 @@ try:
     assert len(input_calls()) == len(baseline_calls) + 3, input_calls()
     assert infra('display-message', '-p', '-t', harness, '#{pane_id}') == sidebar
     (ROOT / 'request.txt').write_bytes(request)
-    proof('A sends exactly one complete organization task to the selected agent; other agents and client focus stay untouched')
+    proof('a sends exactly one complete organization task to the selected agent; other agents and client focus stay untouched')
     (ROOT / 'results.json').write_text(json.dumps(dict(passed=True, cases=RESULTS, model_calls=0), indent=2))
 finally:
     for client in list(CLIENTS):

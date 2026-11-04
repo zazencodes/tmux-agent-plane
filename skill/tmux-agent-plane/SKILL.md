@@ -109,7 +109,7 @@ When coordinating several agents: spawn each with a self-contained task and a na
 
 Treat requests such as “organize my tmux sessions”, “clean up my tmux projects” or “organize my work into projects” as requests to organize the existing session/sidebar hierarchy. Each tmux session is one project, with its orchestrator and helpers inside it.
 
-The user can also select an idle/done agent in the sidebar, press `O`, then `A` to give that agent the organization task. The confirmation names the organizer and uses its existing model. If you receive that request, carry out the workflow below and report the result. Opening/canceling the confirmation sends nothing; working/blocked organizers and changes during confirmation are refused.
+The user can also select an idle/done agent in the sidebar, press `o`, then `a` to give that agent the organization task. The confirmation names the organizer and uses its existing model. If you receive that request, carry out the workflow below and report the result. Opening/canceling the confirmation sends nothing; working/blocked organizers and changes during confirmation are refused.
 
 1. Inspect `sessions list --json` and `list --json`. The session inventory includes shell-only sessions, attached-client counts, window IDs, group membership and agent names. Linked agents appear in every session containing their window; `list` retains one canonical agent row. Use tasks, names, directories and parent links to understand the work and choose appropriate existing or new sessions. Read an agent if its task is unclear.
 2. Create any needed project with `sessions create api --cwd /path/to/api`. Choose short, meaningful session names. Keep the user's established session/project boundaries.
