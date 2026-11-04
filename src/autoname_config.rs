@@ -8,14 +8,12 @@ use std::path::{Path, PathBuf};
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub auto_name: AutoName,
-    pub reviews: crate::settings_review::Preferences,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct AutoName {
     pub enabled: bool,
-    pub hide_hint: bool,
     /// Executable followed by literal arguments; exactly one argument is {prompt}.
     pub command: Vec<String>,
     pub output: Output,
@@ -51,7 +49,6 @@ fn read_path(path: &Path) -> Result<Config> {
 
 fn parse(bytes: &[u8]) -> Result<Config> {
     let config: Config = serde_json::from_slice(bytes)?;
-    config.reviews.validate_at(crate::index::now_ms())?;
     if config.auto_name.enabled || !config.auto_name.command.is_empty() {
         validate_command(&config.auto_name.command)?;
     }
@@ -353,22 +350,16 @@ mod tests {
     }
 
     #[test]
-    fn absent_and_empty_config_are_off_and_hint_is_visible() {
+    fn absent_and_empty_config_are_off() {
         let config = read_path(Path::new("/absent-auto-name-fixture/config.json")).unwrap();
         assert_eq!(config, parse(b"{}").unwrap());
         assert!(!config.auto_name.enabled);
-        assert!(!config.auto_name.hide_hint);
         assert!(config.auto_name.command.is_empty());
     }
     #[test]
-    fn hide_flag_round_trips_without_enabling() {
-        let config = parse(br#"{"auto_name":{"hide_hint":true}}"#).unwrap();
-        assert!(config.auto_name.hide_hint);
-        assert!(!config.auto_name.enabled);
-        assert_eq!(
-            parse(&serde_json::to_vec(&config).unwrap()).unwrap(),
-            config
-        );
+    fn removed_settings_fail_loudly() {
+        assert!(parse(br#"{"auto_name":{"hide_hint":true}}"#).is_err());
+        assert!(parse(br#"{"reviews":{"enabled":true}}"#).is_err());
     }
     #[test]
     fn invalid_configuration_fails_loudly() {

@@ -9,7 +9,6 @@ mod diagnostics;
 mod index;
 mod lifecycle;
 mod popup;
-mod settings_review;
 mod sidebar;
 mod sidebar_help;
 mod tmux;

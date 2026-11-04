@@ -141,7 +141,7 @@ Run your agents as usual. Then ask any of them things like:
 | `Enter` | Jump to the agent. The sidebar stays open; the popup closes |
 | `x` | Ask to kill the selected agent’s pane. The footer pins its name/state; `Enter` or lowercase `y` confirms; `?` temporarily shows help; other keys cancel without replay. Refuses to end your attached session; warns if a remote session would end |
 | `r` | Rename the agent (sidebar), starting from its current name. `Ctrl-W` deletes a word, `Ctrl-U` clears, `Enter` saves, `Esc` cancels |
-| `a` | Open a due settings review, or AI naming setup in the sidebar: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `h` permanently hides the setup hint, `d` disables naming, `Esc` goes back or closes |
+| `c` | Configure, in the sidebar. AI naming: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `d` disables naming, `Esc` goes back or closes |
 | `?` | Show every sidebar shortcut. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search and rename |
 | `q` | Close: the sidebar everywhere, or the popup (also `Esc`) |
 
@@ -184,9 +184,9 @@ All kinds except agy can be spawned without a task. `spawn agy` requires a task 
 
 ### Optional AI naming
 
-AI naming is **off by default**. With it off, no naming command runs and no task data is sent. The sidebar shows a muted `a AI names · optional setup` line above its usual footer. Press `a`, then `h` to hide that hint permanently; `a` still opens setup later. Existing sidebars share configuration changes on their existing slow refresh.
+AI naming is **off by default**. With it off, no naming command runs and no task data is sent. The sidebar always shows `c configure` above its usual footer, so configuration is one key away.
 
-Press `a` and choose `1` Claude Code, `2` Codex, `3` Pi, `4` OpenCode, `5` Antigravity (`agy`), `6` Grok Build, or `7` for a custom command. Setup checks the executable is installed without running it, shows the command and data disclosure, and requires `Enter` to enable. `Esc` goes back or closes; `a`, then `d` disables naming. For Antigravity, authenticate `agy` normally first, then use **`a`, `5`, `Enter`**. Setup itself never calls a model or changes folder trust. Use your configured sidebar key to open or reopen it (the plugin default is `prefix + S`).
+Press `c` and choose `1` Claude Code, `2` Codex, `3` Pi, `4` OpenCode, `5` Antigravity (`agy`), `6` Grok Build, or `7` for a custom command. Setup checks the executable is installed without running it, shows the command and data disclosure, and requires `Enter` to enable. `Esc` goes back or closes; `a`, then `d` disables naming. For Antigravity, authenticate `agy` normally first, then use **`a`, `5`, `Enter`**. Setup itself never calls a model or changes folder trust. Use your configured sidebar key to open or reopen it (the plugin default is `prefix + S`).
 
 The one configuration file is `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/config.json`. Setup writes it; the daemon reads changes on its existing tick, without a restart. An Antigravity configuration looks like:
 
@@ -194,7 +194,6 @@ The one configuration file is `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plan
 {
   "auto_name": {
     "enabled": true,
-    "hide_hint": false,
     "command": [
       "agy", "--model", "gemini-3.8-flash", "--effort", "low",
       "--print", "--output-format", "text",
@@ -217,30 +216,6 @@ Naming waits for a title of at least eight bytes containing two words, excluding
 The daemon runs one naming process at a time, outside tmux with closed stdin and a private working directory under its state directory. Each eligible pane/process lifetime gets **one attempt**, recorded before launch in `${XDG_STATE_HOME:-$HOME/.local/state}/tmux-agent-plane/auto-name.json`, including across daemon restarts. There is a 60-second timeout and a 16 KiB limit on each output stream. A failure pauses new naming attempts for 60 seconds, never retries the failed agent, and persists a deduplicated `auto-name:worker` diagnostic in `daemon.log` with degraded status. Tracking continues. An explicit configuration change acknowledges the active naming fault and clears the pause; it does not repeat reserved attempts.
 
 AI output must be two or three lowercase words joined by hyphens, each starting with a letter, at most 20 ASCII characters and unique. A single terminal newline is allowed; quotes, markdown, whitespace, commentary and duplicate names fail. Names are never repaired. Built-in commands use their noninteractive modes and restrict tools where the CLI provides that control; they run away from project folders and never alter your trust settings. No extra tmux commands run on idle naming ticks or while naming is disabled.
-
-### Periodic settings review
-
-Enabled auto-naming is reviewable every **90 days** after setup or the last review. A muted `a AI names · review due` flag appears above the sidebar footer. There is no popup, status alert, desktop notification, AI call or online model lookup. Open sidebars agree through the same config file on their existing slow refresh; no extra tmux command or timer is used.
-
-When due, `a` shows your configured command, model and thinking beside the **current installed preset** for that CLI. A custom executable with no known preset is shown explicitly as custom. Use `↑` / `↓` to scroll long commands. Press `k` to keep the configuration and mark it reviewed, `c` to change it through the existing setup, or `h` to turn review reminders off permanently. `Esc` closes without marking reviewed; cancelling a change does the same. Completing setup, including explicitly disabling configured naming, marks it reviewed, so its next reminder starts a full interval later. Keeping never rewrites the command. The review never updates models automatically.
-
-Review preferences are separate from `auto_name.hide_hint`:
-
-```json
-{
-  "reviews": {
-    "enabled": true,
-    "interval_days": 90,
-    "last_reviewed": {
-      "auto_name": 1793760000000
-    }
-  }
-}
-```
-
-The example timestamp is Unix **milliseconds**; setup and `k` write the current time. `reviews.enabled` defaults to `true`; review-screen `h` sets it to `false`, persisting until you explicitly change it in config. `reviews.interval_days` defaults to `90` and must be a positive integer. `reviews.last_reviewed` defaults to an empty map; each value must be an integer Unix timestamp that is not in the future, and each key must identify a registered setting. Invalid values fail through the existing configuration diagnostics. Someone who never enabled naming, disabled it, or turned review reminders off has nothing due. Older configurations without a review date start their review clock when setup is next completed; a date is never invented on read.
-
-Reviewable settings live in the small `SETTINGS` list in `src/settings_review.rs`. An entry supplies its key, configuration predicate, current/preset descriptions and existing setup action; generic review dates, due checks, flags and keep/off actions use that list.
 
 ### CLI
 

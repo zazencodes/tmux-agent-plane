@@ -940,13 +940,10 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
         shown: None,
     };
     let mut sidebar = Sidebar::default();
-    sidebar.auto_name.load();
     let mut next_read = Instant::now();
     let mut check_width = true;
     loop {
         if Instant::now() >= next_read {
-            // Configuration and review dates use this existing read, with no tmux calls.
-            sidebar.auto_name.refresh();
             // Refresh may change selection when an agent vanishes. Only input triggers preview.
             sidebar.refresh(&own);
             next_read = Instant::now() + REFRESH;
@@ -1073,14 +1070,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         .killing
         .as_ref()
         .map(|kill| kill_footer(kill, f.area().width as usize));
-    let flags = if confirmation.is_none() {
-        sidebar.auto_name.flags()
-    } else {
-        Vec::new()
-    };
-    let footer_height = confirmation
-        .as_ref()
-        .map_or(1 + flags.len() as u16, |lines| lines.len() as u16);
+    let footer_height = confirmation.as_ref().map_or(2, |lines| lines.len() as u16);
     let [list_area, help_area] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(footer_height)]).areas(f.area());
     let inner = list_area.width.saturating_sub(2) as usize;
@@ -1154,12 +1144,10 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
 
     let footer = confirmation.map_or_else(
         || {
-            let mut lines = Vec::new();
-            for flag in flags {
-                lines.push(Line::styled(flag, SUBTEXT));
-            }
-            lines.push(footer(sidebar, inner + 2, index::now_ms()));
-            Text::from(lines)
+            Text::from(vec![
+                hints(&[("c", "configure")]),
+                footer(sidebar, inner + 2, index::now_ms()),
+            ])
         },
         Text::from,
     );
@@ -1400,7 +1388,7 @@ mod tests {
                         .collect::<String>()
                 })
                 .collect();
-            assert!(!help.contains("optional setup"));
+            assert!(!help.contains("c configure"));
             assert!(!help.contains("? Y/n"));
             sidebar.help_key(KeyEvent::from(KeyCode::Char('x')));
             assert!(sidebar.killing.is_some());

@@ -9,7 +9,7 @@ use ratatui::widgets::Paragraph;
 /// Keep labels as individual whitespace-separated keys, so coverage can check them.
 const SHORTCUTS: &[(&str, &str)] = &[
     ("j k", "Move selection"),
-    ("↑ ↓", "Move / search / scroll review"),
+    ("↑ ↓", "Move selection or in search"),
     ("enter", "Jump / keep search / save"),
     ("v", "Toggle window previews"),
     ("s", "Re-sort agents"),
@@ -18,7 +18,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("esc", "Clear / cancel / close"),
     ("r", "Rename selected agent"),
     ("x", "Confirm kill of agent"),
-    ("a", "Set up AI names"),
+    ("c", "Configure"),
     ("?", "Keyboard shortcuts"),
     ("q", "Close all sidebars"),
     ("ctrl-w", "Delete word in an edit"),
@@ -26,12 +26,8 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("bksp", "Delete character in an edit"),
     ("space", "Rename: insert hyphen"),
     ("enter y", "Kill: confirm (esc cancels)"),
-    ("1-7", "AI setup: choose command"),
-    ("h", "AI setup: hide hint"),
-    ("d", "AI setup: disable names"),
-    ("k", "Review: keep settings"),
-    ("c", "Review: change via setup"),
-    ("h", "Review: reminders off"),
+    ("1-7", "Configure: choose AI command"),
+    ("d", "Configure: turn AI names off"),
 ];
 
 #[derive(Default)]
@@ -158,7 +154,7 @@ mod tests {
                 "missing sidebar help for {label}"
             );
         }
-        for label in ["?", "a", "x", "enter", "ctrl-w", "ctrl-u"] {
+        for label in ["?", "c", "x", "enter", "ctrl-w", "ctrl-u"] {
             assert!(labels.contains(&label));
         }
     }
