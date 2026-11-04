@@ -252,7 +252,23 @@ try:
     # Diagnostic announcements are popups that hold the keyboard, opened per client once it is idle.
     wait("recovery popups opened", lambda: sum(line.startswith("display-popup ") and "notification:desktop: recovered" in line
          for line in (ROOT / "tmux.calls").read_text().splitlines()) == 2)
+    # Readable and clear of the top row: the status line stays, and a key dismisses it at once.
+    original = CLIENTS[0]
+    wait("recovery notice on screen", lambda: any("✓ Recovered" in line for line in original.screen.display))
+    original.snapshot("recovery-notice")
+    assert original.screen.display[0].startswith("TOP-STATUS")
+    assert next(row for row, line in enumerate(original.screen.display) if "╭" in line and "tmux-agent-plane" in line) == 3
+    assert any("closes in" in line for line in original.screen.display)
+    assert any("notification:desktop" in line and "recovered" in line for line in original.screen.display)
+    dismissed_at = time.monotonic()
+    os.write(original.master, b"z")
+    wait("key dismisses the notice", lambda: not any("✓ Recovered" in line for line in original.screen.display))
+    assert time.monotonic() - dismissed_at < 3
+    # The other client's stays until its own 10 seconds run out.
+    second_shown = any("✓ Recovered" in line for line in CLIENTS[1].screen.display)
+    assert second_shown
     wait("recovery popups closed", lambda: not popup_open())
+    assert time.monotonic() - dismissed_at > 5, "an untouched notice stays for 10 seconds"
     change("working", 3)
     wait("working before block", lambda: agent("footer-source")["state"] == "working")
     change("blocked", 3)

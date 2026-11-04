@@ -165,7 +165,7 @@ When an agent finishes or blocks off screen, every open sidebar shows the latest
 
 Pi and OpenCode completion counters also report a new finished turn when it completes between polls while the agent still shows `done`. Each new completion follows the same footer and desktop policy.
 
-Desktop notifications keep the task or blocked detail and work with the sidebar closed. Daemon faults and recoveries appear in a short popup under the status bar, opened on each client once you pause typing for three seconds (a tmux popup takes keyboard input while open); active faults remain in the status bar and full reasons are recorded in `daemon.log`.
+Desktop notifications keep the task or blocked detail and work with the sidebar closed. Daemon faults and recoveries open in their own window a little below the top of the terminal, once you pause typing so it does not swallow keystrokes. A notice stays until you press a key or for 10 seconds, and it takes keyboard input while it is open.
 
 ### Agent launch syntax
 

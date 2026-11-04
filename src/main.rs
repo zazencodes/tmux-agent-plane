@@ -36,6 +36,9 @@ enum Cmd {
     Ui,
     /// Run the always-on agent list (shown in the sidebar pane)
     Sidebar,
+    /// Show a daemon message until a key press or 10 seconds (shown in a popup)
+    #[command(hide = true)]
+    Notice,
     /// Open the sidebar in every window and move into it; close it everywhere if it is open
     ToggleSidebar {
         /// tmux window id or target, e.g. `@104` or `work:2`
@@ -133,6 +136,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Daemon { action } => lifecycle::run(action),
         Cmd::Ui => ui::run(),
         Cmd::Sidebar => sidebar::run(),
+        Cmd::Notice => popup::notice(),
         Cmd::ToggleSidebar { window } => sidebar::toggle(&commands::target_pane(&window)?),
         Cmd::FollowSidebar { window } => sidebar::follow(&commands::target_pane(&window)?),
         Cmd::List { json } => commands::list(json),

@@ -14,6 +14,10 @@ before 1.0, a breaking change bumps the minor version.
 - Restyle the configure screen to match the sidebar: rounded panel, section headings, an on/off badge, a tick on the active command and key hints in the footer
 - Open configuration with `c`, always shown as `c configure` above the sidebar footer; the `a` key and the `AI names` hint are gone
 
+### Fixed
+
+- Make daemon notices readable: they open in their own window a little below the top of the terminal, leaving the status bar visible, with a clear heading, the source and the log path on separate lines, and they stay until you press a key or for 10 seconds
+
 ### Removed
 
 - Remove the 90-day settings review reminder and the option to hide the setup hint. A config file written by 0.4.2 fails loudly on the old `reviews` and `auto_name.hide_hint` keys: delete them
