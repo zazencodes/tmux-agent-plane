@@ -282,9 +282,14 @@ try:
     SPAWNED.remove('quartz-helper')
     SPAWNED.append('quartz-helperq')
     # Kill: another key cancels with no kill, then y kills exactly that pane.
+    # / freezes the search, so the same letters are commands on its matches.
     query(client, 'quartzhelperq', 'quartz-helperq')
-    client.key(b'\r')
-    wait('kept kill search', lambda: 'j/k browse' in client.text())
+    client.key(b'/')
+    wait('frozen search', lambda: 'j/k browse' in client.text() and '› quartzhelperq' in client.text())
+    client.key(b'n')
+    wait('new from frozen search', lambda: 'new agent in quartz-helper' in client.text())
+    client.key(b'\x1b')
+    wait('new cancelled, search kept', lambda: 'new agent in' not in client.text() and '› quartzhelperq' in client.text())
     client.key(b'x')
     wait('kill prompt', lambda: 'kill quartz-helperq' in client.text() and '[Y/n]' in client.text())
     client.key(b'n')
@@ -298,6 +303,16 @@ try:
     assert {a['name'] for a in agents()} == {'cedar-review', 'quartz-build'}
     client.key(b'\x1b')
     wait('search cleared after kill', lambda: '› ' not in client.text())
+    # A third / resumes editing a frozen search.
+    query(client, 'cedar', 'cedar-review')
+    client.key(b'/')
+    wait('frozen again', lambda: 'j/k browse' in client.text())
+    client.key(b'/r')
+    wait('resumed', lambda: '› cedarr' in client.text() and 'j/k browse' not in client.text())
+    client.key(b'\x1b')
+    wait('resume cancelled, frozen query back', lambda: '› cedar' in client.text() and '› cedarr' not in client.text())
+    client.key(b'\x1b')
+    wait('frozen query cleared', lambda: '› ' not in client.text())
     assert client.context() == origin and other.context() == untouched
     client.key(b'\x1b')
     wait('closed after kill', lambda: 'j/k browse' not in client.text())

@@ -121,6 +121,14 @@ impl App {
                 ControlFlow::Continue(())
             };
         }
+        // `/` again freezes the search: its matches stay, and the keys are commands again.
+        if self.sidebar.navigation.search.is_some()
+            && key.code == KeyCode::Char('/')
+            && key.modifiers.is_empty()
+        {
+            self.sidebar.key(KeyEvent::from(KeyCode::Enter));
+            return ControlFlow::Continue(());
+        }
         if self.sidebar.editing.is_none() && self.sidebar.navigation.search.is_none() {
             match key.code {
                 KeyCode::Enter => {
@@ -403,7 +411,7 @@ fn draw(f: &mut Frame, app: &mut App) {
                 hints(&[
                     ("type", "search"),
                     ("^j/^k", "browse"),
-                    ("⏎", "keep"),
+                    ("/ ⏎", "freeze"),
                     ("esc", "cancel"),
                     ("^w ^u", "clear"),
                 ])
@@ -659,11 +667,11 @@ mod tests {
     fn slash_starts_search_where_letters_are_text_and_ctrl_j_k_still_browse() {
         let mut app = app();
         let _ = press(&mut app, KeyCode::Char('/'));
-        for c in "qjx/東京".chars() {
+        for c in "qjx東京".chars() {
             let _ = press(&mut app, KeyCode::Char(c));
         }
         let _ = press(&mut app, KeyCode::Backspace);
-        assert_eq!(app.sidebar.navigation.query, "qjx/東");
+        assert_eq!(app.sidebar.navigation.query, "qjx東");
         type_query(&mut app, "cedar review  ");
         let _ = ctrl(&mut app, 'w');
         assert_eq!(app.sidebar.navigation.query, "cedar ");
@@ -675,6 +683,36 @@ mod tests {
         let _ = ctrl(&mut app, 'k');
         assert_eq!(app.sidebar.list.selected().unwrap(), first);
         assert!(app.sidebar.navigation.search.is_some());
+    }
+
+    #[test]
+    fn slash_freezes_a_search_so_keys_act_on_its_matches_and_slash_resumes_it() {
+        let mut app = app();
+        app.sidebar
+            .all_agents
+            .push(agent("cedar-worker", "%12", "Review database"));
+        app.sidebar.navigation.order.push("%12".into());
+        type_query(&mut app, "cedar");
+        let _ = ctrl(&mut app, 'j');
+        assert_eq!(selected(&app), "cedar-worker");
+        assert!(press(&mut app, KeyCode::Char('/')).is_continue());
+        assert!(app.sidebar.navigation.search.is_none());
+        assert_eq!(app.sidebar.navigation.query, "cedar");
+        assert_eq!(selected(&app), "cedar-worker");
+        assert_eq!(app.sidebar.agents.len(), 2);
+        let _ = press(&mut app, KeyCode::Char('k'));
+        assert_eq!(selected(&app), "cedar-review");
+        assert_eq!(app.sidebar.navigation.query, "cedar");
+        let _ = press(&mut app, KeyCode::Char('n'));
+        let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(screen(&terminal).contains("new agent in work"));
+        let _ = press(&mut app, KeyCode::Esc);
+        assert_eq!(app.sidebar.navigation.query, "cedar");
+        let _ = press(&mut app, KeyCode::Char('/'));
+        let _ = press(&mut app, KeyCode::Char('w'));
+        assert_eq!(app.sidebar.navigation.query, "cedarw");
+        assert_eq!(selected(&app), "cedar-worker");
     }
 
     #[test]
