@@ -5,6 +5,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+## 0.4.3 - 2026-11-04
+
 ### Added
 
 - Ghostty flicker troubleshooting with synchronized-output configuration, client reattachment requirements, and shared-TERM limitations
