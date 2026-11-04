@@ -11,6 +11,7 @@ use crate::ui::{
     message, name_style, panel, state_style,
 };
 use anyhow::{Context, Result, bail};
+use nucleo_matcher::Matcher;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -31,6 +32,19 @@ const REFRESH: Duration = Duration::from_millis(500);
 const MARK: &str = "@agent-plane-sidebar";
 /// Global option set while the sidebar is open, in every window of every session.
 const OPEN: &str = "@agent-plane-sidebar-open";
+
+/// Where a list's keys come from: a sidebar knows its own pane, the popup is told its client.
+#[derive(Clone, Copy)]
+pub(crate) enum Origin<'a> {
+    Sidebar(&'a str),
+    Popup(&'a str),
+}
+
+impl Origin<'_> {
+    fn is_sidebar(self, pane: &str) -> bool {
+        matches!(self, Origin::Sidebar(own) if own == pane)
+    }
+}
 
 /// The sidebar key: close the sidebar everywhere when it is open, wherever you are; otherwise
 /// open it everywhere and move into this window's.
@@ -159,30 +173,30 @@ pub fn run() -> Result<()> {
 }
 
 #[derive(Default)]
-struct Navigation {
-    view: bool,
-    filter: Option<State>,
-    query: String,
-    pane: Option<String>,
-    search: Option<SearchEdit>,
-    order: Vec<String>,
+pub(crate) struct Navigation {
+    pub(crate) view: bool,
+    pub(crate) filter: Option<State>,
+    pub(crate) query: String,
+    pub(crate) pane: Option<String>,
+    pub(crate) search: Option<SearchEdit>,
+    pub(crate) order: Vec<String>,
 }
 
-struct SearchEdit {
+pub(crate) struct SearchEdit {
     query: String,
     pane: Option<String>,
 }
 
-struct Rename {
+pub(crate) struct Rename {
     pane: String,
-    name: String,
+    pub(crate) name: String,
 }
 
 fn kill_accepts(key: KeyEvent) -> bool {
     key.modifiers.is_empty() && matches!(key.code, KeyCode::Enter | KeyCode::Char('y'))
 }
 
-struct KillConfirmation {
+pub(crate) struct KillConfirmation {
     agent: Agent,
     codex_pid: Option<i32>,
     client: String,
@@ -192,7 +206,7 @@ struct KillConfirmation {
     ends_sessions: Vec<String>,
 }
 
-struct OrganizeConfirmation {
+pub(crate) struct OrganizeConfirmation {
     settings: crate::autoname_config::Config,
     client: Client,
 }
@@ -207,7 +221,7 @@ const NEW_AGENT_KINDS: [Kind; 5] = [
 ];
 
 /// The project is pinned when `n` is pressed; rows moving underneath cannot retarget it.
-struct NewAgent {
+pub(crate) struct NewAgent {
     session: String,
     cwd: String,
     selected: usize,
@@ -359,27 +373,32 @@ fn session_endings(window: &str, attached_session: &str, windows: &str) -> Resul
     Ok(ending)
 }
 
+/// The agent list and its actions: the sidebar's own state, and the picker popup's model.
 #[derive(Default)]
-struct Sidebar {
+pub(crate) struct Sidebar {
     // Auto-naming setup is local UI state; it never performs periodic work.
-    auto_name: crate::autoname_setup::Setup,
-    help: crate::sidebar_help::Help,
-    all_agents: Vec<Agent>,
-    agents: Vec<Agent>,
-    navigation: Navigation,
+    pub(crate) auto_name: crate::autoname_setup::Setup,
+    pub(crate) help: crate::sidebar_help::Help,
+    pub(crate) all_agents: Vec<Agent>,
+    pub(crate) agents: Vec<Agent>,
+    pub(crate) navigation: Navigation,
+    /// The picker ranks search matches, best first; the sidebar keeps its rows in place.
+    pub(crate) ranker: Option<Matcher>,
+    /// `n` took the client to its new agent, so a popup has nothing left to show.
+    pub(crate) left: bool,
     recent_event: Option<RecentEvent>,
     organize_status: Option<crate::organize::Status>,
-    list: ListState,
-    error: Option<String>,
-    editing: Option<Rename>,
-    notice: Option<String>,
+    pub(crate) list: ListState,
+    pub(crate) error: Option<String>,
+    pub(crate) editing: Option<Rename>,
+    pub(crate) notice: Option<String>,
     killing: Option<KillConfirmation>,
     organizing: Option<OrganizeConfirmation>,
     new_agent: Option<NewAgent>,
     /// Hide successfully closed panes until the daemon has removed them from the index.
     closed: HashSet<String>,
     /// The order `s` chose, on its way to the daemon.
-    unsent_order: Option<Vec<String>>,
+    pub(crate) unsent_order: Option<Vec<String>>,
     /// When the daemon acknowledged that order: older indexes must not undo it on screen.
     sorted_at: Option<u64>,
     /// A client is viewing this sidebar with the keyboard in it: its selection is theirs.
@@ -457,7 +476,7 @@ impl Sidebar {
     }
 
     /// A key proves the client is in this sidebar, ahead of the daemon seeing it there.
-    fn pressed(&mut self, now: u64) {
+    pub(crate) fn pressed(&mut self, now: u64) {
         self.pressed_at = now;
         self.steering = true;
     }
@@ -470,9 +489,9 @@ impl Sidebar {
         self.rebuild();
     }
 
-    fn refresh(&mut self, own: &str) {
+    pub(crate) fn refresh(&mut self, origin: Origin<'_>) {
         match index::read() {
-            Ok(index) => self.apply(index, own),
+            Ok(index) => self.apply(index, origin),
             Err(e) => {
                 self.all_agents.clear();
                 self.recent_event = None;
@@ -482,7 +501,7 @@ impl Sidebar {
         }
     }
 
-    fn apply(&mut self, index: Index, own: &str) {
+    fn apply(&mut self, index: Index, origin: Origin<'_>) {
         self.closed
             .retain(|pane| index.agents.iter().any(|a| &a.pane == pane));
         self.all_agents = index
@@ -508,7 +527,9 @@ impl Sidebar {
         }
         self.rebuild();
         // An index stamped before the last key cannot know the keyboard is here.
-        if index.updated_at > self.pressed_at {
+        if let Origin::Sidebar(own) = origin
+            && index.updated_at > self.pressed_at
+        {
             let window = index
                 .windows
                 .iter()
@@ -517,7 +538,8 @@ impl Sidebar {
         }
     }
 
-    fn rebuild(&mut self) {
+    pub(crate) fn rebuild(&mut self) {
+        let ranked = self.ranker.is_some() && !self.navigation.query.is_empty();
         self.agents = self
             .navigation
             .order
@@ -525,12 +547,15 @@ impl Sidebar {
             .filter_map(|pane| self.all_agents.iter().find(|a| &a.pane == pane))
             .filter(|a| {
                 self.navigation.filter.is_none_or(|state| a.state == state)
-                    && self.navigation.matches_query(a)
+                    && (ranked || self.navigation.matches_query(a))
             })
             .cloned()
             .collect();
         // Sessions by name: a stable sort keeps the list's order within each.
         self.agents.sort_by(|a, b| a.session.cmp(&b.session));
+        if ranked && let Some(ranker) = &mut self.ranker {
+            self.agents = crate::ui::rank(ranker, &self.navigation.query, &self.agents);
+        }
         let selected = self
             .navigation
             .pane
@@ -539,6 +564,7 @@ impl Sidebar {
             .or_else(|| {
                 [State::Blocked, State::Done]
                     .into_iter()
+                    .filter(|_| !ranked)
                     .find_map(|state| self.agents.iter().position(|a| a.state == state))
             })
             .or_else(|| (!self.agents.is_empty()).then_some(0));
@@ -558,7 +584,7 @@ impl Sidebar {
         self.navigation.pane = self.selected().map(|a| a.pane.clone());
     }
 
-    fn selected(&self) -> Option<&Agent> {
+    pub(crate) fn selected(&self) -> Option<&Agent> {
         self.list.selected().and_then(|i| self.agents.get(i))
     }
 
@@ -615,6 +641,14 @@ impl Sidebar {
                 self.step(-1);
                 return;
             }
+            KeyCode::Char('j') if ctrl => {
+                self.step(1);
+                return;
+            }
+            KeyCode::Char('k') if ctrl => {
+                self.step(-1);
+                return;
+            }
             KeyCode::Char('w') if ctrl => delete_word(&mut self.navigation.query),
             KeyCode::Char('u') if ctrl => self.navigation.query.clear(),
             KeyCode::Backspace => {
@@ -622,6 +656,10 @@ impl Sidebar {
             }
             KeyCode::Char(c) if !ctrl => self.navigation.query.push(c),
             _ => return,
+        }
+        // Ranked results select the best match after every edit.
+        if self.ranker.is_some() && !matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
+            self.navigation.pane = None;
         }
         self.rebuild();
     }
@@ -636,11 +674,11 @@ impl Sidebar {
     }
 
     /// Confirmation consumes every key. Enter/y confirm; all others only cancel.
-    fn kill_key(&mut self, key: KeyEvent, own: &str) -> bool {
+    fn kill_key(&mut self, key: KeyEvent, origin: Origin<'_>) -> bool {
         if let Some(confirmation) = self.killing.take() {
             self.notice = None;
             if kill_accepts(key) {
-                match self.confirm_kill(&confirmation, own) {
+                match self.confirm_kill(&confirmation, origin) {
                     Ok(()) => {
                         let position = self
                             .agents
@@ -672,7 +710,11 @@ impl Sidebar {
         }
         self.notice = None;
         let result = (|| {
-            let Some(selected) = self.selected().filter(|a| a.pane != own).cloned() else {
+            let Some(selected) = self
+                .selected()
+                .filter(|a| !origin.is_sidebar(&a.pane))
+                .cloned()
+            else {
                 return Ok(None);
             };
             let index = index::read()?;
@@ -685,7 +727,7 @@ impl Sidebar {
                 bail!("agent changed; refresh and press x again");
             }
             let clients = clients()?;
-            let client = input_client(&clients, own)?;
+            let client = input_client(&clients, origin)?;
             let ends_sessions = ending_sessions(current, client)?;
             Ok(Some(KillConfirmation {
                 agent: current.clone(),
@@ -704,12 +746,12 @@ impl Sidebar {
         true
     }
 
-    fn confirm_kill(&self, confirmation: &KillConfirmation, own: &str) -> Result<()> {
-        if confirmation.agent.pane == own {
+    fn confirm_kill(&self, confirmation: &KillConfirmation, origin: Origin<'_>) -> Result<()> {
+        if origin.is_sidebar(&confirmation.agent.pane) {
             bail!("cannot kill the sidebar");
         }
         let clients = clients()?;
-        let client = input_client(&clients, own)?;
+        let client = input_client(&clients, origin)?;
         if client.name != confirmation.client
             || client.pid != confirmation.client_pid
             || client.session != confirmation.client_session
@@ -738,11 +780,11 @@ impl Sidebar {
     }
 
     /// Enter, Space or y dispatches; every other closing key is consumed.
-    fn organize_key(&mut self, key: KeyEvent, own: &str) -> bool {
+    fn organize_key(&mut self, key: KeyEvent, origin: Origin<'_>) -> bool {
         if let Some(confirmation) = self.organizing.take() {
             self.notice = None;
             if organize_accepts(key) {
-                match self.confirm_organize(&confirmation, own) {
+                match self.confirm_organize(&confirmation, origin) {
                     Ok(()) => self.notice = Some("organization queued".into()),
                     Err(error) => self.notice = Some(error.to_string()),
                 }
@@ -764,7 +806,7 @@ impl Sidebar {
                 bail!("organization already running");
             }
             let clients = clients()?;
-            let client = input_client(&clients, own)?.clone();
+            let client = input_client(&clients, origin)?.clone();
             Ok(OrganizeConfirmation { settings, client })
         })();
         match result {
@@ -774,9 +816,13 @@ impl Sidebar {
         true
     }
 
-    fn confirm_organize(&self, confirmation: &OrganizeConfirmation, own: &str) -> Result<()> {
+    fn confirm_organize(
+        &self,
+        confirmation: &OrganizeConfirmation,
+        origin: Origin<'_>,
+    ) -> Result<()> {
         let clients = clients()?;
-        if input_client(&clients, own)? != &confirmation.client {
+        if input_client(&clients, origin)? != &confirmation.client {
             bail!("confirmation client changed; press o again");
         }
         if crate::organize::settings()? != confirmation.settings {
@@ -786,7 +832,7 @@ impl Sidebar {
     }
 
     /// While the picker is open it consumes every key: Enter starts, Esc or `n` cancels.
-    fn new_agent_key(&mut self, key: KeyEvent, own: &str) -> bool {
+    fn new_agent_key(&mut self, key: KeyEvent, origin: Origin<'_>) -> bool {
         if let Some(picker) = &mut self.new_agent {
             match key.code {
                 KeyCode::Char('j') | KeyCode::Down => {
@@ -798,8 +844,9 @@ impl Sidebar {
                 }
                 KeyCode::Enter => {
                     let picker = self.new_agent.take().expect("picker is open");
-                    if let Err(error) = start_new_agent(&picker, own) {
-                        self.notice = Some(format!("{error:#}"));
+                    match start_new_agent(&picker, origin) {
+                        Ok(()) => self.left = true,
+                        Err(error) => self.notice = Some(format!("{error:#}")),
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('n') => self.new_agent = None,
@@ -830,6 +877,30 @@ impl Sidebar {
         true
     }
 
+    /// Help, setup, new agent, organize and kill, in priority order. True when one consumed
+    /// the key.
+    pub(crate) fn action_key(&mut self, key: KeyEvent, origin: Origin<'_>) -> bool {
+        self.help_key(key)
+            // Setup consumes its keys before navigation/kill, including Enter.
+            || (self.killing.is_none()
+                && self.organizing.is_none()
+                && self.new_agent.is_none()
+                && self.editing.is_none()
+                && self.navigation.search.is_none()
+                && self.auto_name.key(key))
+            || self.new_agent_key(key, origin)
+            || self.organize_key(key, origin)
+            || self.kill_key(key, origin)
+    }
+
+    /// Hand the order `s` chose to the daemon, which publishes it to every list.
+    pub(crate) fn send_order(&mut self, order: &[String]) {
+        match lifecycle::set_order(order) {
+            Ok(()) => self.sorted_at = Some(index::now_ms()),
+            Err(error) => self.notice = Some(format!("{error:#}")),
+        }
+    }
+
     fn help_key(&mut self, key: KeyEvent) -> bool {
         self.help.key(
             key,
@@ -841,7 +912,7 @@ impl Sidebar {
         )
     }
 
-    fn key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn key(&mut self, key: KeyEvent) -> bool {
         if self.help_key(key) {
             return false;
         }
@@ -893,13 +964,21 @@ fn clients() -> Result<Vec<Client>> {
         .collect()
 }
 
-fn input_client<'a>(clients: &'a [Client], pane: &str) -> Result<&'a Client> {
-    let mut candidates = clients.iter().filter(|client| client.pane == pane);
-    let client = candidates.next().context("no client in this sidebar")?;
-    if candidates.next().is_some() {
-        bail!("multiple clients in sidebar; use a separate session");
+fn input_client<'a>(clients: &'a [Client], origin: Origin<'_>) -> Result<&'a Client> {
+    match origin {
+        Origin::Sidebar(pane) => {
+            let mut candidates = clients.iter().filter(|client| client.pane == pane);
+            let client = candidates.next().context("no client in this sidebar")?;
+            if candidates.next().is_some() {
+                bail!("multiple clients in sidebar; use a separate session");
+            }
+            Ok(client)
+        }
+        Origin::Popup(name) => clients
+            .iter()
+            .find(|client| client.name == name)
+            .context("the picker's client is no longer attached"),
     }
-    Ok(client)
 }
 
 /// What a switch must check, read in one tmux command: each command costs a process.
@@ -962,15 +1041,24 @@ fn switch_command(sidebar: &Sidebar, own: &str, focus: bool) -> Result<Option<Ve
 
 /// Start the chosen agent in a new window of the pinned project and take the client there.
 /// Checks the client first, so a refused move creates nothing.
-fn start_new_agent(picker: &NewAgent, own: &str) -> Result<()> {
+fn start_new_agent(picker: &NewAgent, origin: Origin<'_>) -> Result<()> {
     let session = crate::sessions::destination(&picker.session)?;
     let clients = clients()?;
-    let client = input_client(&clients, own)?;
+    let client = input_client(&clients, origin)?;
     guard_destination(&clients, client, &session, "")?;
     let (window, pane) =
         commands::open_agent_window(NEW_AGENT_KINDS[picker.selected], &session, &picker.cwd)?;
-    let command = switch_to(own, &picker.session, &window, &pane, true)?
-        .context("focus always switches the client")?;
+    let command = match origin {
+        Origin::Sidebar(own) => switch_to(own, &picker.session, &window, &pane, true)?
+            .context("focus always switches the client")?,
+        Origin::Popup(name) => vec![
+            "switch-client".to_string(),
+            "-c".to_string(),
+            name.to_string(),
+            "-t".to_string(),
+            format!("={}:{window}.{pane}", picker.session),
+        ],
+    };
     let command: Vec<_> = command.iter().map(String::as_str).collect();
     tmux::run(&command).map(drop)
 }
@@ -1007,7 +1095,7 @@ fn switch_to(
         "-F",
         "left\x1f#{pane_id}\x1f#{pane_last}",
     ])?)?;
-    let client = input_client(&context.clients, own)?;
+    let client = input_client(&context.clients, Origin::Sidebar(own))?;
     guard_destination(&context.clients, client, &context.session, window)?;
     let destination = match context.sidebar {
         Some(pane) => pane,
@@ -1061,6 +1149,7 @@ impl Screen<'_> {
 fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
     // This is the native sidebar process's own pane, never a caller inferred by the CLI.
     let own = std::env::var("TMUX_PANE")?;
+    let origin = Origin::Sidebar(&own);
     let width = WIDTH.parse::<u16>()?;
     let size = terminal.size()?;
     let mut screen = Screen {
@@ -1074,7 +1163,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
     loop {
         if Instant::now() >= next_read {
             // Refresh may change selection when an agent vanishes. Only input triggers preview.
-            sidebar.refresh(&own);
+            sidebar.refresh(origin);
             next_read = Instant::now() + REFRESH;
         }
         // tmux rescales panes proportionally when the window or a client resizes, and a
@@ -1098,38 +1187,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             {
                 sidebar.pressed(index::now_ms());
                 // Help consumes every closing key before setup, kill or navigation.
-                if sidebar.help_key(key) {
-                    if !event::poll(Duration::ZERO)? {
-                        break;
-                    }
-                    continue;
-                }
-                // Setup consumes its keys before navigation/kill, including Enter.
-                if sidebar.killing.is_none()
-                    && sidebar.organizing.is_none()
-                    && sidebar.new_agent.is_none()
-                    && sidebar.editing.is_none()
-                    && sidebar.navigation.search.is_none()
-                    && sidebar.auto_name.key(key)
-                {
-                    if !event::poll(Duration::ZERO)? {
-                        break;
-                    }
-                    continue;
-                }
-                if sidebar.new_agent_key(key, &own) {
-                    if !event::poll(Duration::ZERO)? {
-                        break;
-                    }
-                    continue;
-                }
-                if sidebar.organize_key(key, &own) {
-                    if !event::poll(Duration::ZERO)? {
-                        break;
-                    }
-                    continue;
-                }
-                if sidebar.kill_key(key, &own) {
+                if sidebar.action_key(key, origin) {
                     if !event::poll(Duration::ZERO)? {
                         break;
                     }
@@ -1159,10 +1217,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
         if let Some(order) = sidebar.unsent_order.take() {
             // On screen first: the daemon's control thread answers within its poll interval.
             screen.show(&mut sidebar)?;
-            match lifecycle::set_order(&order) {
-                Ok(()) => sidebar.sorted_at = Some(index::now_ms()),
-                Err(error) => sidebar.notice = Some(format!("{error:#}")),
-            }
+            sidebar.send_order(&order);
         }
         if focus || (preview && sidebar.navigation.view && sidebar.navigation.search.is_none()) {
             match switch_command(&sidebar, &own, focus) {
@@ -1209,22 +1264,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         sidebar.auto_name.draw(f);
         return;
     }
-    let confirmation = sidebar
-        .killing
-        .as_ref()
-        .map(|kill| kill_footer(kill, f.area().width as usize))
-        .or_else(|| {
-            sidebar
-                .organizing
-                .as_ref()
-                .map(|organize| organize_footer(organize, f.area().width as usize))
-        })
-        .or_else(|| {
-            sidebar
-                .new_agent
-                .as_ref()
-                .map(|picker| new_agent_footer(picker, f.area().width as usize))
-        });
+    let confirmation = confirmation_footer(sidebar, f.area().width as usize);
     let footer_height = confirmation.as_ref().map_or(2, |lines| lines.len() as u16);
     let [list_area, help_area] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(footer_height)]).areas(f.area());
@@ -1307,6 +1347,26 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         Text::from,
     );
     f.render_widget(Paragraph::new(footer), help_area);
+}
+
+/// The prompt of whichever action is waiting on a key.
+pub(crate) fn confirmation_footer(sidebar: &Sidebar, width: usize) -> Option<Vec<Line<'static>>> {
+    sidebar
+        .killing
+        .as_ref()
+        .map(|kill| kill_footer(kill, width))
+        .or_else(|| {
+            sidebar
+                .organizing
+                .as_ref()
+                .map(|organize| organize_footer(organize, width))
+        })
+        .or_else(|| {
+            sidebar
+                .new_agent
+                .as_ref()
+                .map(|picker| new_agent_footer(picker, width))
+        })
 }
 
 fn new_agent_footer(picker: &NewAgent, width: usize) -> Vec<Line<'static>> {
@@ -1399,7 +1459,30 @@ fn kill_footer(confirmation: &KillConfirmation, width: usize) -> Vec<Line<'stati
 
 /// Local failures and rename controls take priority; a shared event never hides them.
 fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
-    match (&sidebar.notice, &sidebar.editing) {
+    status_footer(sidebar, width, now).unwrap_or_else(|| {
+        match sidebar
+            .recent_event
+            .as_ref()
+            .filter(|event| event.is_live(now))
+        {
+            Some(event) => {
+                let state = event.state.state();
+                Line::styled(
+                    truncate(
+                        &format!(" {} {} {}", icon(state), event.name, state.as_str()),
+                        width,
+                    ),
+                    colour(state),
+                )
+            }
+            None => hints(&[("⏎", "jump"), ("s", "sort"), ("x", "kill"), ("?", "keys")]),
+        }
+    })
+}
+
+/// What this list is in the middle of, if anything.
+pub(crate) fn status_footer(sidebar: &Sidebar, width: usize, now: u64) -> Option<Line<'static>> {
+    Some(match (&sidebar.notice, &sidebar.editing) {
         (Some(notice), _) => Line::styled(
             truncate(&format!(" {notice}"), width),
             colour(State::Blocked),
@@ -1432,24 +1515,8 @@ fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
                 },
             )
         }
-        (None, None) => match sidebar
-            .recent_event
-            .as_ref()
-            .filter(|event| event.is_live(now))
-        {
-            Some(event) => {
-                let state = event.state.state();
-                Line::styled(
-                    truncate(
-                        &format!(" {} {} {}", icon(state), event.name, state.as_str()),
-                        width,
-                    ),
-                    colour(state),
-                )
-            }
-            None => hints(&[("⏎", "jump"), ("s", "sort"), ("x", "kill"), ("?", "keys")]),
-        },
-    }
+        (None, None) => return None,
+    })
 }
 
 /// One item per agent, grouped under a heading per tmux session, with a blank line between
@@ -1594,22 +1661,22 @@ mod tests {
     fn new_agent_picker_pins_the_project_and_consumes_its_keys() {
         let mut sidebar = showing(vec![agent("%1", State::Idle)]);
         let selected = sidebar.selected().unwrap().session.clone();
-        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('n')), "%9"));
+        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('n')), Origin::Sidebar("%9")));
         assert_eq!(sidebar.new_agent.as_ref().unwrap().session, selected);
         for code in [KeyCode::Char('x'), KeyCode::Char('q'), KeyCode::Char('?')] {
-            assert!(sidebar.new_agent_key(KeyEvent::from(code), "%9"));
+            assert!(sidebar.new_agent_key(KeyEvent::from(code), Origin::Sidebar("%9")));
         }
         assert!(sidebar.killing.is_none());
-        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Up), "%9"));
+        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Up), Origin::Sidebar("%9")));
         assert_eq!(
             sidebar.new_agent.as_ref().unwrap().selected,
             NEW_AGENT_KINDS.len() - 1
         );
-        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Down), "%9"));
+        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Down), Origin::Sidebar("%9")));
         assert_eq!(sidebar.new_agent.as_ref().unwrap().selected, 0);
-        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Esc), "%9"));
+        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Esc), Origin::Sidebar("%9")));
         assert!(sidebar.new_agent.is_none());
-        assert!(!sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('j')), "%9"));
+        assert!(!sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('j')), Origin::Sidebar("%9")));
     }
 
     #[test]
@@ -1622,7 +1689,7 @@ mod tests {
     #[test]
     fn new_agent_needs_a_selected_project() {
         let mut sidebar = showing(vec![]);
-        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('n')), "%9"));
+        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('n')), Origin::Sidebar("%9")));
         assert!(sidebar.new_agent.is_none());
         assert!(sidebar.notice.is_some());
     }
@@ -1645,7 +1712,7 @@ mod tests {
                 organizing: Some(organize_confirmation()),
                 ..Sidebar::default()
             };
-            assert!(sidebar.organize_key(KeyEvent::from(code), "%99"));
+            assert!(sidebar.organize_key(KeyEvent::from(code), Origin::Sidebar("%99")));
             assert!(sidebar.organizing.is_none());
             assert!(
                 sidebar.killing.is_none() && sidebar.editing.is_none() && !sidebar.auto_name.open
@@ -2033,18 +2100,27 @@ mod tests {
             agent("%3", State::Blocked),
         ];
         let mut sidebar = showing(agents.clone());
-        sidebar.apply(index_at(1, &agents, &["%3", "%2", "%1"]), "%9");
+        sidebar.apply(
+            index_at(1, &agents, &["%3", "%2", "%1"]),
+            Origin::Sidebar("%9"),
+        );
         assert_eq!(order(&sidebar), ["%3", "%2", "%1"]);
         sidebar.select(Some(1));
         // Live badges in fixed rows, with identity surviving.
         agents[0].state = State::Blocked;
         agents[2].state = State::Idle;
-        sidebar.apply(index_at(2, &agents, &["%3", "%2", "%1"]), "%9");
+        sidebar.apply(
+            index_at(2, &agents, &["%3", "%2", "%1"]),
+            Origin::Sidebar("%9"),
+        );
         assert_eq!(order(&sidebar), ["%3", "%2", "%1"]);
         assert_eq!(sidebar.agents[0].state, State::Idle);
         assert_eq!(sidebar.selected().unwrap().pane, "%2");
         // Another sidebar's `s` arrives through the index.
-        sidebar.apply(index_at(3, &agents, &["%1", "%2", "%3"]), "%9");
+        sidebar.apply(
+            index_at(3, &agents, &["%1", "%2", "%3"]),
+            Origin::Sidebar("%9"),
+        );
         assert_eq!(order(&sidebar), ["%1", "%2", "%3"]);
         assert_eq!(sidebar.selected().unwrap().pane, "%2");
     }
@@ -2053,7 +2129,7 @@ mod tests {
     fn s_shows_at_once_and_older_indexes_never_snap_it_back() {
         let mut agents = vec![agent("%1", State::Idle), agent("%2", State::Blocked)];
         let mut sidebar = showing(agents.clone());
-        sidebar.apply(index_at(1, &agents, &["%1", "%2"]), "%9");
+        sidebar.apply(index_at(1, &agents, &["%1", "%2"]), Origin::Sidebar("%9"));
         sidebar.select(Some(0));
         press(&mut sidebar, KeyCode::Char('s'));
         assert_eq!(order(&sidebar), ["%2", "%1"]);
@@ -2066,14 +2142,17 @@ mod tests {
         sidebar.sorted_at = Some(100);
         for updated_at in [50, 100] {
             agents[0].state = State::Working;
-            sidebar.apply(index_at(updated_at, &agents, &["%1", "%2"]), "%9");
+            sidebar.apply(
+                index_at(updated_at, &agents, &["%1", "%2"]),
+                Origin::Sidebar("%9"),
+            );
             assert_eq!(order(&sidebar), ["%2", "%1"]);
         }
         assert_eq!(sidebar.agents[1].state, State::Working); // Badges still update.
         // The first tick after it has the sort; from then on the index rules again.
-        sidebar.apply(index_at(101, &agents, &["%2", "%1"]), "%9");
+        sidebar.apply(index_at(101, &agents, &["%2", "%1"]), Origin::Sidebar("%9"));
         assert_eq!(sidebar.sorted_at, None);
-        sidebar.apply(index_at(102, &agents, &["%1", "%2"]), "%9");
+        sidebar.apply(index_at(102, &agents, &["%1", "%2"]), Origin::Sidebar("%9"));
         assert_eq!(order(&sidebar), ["%1", "%2"]);
     }
 
@@ -2083,12 +2162,21 @@ mod tests {
         other.session = "alpha".into();
         let agents = vec![agent("%1", State::Idle), agent("%2", State::Idle), other];
         let mut sidebar = showing(agents.clone());
-        sidebar.apply(index_at(1, &agents, &["%2", "%1", "%3"]), "%9");
+        sidebar.apply(
+            index_at(1, &agents, &["%2", "%1", "%3"]),
+            Origin::Sidebar("%9"),
+        );
         assert_eq!(order(&sidebar), ["%3", "%2", "%1"]);
         let without = [agents[0].clone(), agents[2].clone()];
-        sidebar.apply(index_at(2, &without, &["%2", "%1", "%3"]), "%9");
+        sidebar.apply(
+            index_at(2, &without, &["%2", "%1", "%3"]),
+            Origin::Sidebar("%9"),
+        );
         assert_eq!(order(&sidebar), ["%3", "%1"]);
-        sidebar.apply(index_at(3, &agents, &["%2", "%1", "%3"]), "%9");
+        sidebar.apply(
+            index_at(3, &agents, &["%2", "%1", "%3"]),
+            Origin::Sidebar("%9"),
+        );
         assert_eq!(order(&sidebar), ["%3", "%2", "%1"]);
     }
 
@@ -2148,21 +2236,21 @@ mod tests {
             organize: None,
             ..index_at(updated_at, &agents, &["%1", "%2"])
         };
-        sidebar.apply(at(1, "%1", true), "%9");
+        sidebar.apply(at(1, "%1", true), Origin::Sidebar("%9"));
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
         // The keyboard just moved here and the daemon has not seen it: `j` must stand.
         sidebar.pressed(100);
         press(&mut sidebar, KeyCode::Char('j'));
         assert_eq!(sidebar.selected().unwrap().pane, "%2");
         for updated_at in [50, 100] {
-            sidebar.apply(at(updated_at, "%1", true), "%9");
+            sidebar.apply(at(updated_at, "%1", true), Origin::Sidebar("%9"));
             assert_eq!(sidebar.selected().unwrap().pane, "%2");
         }
         // The daemon now agrees the sidebar is active: still the client's selection.
-        sidebar.apply(at(101, "%9", true), "%9");
+        sidebar.apply(at(101, "%9", true), Origin::Sidebar("%9"));
         assert_eq!(sidebar.selected().unwrap().pane, "%2");
         // The client left: the rule resumes.
-        sidebar.apply(at(102, "%9", false), "%9");
+        sidebar.apply(at(102, "%9", false), Origin::Sidebar("%9"));
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
     }
 
@@ -2311,14 +2399,17 @@ mod tests {
                 pane: "%2".into(),
             },
         ];
-        assert!(input_client(&clients, "%9").is_err());
-        assert_eq!(input_client(&clients, "%1").unwrap().name, "one");
+        assert!(input_client(&clients, Origin::Sidebar("%9")).is_err());
+        assert_eq!(
+            input_client(&clients, Origin::Sidebar("%1")).unwrap().name,
+            "one"
+        );
         assert!(guard_destination(&clients, &clients[0], "$2", "@9").is_err());
         assert!(guard_destination(&clients, &clients[0], "$9", "@2").is_err());
         assert!(guard_destination(&clients, &clients[0], "$3", "@3").is_ok());
         let mut shared = clients;
         shared[1].pane = "%1".into();
-        assert!(input_client(&shared, "%1").is_err());
+        assert!(input_client(&shared, Origin::Sidebar("%1")).is_err());
     }
 
     #[test]
@@ -2381,7 +2472,7 @@ mod tests {
             let mut sidebar = showing(vec![agent("%1", State::Working), agent("%2", State::Idle)]);
             sidebar.killing = Some(confirmation(State::Working));
             sidebar.notice = Some("old error".into());
-            assert!(sidebar.kill_key(key, "%sidebar"));
+            assert!(sidebar.kill_key(key, Origin::Sidebar("%sidebar")));
             assert!(sidebar.killing.is_none());
             assert_eq!(sidebar.selected().unwrap().pane, "%1");
             assert!(!sidebar.navigation.view);
@@ -2442,7 +2533,10 @@ mod tests {
     #[test]
     fn kill_never_offers_own_sidebar_and_prompt_keeps_name_state_and_default_yes_legible() {
         let mut sidebar = showing(vec![agent("%1", State::Idle)]);
-        assert!(sidebar.kill_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE), "%1"));
+        assert!(sidebar.kill_key(
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            Origin::Sidebar("%1")
+        ));
         assert!(sidebar.killing.is_none()); // No tmux/index call for the own-pane exclusion.
         let mut kill = confirmation(State::Working);
         kill.agent.name = "kill-name-is-long".into();

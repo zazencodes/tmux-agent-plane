@@ -11,8 +11,9 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("Alt-↑/↓", "Prev/next agent (global)"),
     ("j k", "Move selection"),
     ("↑ ↓", "Move selection or in search"),
+    ("^j ^k", "Move selection or in search"),
     ("enter", "Jump / keep search / save"),
-    ("v", "Toggle window previews"),
+    ("v", "Sidebar: window previews"),
     ("s", "Re-sort agents"),
     ("f", "Cycle state filter"),
     ("/", "Fuzzy search agents"),
@@ -23,7 +24,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("n", "New agent in selected project"),
     ("o", "Organize all agents"),
     ("?", "Keyboard shortcuts"),
-    ("q", "Close all sidebars"),
+    ("q", "Close sidebars or picker"),
     ("ctrl-w", "Delete word in an edit"),
     ("ctrl-u", "Clear text in an edit"),
     ("bksp", "Delete character in an edit"),
@@ -129,7 +130,7 @@ mod tests {
     fn every_key_handled_by_sidebar_key_has_a_help_entry() {
         // Read the method itself: adding a command without a help entry fails this test.
         let source = include_str!("sidebar.rs")
-            .split("    fn key(&mut self, key: KeyEvent) -> bool {")
+            .split("    pub(crate) fn key(&mut self, key: KeyEvent) -> bool {")
             .nth(1)
             .unwrap()
             .split("\n    }\n")

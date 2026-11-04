@@ -31,7 +31,7 @@ Claude Code, Codex and Antigravity use native signals. Pi and OpenCode use publi
 - **Know what needs you.** The status bar counts agents by state. An agent that finishes or blocks while you are looking elsewhere shows a five-second notice in every open sidebar footer and sends a desktop notification, and stays `done` until you look at it.
 - **A sidebar of agents.** Your sidebar key (default `prefix + S`) opens a live list of every agent down the left of every window, in every session, and puts you in it: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar is there too. Close it once and it closes everywhere.
 - **Flip through your agents.** Alt + K / J (Option + K / J on macOS) goes straight to the previous or next agent from anywhere, across sessions, with no prefix. Tap it repeatedly to scroll through them. See [Direct agent navigation](#direct-agent-navigation).
-- **Search and peek before you jump.** `prefix + f` opens a fuzzy agent picker with a large live preview. Type to search names and descriptions across every session, browse with arrows or Ctrl-J/Ctrl-K, and press Enter to focus.
+- **Search and peek before you jump.** `prefix + f` opens an agent picker with a large live preview and the sidebar's actions. Browse with `j`/`k`, press `/` to fuzzy-search names and descriptions across every session, and press Enter to focus.
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
 - **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`. Optional AI naming can name the remaining default-named agents; press `c` in the sidebar to set it up.
 - **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. A spawned agent records its parent when caller identity is known.
@@ -146,12 +146,13 @@ These are tmux key names (`C` is Ctrl, `M` is Alt). The defaults leave tmux's pr
 | Key | Action |
 | --- | --- |
 | Sidebar key (default `prefix + S`) | Open the sidebar in every window and move into it; close it everywhere when it is open |
-| `prefix + f` | Open the fuzzy agent picker, ready to type, with a live screen preview |
+| `prefix + f` | Open the agent picker: the sidebar's list and actions, with a live screen preview |
 | `Alt + ↑` / `Alt + ↓` | Focus previous/next agent directly, across sessions; no prefix or sidebar focus needed |
 | `↓` `↑` | Move selection; in sidebar view mode, preview the selected agent’s window/session. The sidebar also accepts `j` / `k` |
 | `v` | Toggle sidebar view mode (off initially): preview while keeping keyboard input in the sidebar |
 | `s` | Re-sort agents within each session by attention, then longest in state; keep the selected pane |
 | `f` | Cycle sidebar state filter: All → Blocked → Done → Working → Idle → All, skipping states with no search matches when pressed |
+| `Ctrl-J` / `Ctrl-K` | Move selection, including while editing a search |
 | `/` | Edit sidebar fuzzy search across name, task, blocked detail, location and directory; characters match in order, ignoring case and allowing gaps. A query can span the name and description, and matching rows keep their order. `Enter` keeps the query and previews its selection when view mode is on, `Esc` cancels the edit, `Ctrl-W` deletes a word, `Ctrl-U` clears; arrows move selection while editing |
 | `Esc` | Clear sidebar search outside editing; close the popup |
 | `Enter` | Jump to the agent. The sidebar stays open; the popup closes |
@@ -161,7 +162,7 @@ These are tmux key names (`C` is Ctrl, `M` is Alt). The defaults leave tmux's pr
 | `n` | Start a new agent in the selected agent's project. Pick the kind with arrows or `j`/`k`, then `Enter`: it opens in a new window of that session, in that agent's directory, and takes you there. `Esc` or `n` cancels |
 | `o` | Organize all agents across every tmux session. The selected ready agent coordinates the task; Enter, Space or `y` confirms the footer prompt; other keys cancel |
 | `?` | Show every sidebar shortcut. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search and rename |
-| `q` | Close the sidebar everywhere; in the popup, letters are search text |
+| `q` | Close the sidebar everywhere; close the popup |
 
 `n` offers Claude Code, Codex, Pi, OpenCode and Grok Build. Antigravity needs a first task to start, so use `spawn agy "<task>"` for it. Pi, OpenCode and Grok Build always appear in the picker, but are tracked only once their [optional integrations](#more-agents) are set up. Like `Enter`, `n` refuses a session another client is using.
 
@@ -181,7 +182,11 @@ The view/filter/query controls stay visible above the list. Filters and search c
 
 ### tmux fuzzy picker
 
-Press `prefix + f` from any pane. The search field is active immediately: type a case-insensitive fuzzy query across existing agent names, task titles and blocked details, including queries spanning those fields. Stronger matches appear first; Up/Down or Ctrl-J/Ctrl-K browses them and the screen preview updates inside the popup. Periodic state updates preserve the selected pane. Enter focuses that exact pane in the client that opened the picker, across sessions; Esc or Ctrl-C cancels and leaves your original pane and session selected. Browsing never switches sessions. Backspace edits, Ctrl-W deletes a word and Ctrl-U clears. With no matches, Enter leaves the picker open.
+Press `prefix + f` from any pane. It opens on the list, sessions together. `j`/`k`, Up/Down or Ctrl-J/Ctrl-K browse, and the screen preview updates inside the popup. Periodic state updates preserve the selected pane. Enter focuses that exact pane in the client that opened the picker, across sessions; `q`, Esc or Ctrl-C closes and leaves your original pane and session selected. Browsing never switches sessions.
+
+Press `/` to search. The search box appears and letters become text: a case-insensitive fuzzy query across agent names, task titles and blocked details, including queries spanning those fields. Stronger matches appear first; Ctrl-J/Ctrl-K or Up/Down browse them. Backspace edits, Ctrl-W deletes a word and Ctrl-U clears. Enter keeps the query and returns to the list, so the next Enter focuses; Esc cancels the edit. On the list, Esc clears a kept query first, then closes.
+
+The sidebar's actions work on the selected agent, with the same prompts and checks: `n` new agent, `x` kill, `r` rename, `o` organize, `f` state filter, `s` sort, `c` configure and `?` shortcuts. `n` closes the picker and takes you to the new agent. `v` is sidebar-only, since the picker always previews.
 
 The popup inherits the terminal background and uses its palette for the selected row, even when a tmux theme configures other popup colors. The plugin supplies the originating client to `tmux-agent-plane ui --client <client-name>`.
 

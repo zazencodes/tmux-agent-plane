@@ -146,6 +146,10 @@ def wait(label, condition):
 
 
 def query(client, value, selected):
+    """Edit the search, entering search mode the first time."""
+    if '› ' not in client.text():
+        client.key(b'/')
+        wait('search opens', lambda: '› ' in client.text())
     client.key(b'\x15' + value.encode())
     wait('query ' + value, lambda: client.selected() == selected and '› ' + value in client.text())
 
@@ -170,9 +174,9 @@ try:
     wait('empty picker', lambda: 'no agents running' in client.text())
     client.key(b'\r')
     time.sleep(.15)
-    assert 'search names / descriptions' in client.text()
+    assert 'j/k browse' in client.text()
     client.key(b'\x1b')
-    wait('empty cancelled', lambda: 'search names / descriptions' not in client.text())
+    wait('empty cancelled', lambda: 'j/k browse' not in client.text())
     for name in ('cedar-review', 'quartz-build', 'quartz-helper'):
         plane('spawn', 'pi', '--in', 'session', '--cwd', str(ROOT), '--name', name)
         SPAWNED.append(name)
@@ -182,56 +186,172 @@ try:
     client.key(b'\x01f')
     wait('picker', lambda: client.selected() == 'quartz-build')
     client.snapshot('all-agents')
+    # The list opens in command mode: no search box, and letters are commands.
+    assert 'search names / descriptions' not in client.text() and 'j/k browse' in client.text()
     # Blank canvas and panel background must use terminal default, despite popup-style.
     assert client.screen.buffer[4][65].bg == 'default', client.screen.buffer[4][65]
     assert client.screen.buffer[20][65].bg == 'default', client.screen.buffer[20][65]
+    # Plain and control vim keys browse from the list, and a state refresh keeps the row.
+    browse = {}
+    for key, label in ((b'j', 'j'), (b'k', 'k'), (b'\n', 'ctrl-j'), (b'\x0b', 'ctrl-k'), (b'\x1b[B', 'down'), (b'\x1b[A', 'up')):
+        before = client.selected()
+        client.key(key)
+        wait(label, lambda: client.selected() != before)
+        browse[label] = client.selected()
+    assert browse['j'] == browse['ctrl-j'] == browse['down'] != 'quartz-build', browse
+    assert browse['k'] == browse['ctrl-k'] == browse['up'] == 'quartz-build', browse
+    # Search appears on / only; its letters are text, and Ctrl-J/K still browse.
     query(client, 'CDRRV', 'cedar-review')
     query(client, 'qrtzbldnativepay', 'quartz-build')
     query(client, 'fxtperm', 'cedar-review')
     query(client, 'quartz', 'quartz-build')
-    client.key(b'\x1b[B')
-    wait('down', lambda: client.selected() == 'quartz-helper')
-    # State refresh must preserve the exact browsed row.
+    client.key(b'\n')
+    wait('search ctrl-j', lambda: client.selected() == 'quartz-helper')
     time.sleep(.7)
     assert client.selected() == 'quartz-helper'
-    client.key(b'\x1b[A')
-    wait('up', lambda: client.selected() == 'quartz-build')
-    client.key(b'\n')
-    wait('ctrl-j', lambda: client.selected() == 'quartz-helper')
     client.key(b'\x0b')
-    wait('ctrl-k', lambda: client.selected() == 'quartz-build')
+    wait('search ctrl-k', lambda: client.selected() == 'quartz-build')
+    client.key(b'\x1b[B')
+    wait('search down', lambda: client.selected() == 'quartz-helper')
+    client.key(b'\x1b[A')
+    wait('search up', lambda: client.selected() == 'quartz-build')
     client.snapshot('search')
     assert client.context() == origin and other.context() == untouched
     query(client, 'zzzzzz', None)
     assert 'no matching agents' in client.text()
     client.key(b'\r')
+    wait('kept search', lambda: 'j/k browse' in client.text() and '› zzzzzz' in client.text())
+    client.key(b'\r')
     time.sleep(.15)
-    assert 'search names / descriptions' in client.text() and client.context() == origin
+    assert '› zzzzzz' in client.text() and client.context() == origin
+    # Esc clears a kept search, then closes.
     client.key(b'\x1b')
-    wait('cancelled', lambda: 'search names / descriptions' not in client.text())
+    wait('search cleared', lambda: 'search names / descriptions' not in client.text() and client.selected() == 'quartz-build')
+    client.key(b'\x1b')
+    wait('cancelled', lambda: 'j/k browse' not in client.text())
+    assert client.context() == origin
+    # Esc in the search box cancels the edit and keeps the picker.
+    client.key(b'\x01f')
+    wait('reopen fresh', lambda: client.selected() == 'quartz-build' and '› ' not in client.text())
+    client.key(b'/qjk')
+    wait('literal letters', lambda: '› qjk' in client.text())
+    client.key(b'\x1b')
+    wait('edit cancelled', lambda: '› ' not in client.text() and 'j/k browse' in client.text())
+    # Sidebar actions, on the selection, with the sidebar's own prompts.
+    client.key(b'?')
+    wait('help', lambda: 'Keyboard shortcuts' in client.text())
+    client.key(b'q')
+    wait('help closed, picker open', lambda: 'j/k browse' in client.text())
+    client.key(b'f')
+    wait('filter', lambda: 'agents · blocked' in client.text())
+    # f skips states with no agents, so press until the cycle reaches All.
+    for _ in range(5):
+        if 'agents · ' not in client.text():
+            break
+        client.key(b'f')
+        time.sleep(.15)
+    wait('filter off', lambda: 'agents · ' not in client.text())
+    client.key(b's')
+    time.sleep(.2)
+    assert 'j/k browse' in client.text()
+    client.key(b'o')
+    wait('organize refuses without configured AI', lambda: 'j/k browse' not in client.text())
+    assert '[Y/n]' not in client.text(), client.text()
+    client.key(b'\x03')
+    wait('ctrl-c cancel', lambda: 'search names / descriptions' not in client.text() and '▌' not in client.text())
     assert client.context() == origin
     client.key(b'\x01f')
-    wait('reopen fresh', lambda: client.selected() == 'quartz-build' and '› quartz' not in client.text())
-    client.key(b'qjk')
-    wait('literal letters', lambda: '› qjk' in client.text())
-    client.key(b'\x03')
-    wait('ctrl-c cancel', lambda: 'search names / descriptions' not in client.text())
-    assert client.context() == origin
+    wait('reopen for rename', lambda: client.selected() == 'quartz-build')
+    query(client, 'qrtzhlpr', 'quartz-helper')
+    client.key(b'\r')
+    wait('kept', lambda: 'j/k browse' in client.text())
+    client.key(b'rq\r')
+    wait('renamed', lambda: any(a['name'] == 'quartz-helperq' for a in agents()))
+    client.key(b'\x1b')
+    wait('cleared', lambda: '› ' not in client.text())
+    wait('renamed row', lambda: 'quartz-helperq' in client.text())
+    SPAWNED.remove('quartz-helper')
+    SPAWNED.append('quartz-helperq')
+    # Kill: another key cancels with no kill, then y kills exactly that pane.
+    query(client, 'quartzhelperq', 'quartz-helperq')
+    client.key(b'\r')
+    wait('kept kill search', lambda: 'j/k browse' in client.text())
+    client.key(b'x')
+    wait('kill prompt', lambda: 'kill quartz-helperq' in client.text() and '[Y/n]' in client.text())
+    client.key(b'n')
+    wait('kill cancelled', lambda: '[Y/n]' not in client.text())
+    assert any(a['name'] == 'quartz-helperq' for a in agents())
+    client.key(b'x')
+    wait('kill prompt again', lambda: '[Y/n]' in client.text())
+    client.key(b'y')
+    wait('killed', lambda: not any(a['name'] == 'quartz-helperq' for a in agents()))
+    SPAWNED.remove('quartz-helperq')
+    assert {a['name'] for a in agents()} == {'cedar-review', 'quartz-build'}
+    client.key(b'\x1b')
+    wait('search cleared after kill', lambda: '› ' not in client.text())
+    assert client.context() == origin and other.context() == untouched
+    client.key(b'\x1b')
+    wait('closed after kill', lambda: 'j/k browse' not in client.text())
     client.key(b'\x01f')
     wait('reopen for focus', lambda: client.selected() == 'quartz-build')
     query(client, 'cdrrv', 'cedar-review')
     # Another client remains attached and active while the picker focuses its own client.
     other.key(b'\x0c')
-    client.key(b'\r')
+    client.key(b'\r\r')
     wait('exact cross-session focus', lambda: client.context()[1:] == [rows['cedar-review']['pane'], rows['cedar-review']['session']])
     assert other.context() == untouched
     calls = [json.loads(line) for line in (ROOT / 'calls').read_text().splitlines()]
     switches = [call for call in calls if call and call[0] == 'switch-client']
     assert len(switches) == 1 and switches[0][1:3] == ['-c', origin[0]], switches
+    # n from the popup: a real window in the selected project, the client taken to it,
+    # the popup gone. A plain shell stands in for the agent: only the placement is under test.
+    (BIN / 'claude').write_text('#!/bin/sh\nexec sleep 600\n')
+    (BIN / 'claude').chmod(0o755)
+    windows = lambda: tmux('list-windows', '-t', '=' + rows['quartz-build']['session'], '-F', '#{window_id}').split()
+    before = windows()
+    client.key(b'\x01f')
+    wait('reopen for new', lambda: client.selected() == 'quartz-build')
+    client.key(b'n')
+    wait('new prompt', lambda: 'new agent in ' + rows['quartz-build']['session'] in client.text())
+    client.key(b'\x1b')
+    wait('new cancelled', lambda: 'new agent in' not in client.text() and 'j/k browse' in client.text())
+    assert windows() == before
+    client.key(b'n\r')
+    wait('new window', lambda: len(windows()) == len(before) + 1)
+    created = next(w for w in windows() if w not in before)
+    wait('client moved to new agent', lambda: tmux('list-clients', '-F', '#{client_name} #{window_id}').find(origin[0] + ' ' + created) >= 0)
+    wait('popup closed', lambda: 'j/k browse' not in client.text())
+    assert other.context() == untouched
+    tmux('kill-window', '-t', created)
+    # o from the popup: n cancels; Space queues the daemon job. A fake command returns no plan,
+    # so nothing moves and no model is called.
+    (BIN / 'agy').write_text('#!/bin/sh\nexit 1\n')
+    (BIN / 'agy').chmod(0o755)
+    config = ROOT / 'config/tmux-agent-plane/config.json'
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(json.dumps({'auto_name': {'enabled': False, 'output': 'text',
+        'command': ['agy', '--model', 'fixture-model', '--effort', 'low', '--print', '{prompt}']}}))
+    placed = {a['name']: a['session'] for a in agents()}
+    status = lambda: json.loads((ROOT / 's/tmux-agent-plane/agents.json').read_text()).get('organize')
+    assert status() is None
+    client.key(b'\x01f')
+    wait('reopen for organize', lambda: 'j/k browse' in client.text())
+    client.key(b'o')
+    wait('organize prompt', lambda: 'organize all agents? [Y/n]' in client.text() and 'via agy' in client.text())
+    client.key(b'n')
+    wait('organize cancelled', lambda: '[Y/n]' not in client.text() and 'j/k browse' in client.text())
+    assert status() is None
+    client.key(b'o')
+    wait('organize prompt again', lambda: '[Y/n]' in client.text())
+    client.key(b' ')
+    wait('organize ran', lambda: status() is not None and not status()['running'])
+    assert {a['name']: a['session'] for a in agents()} == placed
+    client.key(b'\x1b')
+    wait('closed after organize', lambda: 'via agy' not in client.text() and '▌' not in client.text())
     for row in rows.values():
         path = ROOT / (row['pane'] + '.input')
         assert not path.exists() or path.read_bytes().replace(b'\x1b[I', b'').replace(b'\x1b[O', b'') == b''
-    print('PASS: lowercase binding; empty/no-match Enter; fuzzy name/title/detail and spanning queries; arrows; Ctrl-J/K; refresh selection; Esc/Ctrl-C; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
+    print('PASS: lowercase binding; command mode by default; j/k, Ctrl-J/K and arrows; / search only; empty/no-match Enter; fuzzy name/title/detail and spanning queries; refresh selection; Esc/Ctrl-C/q; help, filter, sort, organize, rename, kill and new from the popup; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
     print('Evidence:', ROOT, flush=True)
 finally:
     for name in SPAWNED:

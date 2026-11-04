@@ -7,7 +7,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
-- Browse the `prefix + f` agent picker with Ctrl-J/Ctrl-K as well as the arrow keys
+- The `prefix + f` agent picker has the sidebar's actions: `n` new, `x` kill, `r` rename, `o` organize, `f` filter, `s` sort, `c` configure and `?` shortcuts
+- Browse with Ctrl-J/Ctrl-K in the agent picker, and while editing a search in the sidebar
 - Start a new agent from the sidebar: press `n`, pick the kind, and it opens in a new window of the selected agent's project and directory, with you in it
 - Organize project sessions from the sidebar: press `o`, then Enter or Space to group all agents across every session using the configured background AI command; opening or canceling runs nothing
 - Focus the previous or next agent directly with Alt+K/J (Option+K/J on macOS), across sessions and without entering the sidebar; configure the keys with `@agent-plane-previous-key` and `@agent-plane-next-key`
@@ -20,7 +21,7 @@ before 1.0, a breaking change bumps the minor version.
 
 - Clarify sidebar organization covers all tracked agents across every tmux session, including hidden sidebar rows
 - Open sidebar organization with lowercase `o`
-- Open the tmux agent picker with lowercase `prefix + f` (replacing tmux’s window finder); type immediately to fuzzy-search names and descriptions, browse ranked matches with arrows, Enter to focus the exact pane in the originating client, or Esc/Ctrl-C to cancel
+- Open the tmux agent picker with lowercase `prefix + f` (replacing tmux’s window finder); it opens on the list, where `j`/`k` browse and letters are commands; press `/` to fuzzy-search names and descriptions, Enter to focus the exact pane in the originating client, or `q`/Esc/Ctrl-C to close
 - Let the agent picker inherit the terminal background, with selection using the terminal palette
 - Fuzzy search sidebar rows by name and description together, allowing gaps and abbreviations while ignoring case; task, blocked detail, location and directory stay searchable, and matching rows keep their order
 

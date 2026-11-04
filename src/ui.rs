@@ -1,6 +1,7 @@
 //! The agent list: every agent with its state, and a live preview of the selected one.
 
 use crate::index::{self, Agent, State};
+use crate::sidebar::{Origin, Sidebar, confirmation_footer, status_footer};
 use crate::tmux;
 use ansi_to_tui::IntoText;
 use anyhow::{Context, Result};
@@ -8,9 +9,9 @@ use nucleo_matcher::pattern::{Atom, AtomKind, CaseMatching, Normalization};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, List, ListItem, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
@@ -44,97 +45,59 @@ pub(crate) fn age(since_ms: u64) -> String {
     }
 }
 
+/// Search matches for `query`, best first. Stable ties preserve the given order.
+pub(crate) fn rank(matcher: &mut Matcher, query: &str, agents: &[Agent]) -> Vec<Agent> {
+    let pattern = Atom::new(
+        query,
+        CaseMatching::Ignore,
+        Normalization::Never,
+        AtomKind::Fuzzy,
+        false,
+    );
+    let mut buffer = Vec::new();
+    let mut matches: Vec<_> = agents
+        .iter()
+        .filter_map(|agent| {
+            let text = format!(
+                "{} {} {}",
+                agent.name,
+                agent.title,
+                agent.detail.as_deref().unwrap_or("")
+            );
+            pattern
+                .score(Utf32Str::new(&text, &mut buffer), matcher)
+                .map(|score| (score, agent.clone()))
+        })
+        .collect();
+    matches.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+    matches.into_iter().map(|(_, agent)| agent).collect()
+}
+
+/// The sidebar's list and actions, in a popup with a large preview.
 struct App {
-    all_agents: Vec<Agent>,
-    agents: Vec<Agent>,
-    query: String,
-    matcher: Matcher,
-    list: ListState,
+    sidebar: Sidebar,
+    client: String,
     preview: Text<'static>,
-    error: Option<String>,
 }
 
 impl App {
-    fn new() -> Self {
+    fn new(client: &str) -> Self {
+        let mut sidebar = Sidebar::default();
+        sidebar.ranker = Some(Matcher::new(Config::DEFAULT));
         Self {
-            all_agents: Vec::new(),
-            agents: Vec::new(),
-            query: String::new(),
-            matcher: Matcher::new(Config::DEFAULT),
-            list: ListState::default(),
+            sidebar,
+            client: client.to_string(),
             preview: Text::default(),
-            error: None,
         }
-    }
-
-    fn selected(&self) -> Option<&Agent> {
-        self.list.selected().and_then(|i| self.agents.get(i))
     }
 
     fn refresh(&mut self) {
-        match index::read() {
-            Ok(index) => {
-                self.all_agents = index.agents;
-                self.error = None;
-            }
-            Err(e) => {
-                self.all_agents.clear();
-                self.error = Some(e.to_string());
-            }
-        }
-        self.filter(true);
+        self.sidebar.refresh(Origin::Popup(&self.client));
         self.update_preview();
     }
 
-    fn filter(&mut self, preserve_selection: bool) {
-        let keep = preserve_selection
-            .then(|| self.selected().map(|a| a.pane.clone()))
-            .flatten();
-        let pattern = Atom::new(
-            &self.query,
-            CaseMatching::Ignore,
-            Normalization::Never,
-            AtomKind::Fuzzy,
-            false,
-        );
-        let mut buffer = Vec::new();
-        let mut matches: Vec<_> = self
-            .all_agents
-            .iter()
-            .filter_map(|agent| {
-                let text = format!(
-                    "{} {} {}",
-                    agent.name,
-                    agent.title,
-                    agent.detail.as_deref().unwrap_or("")
-                );
-                pattern
-                    .score(Utf32Str::new(&text, &mut buffer), &mut self.matcher)
-                    .map(|score| (score, agent.clone()))
-            })
-            .collect();
-        if !self.query.is_empty() {
-            // Stable ties preserve the index order; every edit selects the best match.
-            matches.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
-        }
-        self.agents = matches.into_iter().map(|(_, agent)| agent).collect();
-        let selected = match keep {
-            Some(pane) => self.agents.iter().position(|a| a.pane == pane),
-            // First open: start on whatever needs attention.
-            None if self.query.is_empty() => [State::Blocked, State::Done]
-                .iter()
-                .find_map(|s| self.agents.iter().position(|a| a.state == *s)),
-            None => None,
-        };
-        self.list.select(selected.or(if self.agents.is_empty() {
-            None
-        } else {
-            Some(0)
-        }));
-    }
-
     fn update_preview(&mut self) {
-        self.preview = match self.selected() {
+        self.preview = match self.sidebar.selected() {
             Some(agent) => match tmux::capture(&agent.pane, true, None) {
                 Ok(screen) => screen
                     .into_text()
@@ -146,61 +109,42 @@ impl App {
     }
 
     fn key(&mut self, key: KeyEvent) -> ControlFlow<Option<Agent>> {
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        match key.code {
-            KeyCode::Esc => return ControlFlow::Break(None),
-            KeyCode::Char('c') if ctrl => return ControlFlow::Break(None),
-            KeyCode::Enter => {
-                if let Some(agent) = self.selected() {
-                    return ControlFlow::Break(Some(agent.clone()));
-                }
-            }
-            KeyCode::Down => self.step(1),
-            KeyCode::Up => self.step(-1),
-            KeyCode::Char('j') if ctrl => self.step(1),
-            KeyCode::Char('k') if ctrl => self.step(-1),
-            KeyCode::Char('u') if ctrl => {
-                self.query.clear();
-                self.filter(false);
-            }
-            KeyCode::Char('w') if ctrl => {
-                self.query = self.query.trim_end().to_string();
-                while self
-                    .query
-                    .chars()
-                    .last()
-                    .is_some_and(|c| !c.is_whitespace())
-                {
-                    self.query.pop();
-                }
-                self.filter(false);
-            }
-            KeyCode::Backspace => {
-                self.query.pop();
-                self.filter(false);
-            }
-            KeyCode::Char(c) if !ctrl && !key.modifiers.contains(KeyModifiers::ALT) => {
-                self.query.push(c);
-                self.filter(false);
-            }
-            _ => {}
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return ControlFlow::Break(None);
         }
+        self.sidebar.pressed(index::now_ms());
+        if self.sidebar.action_key(key, Origin::Popup(&self.client)) {
+            return if self.sidebar.left {
+                ControlFlow::Break(None)
+            } else {
+                ControlFlow::Continue(())
+            };
+        }
+        if self.sidebar.editing.is_none() && self.sidebar.navigation.search.is_none() {
+            match key.code {
+                KeyCode::Enter => {
+                    if let Some(agent) = self.sidebar.selected() {
+                        return ControlFlow::Break(Some(agent.clone()));
+                    }
+                    return ControlFlow::Continue(());
+                }
+                KeyCode::Char('q') => return ControlFlow::Break(None),
+                KeyCode::Esc if self.sidebar.navigation.query.is_empty() => {
+                    return ControlFlow::Break(None);
+                }
+                // The popup's preview is always on.
+                KeyCode::Char('v') => return ControlFlow::Continue(()),
+                _ => {}
+            }
+        }
+        self.sidebar.key(key);
         ControlFlow::Continue(())
-    }
-
-    fn step(&mut self, delta: isize) {
-        if self.agents.is_empty() {
-            return;
-        }
-        let len = self.agents.len() as isize;
-        let i = self.list.selected().unwrap_or(0) as isize;
-        self.list.select(Some((i + delta).rem_euclid(len) as usize));
     }
 }
 
 pub fn run(client: &str) -> Result<()> {
     let mut terminal = ratatui::init();
-    let result = event_loop(&mut terminal);
+    let result = event_loop(&mut terminal, client);
     ratatui::restore();
     let jump = result?;
     if let Some(agent) = jump {
@@ -230,8 +174,8 @@ pub fn run(client: &str) -> Result<()> {
     Ok(())
 }
 
-fn event_loop(terminal: &mut DefaultTerminal) -> Result<Option<Agent>> {
-    let mut app = App::new();
+fn event_loop(terminal: &mut DefaultTerminal, client: &str) -> Result<Option<Agent>> {
+    let mut app = App::new(client);
     app.refresh();
     let mut refreshed = Instant::now();
     loop {
@@ -243,6 +187,11 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Option<Agent>> {
             if let ControlFlow::Break(jump) = app.key(key) {
                 return Ok(jump);
             }
+            if let Some(order) = app.sidebar.unsent_order.take() {
+                // On screen first: the daemon's control thread answers within its poll interval.
+                terminal.draw(|f| draw(f, &mut app))?;
+                app.sidebar.send_order(&order);
+            }
             app.update_preview();
         }
         if refreshed.elapsed() >= REFRESH {
@@ -253,56 +202,92 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Option<Agent>> {
 }
 
 fn draw(f: &mut Frame, app: &mut App) {
-    let list_height = (app.agents.len() as u16 + 2).clamp(3, (f.area().height / 3).max(3));
+    if app.sidebar.help.open {
+        app.sidebar.help.draw(f);
+        return;
+    }
+    if app.sidebar.auto_name.open {
+        app.sidebar.auto_name.draw(f);
+        return;
+    }
+    let sidebar = &mut app.sidebar;
+    let width = f.area().width as usize;
+    let confirmation = confirmation_footer(sidebar, width);
+    let footer_height = confirmation.as_ref().map_or(1, |lines| lines.len() as u16);
+    let searching = sidebar.navigation.search.is_some();
+    // The search box exists only while there is a search.
+    let search_height = if searching || !sidebar.navigation.query.is_empty() {
+        3
+    } else {
+        0
+    };
+    let list_height = (sidebar.agents.len() as u16 + 2).clamp(3, (f.area().height / 3).max(3));
     let [search_area, list_area, preview_area, help_area] = Layout::vertical([
-        Constraint::Length(3),
+        Constraint::Length(search_height),
         Constraint::Length(list_height),
         Constraint::Min(3),
-        Constraint::Length(1),
+        Constraint::Length(footer_height),
     ])
     .areas(f.area());
 
-    let query = format!("› {}", app.query);
-    let cursor = Line::raw(query.as_str()).width().min(u16::MAX as usize) as u16;
-    let scroll = cursor.saturating_sub(search_area.width.saturating_sub(3));
-    let search = Paragraph::new(query)
-        .scroll((0, scroll))
-        .style(Style::default().fg(TEXT))
-        .block(
-            panel(Line::from(" search names / descriptions ")).title_top(
-                Line::styled(
-                    format!(" {} / {} ", app.agents.len(), app.all_agents.len()),
-                    SUBTEXT,
-                )
-                .right_aligned(),
-            ),
-        );
-    f.render_widget(search, search_area);
-    if search_area.width >= 3 && search_area.height >= 3 {
-        f.set_cursor_position((search_area.x + 1 + cursor - scroll, search_area.y + 1));
+    if search_height > 0 {
+        let query = format!("› {}", sidebar.navigation.query);
+        let cursor = Line::raw(query.as_str()).width().min(u16::MAX as usize) as u16;
+        let scroll = cursor.saturating_sub(search_area.width.saturating_sub(3));
+        let search = Paragraph::new(query)
+            .scroll((0, scroll))
+            .style(Style::default().fg(if searching { TEXT } else { SUBTEXT }))
+            .block(
+                panel(Line::from(" search names / descriptions ")).title_top(
+                    Line::styled(
+                        format!(" {} / {} ", sidebar.agents.len(), sidebar.all_agents.len()),
+                        SUBTEXT,
+                    )
+                    .right_aligned(),
+                ),
+            );
+        f.render_widget(search, search_area);
+        if searching && search_area.width >= 3 && search_area.height >= 3 {
+            f.set_cursor_position((search_area.x + 1 + cursor - scroll, search_area.y + 1));
+        }
     }
 
-    let width = |f: fn(&Agent) -> &str| {
-        app.agents
+    let selected = sidebar.list.selected();
+    let renaming = sidebar
+        .editing
+        .as_ref()
+        .map(|edit| format!("{}▏", edit.name));
+    let column = |text: fn(&Agent) -> &str| {
+        sidebar
+            .agents
             .iter()
-            .map(|a| f(a).chars().count())
+            .map(|a| text(a).chars().count())
             .max()
             .unwrap_or(0)
     };
-    let name_width = width(|a| &a.name);
-    let location_width = width(|a| &a.location);
+    let name_width =
+        column(|a| &a.name).max(renaming.as_ref().map_or(0, |typed| typed.chars().count()));
+    let location_width = column(|a| &a.location);
     let row_width = list_area.width.saturating_sub(2) as usize;
-    let selected = app.list.selected();
-    let items: Vec<ListItem> = app
+    let items: Vec<ListItem> = sidebar
         .agents
         .iter()
         .enumerate()
         .map(|(i, a)| {
             let is_selected = selected == Some(i);
+            let name = match renaming.as_ref().filter(|_| is_selected) {
+                Some(typed) => Span::styled(
+                    format!("{typed:<name_width$}  "),
+                    Style::default()
+                        .fg(colour(State::Done))
+                        .add_modifier(Modifier::UNDERLINED),
+                ),
+                None => Span::styled(format!("{:<name_width$}  ", a.name), name_style(a)),
+            };
             let mut line = Line::from(vec![
                 Span::styled(if is_selected { "▌" } else { " " }, colour(a.state)),
                 Span::styled(format!("{} ", icon(a.state)), colour(a.state)),
-                Span::styled(format!("{:<name_width$}  ", a.name), name_style(a)),
+                name,
                 Span::styled(
                     format!("{:<7} {:>4}  ", a.state.as_str(), age(a.state_since)),
                     state_style(a.state),
@@ -323,10 +308,14 @@ fn draw(f: &mut Frame, app: &mut App) {
             ListItem::new(line)
         })
         .collect();
-    let list = List::new(items).block(panel(Line::from(" agents ")).title_top(counts(&app.agents)));
-    f.render_stateful_widget(list, list_area, &mut app.list);
+    let title = match sidebar.navigation.filter {
+        Some(state) => format!(" agents · {} ", state.as_str()),
+        None => " agents ".to_string(),
+    };
+    let list = List::new(items).block(panel(Line::from(title)).title_top(counts(&sidebar.agents)));
+    f.render_stateful_widget(list, list_area, &mut sidebar.list);
 
-    let block = match app.selected() {
+    let block = match app.sidebar.selected() {
         Some(a) => {
             let mut title = vec![
                 Span::raw(" "),
@@ -341,7 +330,7 @@ fn draw(f: &mut Frame, app: &mut App) {
         }
         None => panel(Line::from(" preview ")),
     };
-    match (&app.error, app.selected()) {
+    match (&app.sidebar.error, app.sidebar.selected()) {
         (Some(e), _) => message(
             f,
             preview_area,
@@ -354,13 +343,10 @@ fn draw(f: &mut Frame, app: &mut App) {
             preview_area,
             block,
             TEXT,
-            &if app.all_agents.is_empty() {
+            &if app.sidebar.all_agents.is_empty() {
                 ["no agents running", "start an agent in any tmux pane"]
             } else {
-                [
-                    "no matching agents",
-                    "edit your search or press Ctrl-U to clear",
-                ]
+                ["no matching agents", "f changes state · / edits search"]
             },
         ),
         (None, Some(_)) => {
@@ -376,15 +362,39 @@ fn draw(f: &mut Frame, app: &mut App) {
         }
     }
 
-    f.render_widget(
-        Paragraph::new(hints(&[
-            ("type", "search"),
-            ("↑/↓ ctrl-j/k", "browse"),
-            ("⏎", "focus"),
-            ("esc", "cancel"),
-        ])),
-        help_area,
+    let footer = confirmation.map_or_else(
+        || {
+            let sidebar = &app.sidebar;
+            Text::from(if sidebar.notice.is_none() && searching {
+                hints(&[
+                    ("type", "search"),
+                    ("^j/^k", "browse"),
+                    ("⏎", "keep"),
+                    ("esc", "cancel"),
+                    ("^w ^u", "clear"),
+                ])
+            } else {
+                status_footer(sidebar, width, index::now_ms()).unwrap_or_else(|| {
+                    hints(&[
+                        ("j/k", "browse"),
+                        ("/", "search"),
+                        ("⏎", "focus"),
+                        ("?", "keys"),
+                        ("n", "new"),
+                        ("x", "kill"),
+                        ("r", "rename"),
+                        ("o", "organize"),
+                        ("f", "filter"),
+                        ("s", "sort"),
+                        ("c", "configure"),
+                        ("q", "close"),
+                    ])
+                })
+            })
+        },
+        Text::from,
     );
+    f.render_widget(Paragraph::new(footer), help_area);
 }
 
 // Catppuccin mocha.
@@ -510,99 +520,220 @@ mod tests {
     }
 
     fn app() -> App {
-        let mut app = App::new();
-        app.all_agents = vec![
+        let mut app = App::new("client");
+        app.sidebar.all_agents = vec![
             agent("cedar-review", "%10", "Audit payments"),
             agent("quartz-build", "%11", "Ship compiler"),
         ];
-        app.all_agents[1].detail = Some("Approve cache refresh".into());
-        app.filter(false);
+        app.sidebar.all_agents[1].detail = Some("Approve cache refresh".into());
+        app.sidebar.navigation.order = vec!["%10".into(), "%11".into()];
+        app.sidebar.rebuild();
         app
     }
 
+    fn press(app: &mut App, code: KeyCode) -> ControlFlow<Option<Agent>> {
+        app.key(KeyEvent::from(code))
+    }
+
+    fn ctrl(app: &mut App, c: char) -> ControlFlow<Option<Agent>> {
+        app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL))
+    }
+
+    /// Replace the search with `query`, staying in search mode.
     fn type_query(app: &mut App, query: &str) {
-        let _ = app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
-        for c in query.chars() {
-            assert!(app.key(KeyEvent::from(KeyCode::Char(c))).is_continue());
+        if app.sidebar.navigation.search.is_none() {
+            assert!(press(app, KeyCode::Char('/')).is_continue());
         }
+        let _ = ctrl(app, 'u');
+        for c in query.chars() {
+            assert!(press(app, KeyCode::Char(c)).is_continue());
+        }
+    }
+
+    fn selected(app: &App) -> &str {
+        &app.sidebar.selected().unwrap().name
+    }
+
+    fn screen(terminal: &Terminal<TestBackend>) -> String {
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect()
     }
 
     #[test]
     fn fuzzy_queries_span_names_titles_and_details_and_ignore_case() {
         let mut app = app();
-        for (query, pane) in [
-            ("CDRRV", "%10"),
-            ("adpym", "%10"),
-            ("qbuildshpcmp", "%11"),
-            ("apcchrfr", "%11"),
+        for (query, expected) in [
+            ("CDRRV", "cedar-review"),
+            ("audpay", "cedar-review"),
+            ("qrtzbldshpcmp", "quartz-build"),
+            ("approvecache", "quartz-build"),
         ] {
             type_query(&mut app, query);
-            assert_eq!(app.selected().unwrap().pane, pane, "{query}");
+            assert_eq!(selected(&app), expected);
         }
-        app.all_agents[0].title = "Révision 東京".into();
-        type_query(&mut app, "rév東京");
-        assert_eq!(app.selected().unwrap().pane, "%10");
-        type_query(&mut app, "zzzz");
-        assert!(app.selected().is_none());
-        assert!(app.key(KeyEvent::from(KeyCode::Enter)).is_continue());
+        type_query(&mut app, "does not exist");
+        assert!(app.sidebar.selected().is_none());
+        assert!(press(&mut app, KeyCode::Enter).is_continue());
+        assert!(press(&mut app, KeyCode::Enter).is_continue());
     }
 
     #[test]
     fn best_match_wins_each_edit_and_refresh_preserves_the_browsed_pane() {
         let mut app = app();
-        app.all_agents = vec![
-            agent("sparse", "%10", "p-a-y"),
-            agent("payments", "%11", "Ship"),
-        ];
-        type_query(&mut app, "pay");
-        assert_eq!(app.selected().unwrap().pane, "%11");
-        let _ = app.key(KeyEvent::from(KeyCode::Down));
-        assert_eq!(app.selected().unwrap().pane, "%10");
-        app.all_agents.reverse();
-        app.all_agents[1].name = "renamed".into();
-        app.filter(true);
-        assert_eq!(app.selected().unwrap().pane, "%10");
-        let ControlFlow::Break(Some(chosen)) = app.key(KeyEvent::from(KeyCode::Enter)) else {
-            panic!("expected focus");
+        app.sidebar
+            .all_agents
+            .push(agent("cedar-worker", "%12", "Review database"));
+        app.sidebar.navigation.order.push("%12".into());
+        type_query(&mut app, "cedar");
+        assert_eq!(app.sidebar.selected().unwrap().pane, "%10");
+        let _ = ctrl(&mut app, 'j');
+        assert_eq!(app.sidebar.selected().unwrap().pane, "%12");
+        app.sidebar.all_agents[2].title = "Review database again".into();
+        app.sidebar.rebuild();
+        assert_eq!(app.sidebar.selected().unwrap().pane, "%12");
+        type_query(&mut app, "cedarr");
+        assert_eq!(app.sidebar.selected().unwrap().pane, "%10");
+        let _ = press(&mut app, KeyCode::Enter);
+        let ControlFlow::Break(Some(chosen)) = press(&mut app, KeyCode::Enter) else {
+            panic!("second Enter focuses the selection");
         };
         assert_eq!(chosen.pane, "%10");
-        app.all_agents.retain(|a| a.pane != "%10");
-        app.filter(true);
-        assert_eq!(app.selected().unwrap().pane, "%11");
     }
 
     #[test]
-    fn ctrl_j_and_k_browse_while_plain_j_and_k_stay_query_text() {
+    fn the_list_opens_in_command_mode_and_plain_keys_browse() {
         let mut app = app();
-        let first = app.list.selected().unwrap();
-        let _ = app.key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL));
-        assert_eq!(app.list.selected().unwrap(), first + 1);
-        let _ = app.key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
-        assert_eq!(app.list.selected().unwrap(), first);
-        assert!(app.query.is_empty());
-        type_query(&mut app, "jk");
-        assert_eq!(app.query, "jk");
+        assert_eq!(selected(&app), "cedar-review");
+        let _ = press(&mut app, KeyCode::Char('j'));
+        assert_eq!(selected(&app), "quartz-build");
+        let _ = press(&mut app, KeyCode::Char('k'));
+        assert_eq!(selected(&app), "cedar-review");
+        let _ = ctrl(&mut app, 'j');
+        assert_eq!(selected(&app), "quartz-build");
+        let _ = ctrl(&mut app, 'k');
+        assert_eq!(selected(&app), "cedar-review");
+        assert!(app.sidebar.navigation.query.is_empty());
+        assert!(app.sidebar.navigation.search.is_none());
     }
 
     #[test]
-    fn letters_are_text_editing_is_unicode_safe_and_cancel_has_no_target() {
+    fn slash_starts_search_where_letters_are_text_and_ctrl_j_k_still_browse() {
         let mut app = app();
-        type_query(&mut app, "qjk/東京");
-        let _ = app.key(KeyEvent::from(KeyCode::Backspace));
-        assert_eq!(app.query, "qjk/東");
+        let _ = press(&mut app, KeyCode::Char('/'));
+        for c in "qjx/東京".chars() {
+            let _ = press(&mut app, KeyCode::Char(c));
+        }
+        let _ = press(&mut app, KeyCode::Backspace);
+        assert_eq!(app.sidebar.navigation.query, "qjx/東");
         type_query(&mut app, "cedar review  ");
-        let _ = app.key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
-        assert_eq!(app.query, "cedar ");
-        let _ = app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
-        assert!(app.query.is_empty());
+        let _ = ctrl(&mut app, 'w');
+        assert_eq!(app.sidebar.navigation.query, "cedar ");
+        let _ = ctrl(&mut app, 'u');
+        assert!(app.sidebar.navigation.query.is_empty());
+        let first = app.sidebar.list.selected().unwrap();
+        let _ = ctrl(&mut app, 'j');
+        assert_eq!(app.sidebar.list.selected().unwrap(), first + 1);
+        let _ = ctrl(&mut app, 'k');
+        assert_eq!(app.sidebar.list.selected().unwrap(), first);
+        assert!(app.sidebar.navigation.search.is_some());
+    }
+
+    #[test]
+    fn esc_cancels_search_clears_a_kept_query_and_then_closes() {
+        let mut app = app();
+        let _ = press(&mut app, KeyCode::Char('j'));
+        type_query(&mut app, "cedar");
+        assert_eq!(selected(&app), "cedar-review");
+        assert!(press(&mut app, KeyCode::Esc).is_continue());
+        assert!(app.sidebar.navigation.query.is_empty());
+        assert_eq!(selected(&app), "quartz-build");
+        type_query(&mut app, "cedar");
+        assert!(press(&mut app, KeyCode::Enter).is_continue());
+        assert_eq!(app.sidebar.navigation.query, "cedar");
+        assert!(press(&mut app, KeyCode::Esc).is_continue());
+        assert!(app.sidebar.navigation.query.is_empty());
         assert!(matches!(
-            app.key(KeyEvent::from(KeyCode::Esc)),
+            press(&mut app, KeyCode::Esc),
             ControlFlow::Break(None)
         ));
+    }
+
+    #[test]
+    fn q_and_ctrl_c_close_without_a_target_and_v_is_inert() {
+        let mut app = app();
+        assert!(press(&mut app, KeyCode::Char('v')).is_continue());
+        assert!(!app.sidebar.navigation.view);
         assert!(matches!(
-            app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            press(&mut app, KeyCode::Char('q')),
             ControlFlow::Break(None)
         ));
+        let _ = press(&mut app, KeyCode::Char('/'));
+        assert!(matches!(ctrl(&mut app, 'c'), ControlFlow::Break(None)));
+    }
+
+    #[test]
+    fn rename_edits_in_the_row_and_its_letters_are_not_commands() {
+        let mut app = app();
+        let _ = press(&mut app, KeyCode::Char('r'));
+        for c in "xq".chars() {
+            assert!(press(&mut app, KeyCode::Char(c)).is_continue());
+        }
+        assert_eq!(app.sidebar.editing.as_ref().unwrap().name, "cedar-reviewxq");
+        let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(screen(&terminal).contains("cedar-reviewxq▏"));
+        assert!(press(&mut app, KeyCode::Esc).is_continue());
+        assert!(app.sidebar.editing.is_none());
+    }
+
+    #[test]
+    fn filter_and_help_work_from_the_list() {
+        let mut app = app();
+        app.sidebar.all_agents[1].state = State::Blocked;
+        app.sidebar.rebuild();
+        let _ = press(&mut app, KeyCode::Char('f'));
+        assert_eq!(app.sidebar.navigation.filter, Some(State::Blocked));
+        assert_eq!(app.sidebar.agents.len(), 1);
+        let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(screen(&terminal).contains("agents · blocked"));
+        let _ = press(&mut app, KeyCode::Char('?'));
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(screen(&terminal).contains("Keyboard shortcuts"));
+        assert!(press(&mut app, KeyCode::Char('q')).is_continue());
+        assert!(!app.sidebar.help.open);
+    }
+
+    #[test]
+    fn new_agent_prompt_uses_the_footer_and_consumes_keys() {
+        let mut app = app();
+        let _ = press(&mut app, KeyCode::Char('n'));
+        let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(screen(&terminal).contains("new agent in work"));
+        assert!(press(&mut app, KeyCode::Char('q')).is_continue());
+        let _ = press(&mut app, KeyCode::Esc);
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(!screen(&terminal).contains("new agent in work"));
+    }
+
+    #[test]
+    fn search_box_shows_only_during_a_search() {
+        let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
+        let mut app = app();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(!screen(&terminal).contains("search names / descriptions"));
+        let _ = press(&mut app, KeyCode::Char('/'));
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(screen(&terminal).contains("search names / descriptions"));
+        let _ = press(&mut app, KeyCode::Esc);
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(!screen(&terminal).contains("search names / descriptions"));
     }
 
     #[test]
@@ -614,23 +745,17 @@ mod tests {
                 type_query(&mut app, query);
                 terminal.draw(|f| draw(f, &mut app)).unwrap();
                 if width == 120 {
-                    let screen = terminal
-                        .backend()
-                        .buffer()
-                        .content
-                        .iter()
-                        .map(|c| c.symbol())
-                        .collect::<String>();
-                    assert!(screen.contains("search names / descriptions"));
+                    let shown = screen(&terminal);
+                    assert!(shown.contains("search names / descriptions"));
                     if query == "missing" {
-                        assert!(screen.contains("no matching agents"));
+                        assert!(shown.contains("no matching agents"));
                     }
                 }
             }
-            app.all_agents.clear();
-            app.filter(false);
+            app.sidebar.all_agents.clear();
+            app.sidebar.rebuild();
             terminal.draw(|f| draw(f, &mut app)).unwrap();
-            app.error = Some("stale agent index".into());
+            app.sidebar.error = Some("stale agent index".into());
             terminal.draw(|f| draw(f, &mut app)).unwrap();
         }
     }
