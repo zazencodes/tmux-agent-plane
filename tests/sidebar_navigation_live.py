@@ -258,7 +258,7 @@ def assert_fuzzy_search(client):
     next_name = baseline[(baseline.index("nav-work") + 1) % len(baseline)]
     selected(client, next_name)
     assert client.context() == editing_origin
-    client.key(b"z")
+    client.key("☃".encode())
     wait("fuzzy incremental miss", lambda: "no matching agents" in client.text())
     client.key(b"\x7f")
     wait("fuzzy backspace restores rows", lambda: shown_names(client) == baseline)
