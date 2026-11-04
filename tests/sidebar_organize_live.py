@@ -177,27 +177,27 @@ try:
     client.keys(b'/organizer-fixture\r')
     wait('selected fixture', lambda: 'organizer-fixture' in client.text() and 'type to search' not in client.text())
     baseline_input, baseline_calls = inputs(), input_calls()
-    for key in (b'\x1b', b'\r', b'q', b'x', b'c', b'j', b'o', b'O', b'A', b'?'):
+    for key in (b'\x1b', b'n', b'a', b'q', b'x', b'c', b'j', b'o', b'O', b'A', b'?'):
         client.keys(b'o')
-        wait('confirmation', lambda: 'Organize all agents?' in client.text())
-        assert 'Coordinator: organizer-fixture' in client.text()
-        assert 'every tmux session' in client.text()
+        wait('confirmation', lambda: 'organize all agents? y/n' in client.text())
+        assert 'via organizer-fixture' in client.text()
+        assert 'v off' in client.text(), 'agent list must stay visible'
         client.snapshot('confirmation')
         client.keys(key)
-        wait('cancelled', lambda: 'Organize all agents?' not in client.text())
+        wait('cancelled', lambda: 'organize all agents? y/n' not in client.text())
         assert inputs() == baseline_input and input_calls() == baseline_calls, key
         assert infra('display-message', '-p', '-t', harness, '#{pane_id}') == sidebar
-    proof('o reviews all agents across every session and names the coordinator; cancellation sends no input')
+    proof('o shows a compact yes/no footer with the coordinator; the agent list stays visible and cancel sends nothing')
 
     client.keys(b'/o')
     wait('literal o search', lambda: 'organizer-fixtureo' in client.text())
-    assert 'Organize all agents?' not in client.text()
+    assert 'organize all agents? y/n' not in client.text()
     client.keys(b'\x1b')
     wait('search closed', lambda: '⏎ jump' in client.text())
     client.keys(b'ro')
     time.sleep(.15)
     client.drain()
-    assert 'Organize all agents?' not in client.text()
+    assert 'organize all agents? y/n' not in client.text()
     client.keys(b'\x1b')
     wait('rename closed', lambda: '⏎ jump' in client.text())
     proof('o remains literal in search and rename edits')
@@ -209,17 +209,17 @@ try:
                                                      for row in client.text().splitlines()))
         client.keys(b'o')
         wait('readiness refusal', lambda: 'select an idle or done coordinator' in client.text())
-        assert 'Organize all agents?' not in client.text()
+        assert 'organize all agents? y/n' not in client.text()
         assert inputs() == baseline_input and input_calls() == baseline_calls
     state(selected, 'idle')
     wait('ready again', lambda: agent('organizer-fixture')['state'] == 'idle')
     wait('ready sidebar', lambda: any('organizer-fixture' in row and 'idle' in row
                                       for row in client.text().splitlines()))
     client.keys(b'o')
-    wait('open before state change', lambda: 'Organize all agents?' in client.text())
+    wait('open before state change', lambda: 'organize all agents? y/n' in client.text())
     state(selected, 'blocked')
     wait('blocked while confirming', lambda: agent('organizer-fixture')['state'] == 'blocked')
-    client.keys(b'a')
+    client.keys(b' ')
     wait('changed organizer refusal', lambda: 'coordinator changed' in client.text())
     assert inputs() == baseline_input and input_calls() == baseline_calls
     proof('working/blocked organizers and state changes after opening cannot receive the request')
@@ -229,49 +229,50 @@ try:
     wait('ready sidebar for identity', lambda: any('organizer-fixture' in row and 'idle' in row
                                                    for row in client.text().splitlines()))
     client.keys(b'o')
-    wait('open before identity change', lambda: 'Organize all agents?' in client.text())
+    wait('open before identity change', lambda: 'organize all agents? y/n' in client.text())
     state(selected, 'idle', identity=1)
     old_id = selected['session_id']
     wait('new native identity', lambda: agent('organizer-fixture')['session_id'] != old_id)
-    client.keys(b'a')
+    client.keys(b' ')
     wait('native identity refusal', lambda: 'coordinator changed' in client.text())
     assert inputs() == baseline_input and input_calls() == baseline_calls
     proof('native identity changes cannot silently retarget a confirmed request')
 
     client.keys(b'o')
-    wait('open before second client', lambda: 'Organize all agents?' in client.text())
+    wait('open before second client', lambda: 'organize all agents? y/n' in client.text())
     other_client = Client()
     wait('two clients', lambda: len(infra('list-clients', '-F', '#{client_name}').splitlines()) == 2)
-    client.keys(b'a')
+    client.keys(b' ')
     wait('shared input refused', lambda: 'multiple clients in sidebar' in client.text())
     assert inputs() == baseline_input and input_calls() == baseline_calls
     other_client.close()
     wait('one client', lambda: len(infra('list-clients', '-F', '#{client_name}').splitlines()) == 1)
     proof('a changed/shared input client cannot dispatch a pending request')
 
-    client.keys(b'o')
-    wait('lowercase open', lambda: 'Organize all agents?' in client.text())
-    client.keys(b'a')
     path = ROOT / (selected['pane'] + '.input')
-    wait('request delivered once', lambda: path.exists() and path.read_bytes().endswith(b'\r'))
-    wait('dispatch notice', lambda: 'asked to organize all agents' in client.text())
-    client.snapshot('requested')
-    client.keys(b'a')
-    time.sleep(.15)
-    client.drain()
-    request = path.read_bytes()
-    assert request.startswith(b'Organize all tracked agents across every tmux session into project sessions.')
-    assert request.count(b'Organize all tracked agents across every tmux session into project sessions.') == 1
-    assert request.count(b'\r') == 1 and b'"organizer-fixture"' in request
-    assert b'tmux-agent-plane skill' in request and b'canonical' in request
-    assert b'including agents hidden by sidebar search or state filters' in request
-    assert b'Review every listed agent' in request
-    assert agent('unrelated-fixture')['session'] != selected['session']
-    assert (ROOT / (agent('unrelated-fixture')['pane'] + '.input')).exists() is False
-    assert len(input_calls()) == len(baseline_calls) + 3, input_calls()
-    assert infra('display-message', '-p', '-t', harness, '#{pane_id}') == sidebar
-    (ROOT / 'request.txt').write_bytes(request)
-    proof('a sends one global organization request to the coordinator, covering hidden agents in other sessions')
+    previous = b''
+    for number, (label, key) in enumerate((('space', b' '), ('enter', b'\r')), start=1):
+        client.keys(b'o')
+        wait('compact prompt for ' + label, lambda: 'organize all agents? y/n' in client.text())
+        client.keys(key)
+        wait('request delivered once by ' + label,
+             lambda: path.exists() and len(path.read_bytes()) > len(previous) and path.read_bytes().endswith(b'\r'))
+        wait('dispatch notice', lambda: 'asked to organize all agents' in client.text())
+        client.snapshot('requested-' + label)
+        request = path.read_bytes()[len(previous):]
+        assert request.startswith(b'Organize all tracked agents across every tmux session into project sessions.')
+        assert request.count(b'Organize all tracked agents across every tmux session into project sessions.') == 1
+        assert request.count(b'\r') == 1 and b'"organizer-fixture"' in request
+        assert b'tmux-agent-plane skill' in request and b'canonical' in request
+        assert b'including agents hidden by sidebar search or state filters' in request
+        assert b'Review every listed agent' in request
+        assert agent('unrelated-fixture')['session'] != selected['session']
+        assert (ROOT / (agent('unrelated-fixture')['pane'] + '.input')).exists() is False
+        assert len(input_calls()) == len(baseline_calls) + 3 * number, input_calls()
+        assert infra('display-message', '-p', '-t', harness, '#{pane_id}') == sidebar
+        previous += request
+        (ROOT / ('request-' + label + '.txt')).write_bytes(request)
+    proof('o then Space and o then Enter each submit exactly one global request; sidebar focus stays put')
     (ROOT / 'results.json').write_text(json.dumps(dict(passed=True, cases=RESULTS, model_calls=0), indent=2))
 finally:
     for client in list(CLIENTS):

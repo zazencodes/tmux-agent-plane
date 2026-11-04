@@ -17,7 +17,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, Ke
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use ratatui::{DefaultTerminal, Frame, Terminal};
 use std::collections::{BTreeMap, HashSet};
 use std::os::fd::AsRawFd;
@@ -199,7 +199,7 @@ struct OrganizeConfirmation {
 }
 
 fn organize_accepts(key: KeyEvent) -> bool {
-    key.modifiers.is_empty() && key.code == KeyCode::Char('a')
+    key.modifiers.is_empty() && matches!(key.code, KeyCode::Enter | KeyCode::Char(' ' | 'y'))
 }
 
 fn organizer_ready(agent: &Agent) -> Result<()> {
@@ -729,7 +729,7 @@ impl Sidebar {
         commands::kill_pane(&current.pane)
     }
 
-    /// Only a dispatches; every other closing key is consumed in this sidebar.
+    /// Enter, Space or y dispatches; every other closing key is consumed.
     fn organize_key(&mut self, key: KeyEvent, own: &str) -> bool {
         if let Some(confirmation) = self.organizing.take() {
             self.notice = None;
@@ -1145,14 +1145,16 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         sidebar.auto_name.draw(f);
         return;
     }
-    if let Some(confirmation) = &sidebar.organizing {
-        draw_organize(f, confirmation);
-        return;
-    }
     let confirmation = sidebar
         .killing
         .as_ref()
-        .map(|kill| kill_footer(kill, f.area().width as usize));
+        .map(|kill| kill_footer(kill, f.area().width as usize))
+        .or_else(|| {
+            sidebar
+                .organizing
+                .as_ref()
+                .map(|organize| organize_footer(organize, f.area().width as usize))
+        });
     let footer_height = confirmation.as_ref().map_or(2, |lines| lines.len() as u16);
     let [list_area, help_area] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(footer_height)]).areas(f.area());
@@ -1237,36 +1239,17 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     f.render_widget(Paragraph::new(footer), help_area);
 }
 
-fn draw_organize(f: &mut Frame, confirmation: &OrganizeConfirmation) {
-    let [body, footer] =
-        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
-    let block = panel(Line::from(" organize all agents "));
-    let inner = block.inner(body).inner(ratatui::layout::Margin::new(1, 0));
-    f.render_widget(block, body);
-    let agent = &confirmation.agent;
-    let lines = vec![
-        Line::styled("Organize all agents?", Style::default().fg(TEXT).bold()),
-        Line::default(),
-        Line::styled(format!("Coordinator: {}", agent.name), TEXT),
+fn organize_footer(confirmation: &OrganizeConfirmation, width: usize) -> Vec<Line<'static>> {
+    vec![
         Line::styled(
-            format!("{} · {}", agent.kind.as_str(), agent.state.as_str()),
+            truncate(" organize all agents? y/n", width),
+            Style::default().fg(TEXT).bold(),
+        ),
+        Line::styled(
+            truncate(&format!(" via {}", confirmation.agent.name), width),
             SUBTEXT,
         ),
-        Line::default(),
-        Line::from("Across every tmux session, including agents hidden by search or filters."),
-        Line::default(),
-        Line::from("Group related work into project sessions."),
-        Line::default(),
-        Line::styled(
-            "Uses the coordinator's current model. Agent processes keep running.",
-            SUBTEXT,
-        ),
-    ];
-    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
-    f.render_widget(
-        Paragraph::new(hints(&[("a", "organize all"), ("esc", "cancel")])),
-        footer,
-    );
+    ]
 }
 
 /// Two lines keep both name and state readable in a narrow pane. Remote session
@@ -1456,31 +1439,39 @@ mod tests {
     }
 
     #[test]
-    fn organize_requires_ready_agent_and_deliberate_a() {
+    fn organize_requires_ready_agent_and_yes() {
         for state in [State::Idle, State::Done, State::Working, State::Blocked] {
             assert_eq!(
                 organizer_ready(&agent("%1", state)).is_ok(),
                 matches!(state, State::Idle | State::Done)
             );
         }
-        assert!(organize_accepts(KeyEvent::from(KeyCode::Char('a'))));
-        assert!(!organize_accepts(KeyEvent::from(KeyCode::Char('A'))));
-        for code in [KeyCode::Char('a'), KeyCode::Char('A')] {
-            assert!(!organize_accepts(KeyEvent::new(code, KeyModifiers::SHIFT)));
-            assert!(!organize_accepts(KeyEvent::new(
-                code,
-                KeyModifiers::CONTROL
-            )));
-            assert!(!organize_accepts(KeyEvent::new(code, KeyModifiers::ALT)));
+        for code in [KeyCode::Enter, KeyCode::Char(' '), KeyCode::Char('y')] {
+            assert!(organize_accepts(KeyEvent::from(code)));
+            for modifier in [
+                KeyModifiers::SHIFT,
+                KeyModifiers::CONTROL,
+                KeyModifiers::ALT,
+            ] {
+                assert!(!organize_accepts(KeyEvent::new(code, modifier)));
+            }
         }
-        assert!(!organize_accepts(KeyEvent::from(KeyCode::Enter)));
+        for code in [
+            KeyCode::Esc,
+            KeyCode::Char('n'),
+            KeyCode::Char('a'),
+            KeyCode::Char('A'),
+        ] {
+            assert!(!organize_accepts(KeyEvent::from(code)));
+        }
     }
 
     #[test]
     fn organize_cancel_consumes_keys_without_other_sidebar_actions() {
         for code in [
-            KeyCode::Enter,
             KeyCode::Esc,
+            KeyCode::Char('n'),
+            KeyCode::Char('a'),
             KeyCode::Char('q'),
             KeyCode::Char('x'),
             KeyCode::Char('c'),
@@ -1503,24 +1494,31 @@ mod tests {
     }
 
     #[test]
-    fn organize_confirmation_fits_sidebar_and_keeps_action_visible_when_short() {
-        for height in [1, 2, 4, 8, 28] {
-            let mut terminal = Terminal::new(TestBackend::new(38, height)).unwrap();
-            let mut sidebar = Sidebar {
-                organizing: Some(organize_confirmation()),
-                ..Sidebar::default()
-            };
-            terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
-            let row: String = (0..38)
-                .map(|x| terminal.backend().buffer()[(x, height - 1)].symbol())
-                .collect();
-            assert!(
-                row.contains("a organize all") && row.contains("esc cancel"),
-                "{row}"
-            );
-            assert!(!sidebar.help_key(KeyEvent::from(KeyCode::Char('?'))));
-            assert!(!sidebar.help.open);
+    fn organize_confirmation_stays_in_the_footer() {
+        let confirmation = organize_confirmation();
+        for width in [20, 38] {
+            let lines = organize_footer(&confirmation, width);
+            assert_eq!(lines.len(), 2);
+            assert!(lines.iter().all(|line| line.width() <= width));
         }
+        let mut terminal = Terminal::new(TestBackend::new(38, 28)).unwrap();
+        let mut sidebar = Sidebar {
+            organizing: Some(confirmation),
+            ..Sidebar::default()
+        };
+        terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
+        let rows: Vec<String> = (0..28)
+            .map(|y| {
+                (0..38)
+                    .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                    .collect()
+            })
+            .collect();
+        assert!(rows[0].contains("agents"));
+        assert!(rows[26].contains("organize all agents? y/n"));
+        assert!(rows[27].contains("via agent-%1"));
+        assert!(!sidebar.help_key(KeyEvent::from(KeyCode::Char('?'))));
+        assert!(!sidebar.help.open);
     }
     use crate::index::EventState;
 

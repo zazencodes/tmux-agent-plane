@@ -30,7 +30,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("enter y", "Kill: confirm (esc cancels)"),
     ("1-7", "Configure: choose AI command"),
     ("d", "Configure: turn AI names off"),
-    ("a", "Organize: confirm all agents"),
+    ("space y", "Organize: yes (or Enter)"),
 ];
 
 #[derive(Default)]
