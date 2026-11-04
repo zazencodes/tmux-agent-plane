@@ -7,15 +7,15 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
-- Organize project sessions from the sidebar: select a ready agent, press `o`, then `a` to ask it to group the current work using the existing skill and CLI; opening or canceling sends nothing
+- Organize project sessions from the sidebar: select a ready coordinator, press `o`, then `a` to ask it to group all agents across every session using the existing skill and CLI; opening or canceling sends nothing
 - Focus the previous or next agent directly with Alt+↑/↓, across sessions and without entering the sidebar; configure the keys with `@agent-plane-previous-key` and `@agent-plane-next-key`
 - Treat tmux sessions as projects: inspect/create named sessions, spawn directly into an explicit project, and move running agents between projects without restarting them or sending input; the agent skill now includes a project organization workflow
 - A Neovim Telescope picker for tracked agent sessions: fuzzy-search names, task titles and blocked details, browse with arrows, and press Enter to focus the selected pane
 
 ### Changed
 
+- Clarify sidebar organization covers all tracked agents across every tmux session, including hidden sidebar rows
 - Use lowercase `o` / `a` for sidebar organization
-
 - Open the tmux agent picker with lowercase `prefix + f` (replacing tmux’s window finder); type immediately to fuzzy-search names and descriptions, browse ranked matches with arrows, Enter to focus the exact pane in the originating client, or Esc/Ctrl-C to cancel
 - Let the agent picker inherit the terminal background, with selection using the terminal palette
 - Fuzzy search sidebar rows by name and description together, allowing gaps and abbreviations while ignoring case; task, blocked detail, location and directory stay searchable, and matching rows keep their order

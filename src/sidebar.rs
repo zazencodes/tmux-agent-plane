@@ -205,7 +205,7 @@ fn organize_accepts(key: KeyEvent) -> bool {
 fn organizer_ready(agent: &Agent) -> Result<()> {
     if !matches!(agent.state, State::Idle | State::Done) {
         bail!(
-            "select an idle or done organizer; {} is {}",
+            "select an idle or done coordinator; {} is {}",
             agent.name,
             agent.state.as_str()
         );
@@ -215,7 +215,7 @@ fn organizer_ready(agent: &Agent) -> Result<()> {
 
 fn organize_task(agent: &Agent) -> String {
     format!(
-        "Organize the current tmux work into project sessions. The user selected you as the organizer; your explicit agent name is {:?}. Load the tmux-agent-plane skill and follow its Organizing projects workflow. A tmux session IS a project. Inspect `tmux-agent-plane sessions list --json` and `tmux-agent-plane list --json`; use current tasks, names, working directories, parent links and established sessions to understand which work belongs together. Create appropriate named sessions and move existing agents through the canonical CLI commands: `tmux-agent-plane sessions create NAME --cwd DIR` and `tmux-agent-plane move AGENT --session NAME`. This request authorizes you to carry out the organization and verify it, then report the resulting project sessions and any limits. Preserve agent processes, names, pane identities, parents and completion history. Keep unrelated shells and existing work intact. Never restart or kill agents, submit prompts/keys to other agents, use raw tmux on agent panes, change files/settings/trust or access usage/reset controls. Respect linked/grouped-session and attached-session move refusals; report those limits without bypassing them. This task is tmux organization; no source changes are requested.",
+        "Organize all tracked agents across every tmux session into project sessions. The user selected you to coordinate this global organization; your explicit agent name is {:?}. Load the tmux-agent-plane skill and follow its Organizing projects workflow. A tmux session IS a project. Inspect the complete inventories from `tmux-agent-plane sessions list --json` and `tmux-agent-plane list --json`, including agents hidden by sidebar search or state filters. Review every listed agent; retain agents already in the correct project and move any misplaced agents. Use current tasks, names, working directories, parent links and established sessions to understand which work belongs together. Create appropriate named sessions and move existing agents through the canonical CLI commands: `tmux-agent-plane sessions create NAME --cwd DIR` and `tmux-agent-plane move AGENT --session NAME`. This request authorizes you to carry out the organization and verify the full inventory, then report the resulting project sessions and any limits. Preserve agent processes, names, pane identities, parents and completion history. Keep unrelated shells and existing work intact. Never restart or kill agents, submit prompts/keys to other agents, use raw tmux on agent panes, change files/settings/trust or access usage/reset controls. Respect linked/grouped-session and attached-session move refusals; report those limits without bypassing them. This task is tmux organization; no source changes are requested.",
         agent.name
     )
 }
@@ -735,9 +735,7 @@ impl Sidebar {
             self.notice = None;
             if organize_accepts(key) {
                 match self.confirm_organize(&confirmation, own) {
-                    Ok(()) => {
-                        self.notice = Some(format!("asked {} to organize", confirmation.agent.name))
-                    }
+                    Ok(()) => self.notice = Some("asked to organize all agents".into()),
                     Err(error) => self.notice = Some(error.to_string()),
                 }
             }
@@ -755,13 +753,13 @@ impl Sidebar {
         let result: Result<OrganizeConfirmation> = (|| {
             let selected = self
                 .selected()
-                .context("select a ready agent to organize projects")?;
+                .context("select a ready coordinator for all agents")?;
             let index = index::read()?;
             let current = index
                 .agents
                 .iter()
                 .find(|a| a.pane == selected.pane)
-                .context("organizer exited; select it again")?;
+                .context("coordinator exited; select it again")?;
             // Opening only reviews the target: capture its fresh state and identity,
             // even if the rendered row is one sidebar refresh behind the index.
             organizer_ready(current)?;
@@ -790,13 +788,13 @@ impl Sidebar {
             .agents
             .iter()
             .find(|a| a.pane == confirmation.agent.pane)
-            .context("organizer exited; select it again")?;
+            .context("coordinator exited; select it again")?;
         if !same_action_target(&confirmation.agent, current) {
-            bail!("organizer changed; press o again");
+            bail!("coordinator changed; press o again");
         }
         organizer_ready(current)?;
         if action_identity(current)? != confirmation.codex_pid {
-            bail!("organizer process changed; press o again");
+            bail!("coordinator process changed; press o again");
         }
         commands::send(&current.pane, &organize_task(current), false, false, None)
     }
@@ -1230,7 +1228,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let footer = confirmation.map_or_else(
         || {
             Text::from(vec![
-                hints(&[("c", "configure"), ("o", "organize")]),
+                hints(&[("c", "configure"), ("o", "organize all")]),
                 footer(sidebar, inner + 2, index::now_ms()),
             ])
         },
@@ -1242,29 +1240,31 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
 fn draw_organize(f: &mut Frame, confirmation: &OrganizeConfirmation) {
     let [body, footer] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
-    let block = panel(Line::from(" organize projects "));
+    let block = panel(Line::from(" organize all agents "));
     let inner = block.inner(body).inner(ratatui::layout::Margin::new(1, 0));
     f.render_widget(block, body);
     let agent = &confirmation.agent;
     let lines = vec![
-        Line::styled("Organize all projects?", Style::default().fg(TEXT).bold()),
+        Line::styled("Organize all agents?", Style::default().fg(TEXT).bold()),
         Line::default(),
-        Line::styled(format!("Organizer: {}", agent.name), TEXT),
+        Line::styled(format!("Coordinator: {}", agent.name), TEXT),
         Line::styled(
             format!("{} · {}", agent.kind.as_str(), agent.state.as_str()),
             SUBTEXT,
         ),
         Line::default(),
-        Line::from("Ask this agent to create project sessions and move related work into them."),
+        Line::from("Across every tmux session, including agents hidden by search or filters."),
+        Line::default(),
+        Line::from("Group related work into project sessions."),
         Line::default(),
         Line::styled(
-            "Agent processes keep running. Uses this agent's current model.",
+            "Uses the coordinator's current model. Agent processes keep running.",
             SUBTEXT,
         ),
     ];
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
     f.render_widget(
-        Paragraph::new(hints(&[("a", "organize"), ("esc", "cancel")])),
+        Paragraph::new(hints(&[("a", "organize all"), ("esc", "cancel")])),
         footer,
     );
 }
@@ -1515,7 +1515,7 @@ mod tests {
                 .map(|x| terminal.backend().buffer()[(x, height - 1)].symbol())
                 .collect();
             assert!(
-                row.contains("a organize") && row.contains("esc cancel"),
+                row.contains("a organize all") && row.contains("esc cancel"),
                 "{row}"
             );
             assert!(!sidebar.help_key(KeyEvent::from(KeyCode::Char('?'))));
