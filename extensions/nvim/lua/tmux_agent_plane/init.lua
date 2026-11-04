@@ -1,0 +1,92 @@
+local M = {}
+
+local function error_message(message)
+  vim.notify(message, vim.log.levels.ERROR, { title = "tmux-agent-plane" })
+end
+
+local function run(args)
+  local command = vim.list_extend({ "tmux-agent-plane" }, args)
+  local ok, result = pcall(function()
+    return vim.system(command, { text = true }):wait()
+  end)
+  if not ok then
+    error_message(tostring(result))
+    return
+  end
+  if result.code ~= 0 then
+    error_message(table.concat(command, " ") .. ": " .. vim.trim(result.stderr .. result.stdout))
+    return
+  end
+  return result.stdout
+end
+
+local function agents()
+  local output = run({ "list", "--json" })
+  if not output then
+    return
+  end
+  local ok, rows = pcall(vim.json.decode, output)
+  if not ok or type(rows) ~= "table" or not vim.islist(rows) or not output:match("^%s*%[") then
+    error_message("tmux-agent-plane list --json: expected an array of agents")
+    return
+  end
+  for _, row in ipairs(rows) do
+    for _, field in ipairs({ "name", "title", "pane", "state", "location" }) do
+      if type(row) ~= "table" or type(row[field]) ~= "string" then
+        error_message("tmux-agent-plane list --json: invalid agent field " .. field)
+        return
+      end
+    end
+    if not row.pane:match("^%%%d+$") then
+      error_message("tmux-agent-plane list --json: invalid agent pane " .. row.pane)
+      return
+    end
+  end
+  return rows
+end
+
+function M.agents(opts)
+  opts = opts or {}
+  local rows = agents()
+  if not rows then
+    return
+  end
+
+  local actions = require("telescope.actions")
+  local action_state = require("telescope.actions.state")
+  local picker = require("telescope.pickers").new(opts, {
+    prompt_title = "Agent sessions",
+    previewer = false,
+    finder = require("telescope.finders").new_table({
+      results = rows,
+      entry_maker = function(agent)
+        local detail = type(agent.detail) == "string" and agent.detail or ""
+        local description = agent.state == "blocked" and type(agent.detail) == "string" and detail or agent.title
+        return {
+          value = agent,
+          ordinal = agent.name .. " " .. agent.title .. " " .. detail,
+          display = agent.name .. "  " .. description .. "  [" .. agent.state .. " · " .. agent.location .. "]",
+        }
+      end,
+    }),
+    sorter = require("telescope.sorters").get_fzy_sorter(opts),
+    attach_mappings = function(prompt_bufnr, map)
+      for _, mode in ipairs({ "i", "n" }) do
+        map(mode, "<Down>", actions.move_selection_next)
+        map(mode, "<Up>", actions.move_selection_previous)
+      end
+      actions.select_default:replace(function()
+        local entry = action_state.get_selected_entry()
+        actions.close(prompt_bufnr)
+        if entry then
+          run({ "focus", entry.value.pane })
+        end
+      end)
+      return true
+    end,
+  })
+  picker:find()
+  return picker
+end
+
+return M

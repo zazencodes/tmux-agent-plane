@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Added
+
+- A Neovim Telescope picker for tracked agent sessions: fuzzy-search names, task titles and blocked details, browse with arrows, and press Enter to focus the selected pane
+
 ### Changed
 
 - Fuzzy search sidebar rows by name and description together, allowing gaps and abbreviations while ignoring case; task, blocked detail, location and directory stay searchable, and matching rows keep their order

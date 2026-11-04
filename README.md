@@ -159,6 +159,29 @@ The view/filter/query controls stay visible above the list. Filters and search c
 
 `x` closes the agent's pane using the same operation as `tmux-agent-plane kill`. It does not issue `kill-session`. The confirmation takes priority over notices and event footers, with separate name/state lines in narrow sidebars. It is pinned to the target's native identity and state; an exited, changed or renamed agent requires a new confirmation. After a successful kill, selection moves to the next visible agent (or the previous one at the end). Killing a final pane may naturally remove its window; if that would also end a remote session, the prompt names the session. Ending the originating client's attached session is refused.
 
+### Neovim Telescope picker
+
+With Neovim 0.10+ and [Telescope](https://github.com/nvim-telescope/telescope.nvim), add this local plugin to your lazy.nvim spec (adjust the checkout path):
+
+```lua
+{
+  dir = vim.fn.expand("~/.tmux/plugins/tmux-agent-plane/extensions/nvim"),
+  name = "tmux-agent-plane.nvim",
+  dependencies = { "nvim-telescope/telescope.nvim" },
+}
+```
+
+After your Telescope setup, load the extension and bind Space f a:
+
+```lua
+require("telescope").load_extension("tmux_agent_plane")
+vim.keymap.set("n", "<leader>fa", function()
+  require("telescope").extensions.tmux_agent_plane.agents()
+end, { desc = "Find agent sessions" })
+```
+
+Run Neovim inside tmux with `tmux-agent-plane` on `PATH` and its daemon running. `:Telescope tmux_agent_plane agents` opens the same picker. It reads tracked agents from `tmux-agent-plane list --json`, with their existing names and task descriptions (blocked detail when present). Type a case-insensitive fuzzy search across name, title and blocked detail, including queries spanning those fields; use Up/Down in insert or normal mode to browse, then Enter to run `tmux-agent-plane focus <pane-id>` for that exact selection. Browsing does not change agent focus. An empty index opens an empty picker; command failures, including a stale index, appear as error notifications.
+
 ### Notifications
 
 When an agent finishes or blocks off screen, every open sidebar shows the latest transition on its bottom line for five seconds: `✓ grok-support done` in green or `◆ grok-support blocked` in red. Sidebars in other windows and sessions receive the same event. Rename errors and active rename controls take priority; normal key hints return when the notice expires. A notice never opens a closed sidebar, changes focus or intercepts pane input. Expired notices are discarded, and restarting the daemon clears the previous notice.
