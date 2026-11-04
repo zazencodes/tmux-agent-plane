@@ -25,7 +25,7 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 - Prefer reliable native live signals without configuration (session/state files, titles, process tree or local APIs). An official mode such as Grok leader may be opt-in. When native signals are insufficient, use the official hook/plugin/extension API to publish per-session state. Ship publishers/configuration examples under `extensions/<kind>/`; install publishers by symlink plus required host configuration, documented in README More agents. Missing optional publisher files or leader socket leaves that kind untracked without errors or extra setup. Use one canonical method per kind; no fallback paths or screen scraping.
 - Fail loudly: withdraw faulty kinds/observations, keep healthy tracking, and persist errors/recovery in daemon.log with degraded status. Process/pane snapshot, index and log failures remain fatal; stale index reads fail.
 - One canonical way per job; no fallbacks.
-- After every fix or change lands, without waiting to be asked, run `cargo install --path . --force` and `tmux-agent-plane daemon restart` so the user can test it on their system. Open sidebars keep the code they started with, so tell the user to close and reopen them with the sidebar key.
+- After every fix or change lands, without waiting to be asked, run `cargo install --path . --force` and `tmux-agent-plane daemon restart` so the user can test it on their system. There are no exceptions: do this for plugin-only or docs-adjacent changes, and when other agents have uncommitted work in the checkout. Open sidebars keep the code they started with, so tell the user to close and reopen them with the sidebar key.
 
 ## Next steps
 
