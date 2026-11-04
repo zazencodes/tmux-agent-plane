@@ -240,7 +240,9 @@ def assert_cycle_keys(client):
     def here():
         return client.context()[1]
 
-    modifier = 3
+
+    default_keys = {'next': b'\x1bj', 'previous': b'\x1bk'}
+    keys = default_keys
 
     def hop(direction):
         ordered = [a['pane'] for a in order()]
@@ -250,13 +252,13 @@ def assert_cycle_keys(client):
             expected = ordered[(ordered.index(origin) + delta) % len(ordered)]
         else:
             expected = ordered[0 if direction == 'next' else -1]
-        client.key(f'\x1b[1;{modifier}{"B" if direction == "next" else "A"}'.encode())
+        client.key(keys[direction])
         wait('direct key ' + direction, lambda: here() == expected)
         return expected
 
     bindings = tmux('list-keys', '-T', 'root')
-    assert 'M-Up' in bindings and 'cycle previous --client' in bindings
-    assert 'M-Down' in bindings and 'cycle next --client' in bindings
+    assert 'M-k' in bindings and 'cycle previous --client' in bindings
+    assert 'M-j' in bindings and 'cycle next --client' in bindings
     before = {name: input_bytes(name) for name in FIXTURES}
     visited = {hop('next') for _ in range(4)}
     assert visited == {a['pane'] for a in order()}
@@ -264,7 +266,7 @@ def assert_cycle_keys(client):
     ordered = [a['pane'] for a in order()]
     origin = here()
     expected = ordered[(ordered.index(origin) + 11) % len(ordered)]
-    client.key(b'\x1b[1;3B' * 11)
+    client.key(b"\x1bj" * 11)
     wait('rapid keys advance from live pane', lambda: here() == expected)
     settle(0.7)
     assert here() == expected
@@ -318,8 +320,8 @@ def assert_cycle_keys(client):
     tmux('set-option', '-g', '@agent-plane-next-key', 'C-M-Down')
     subprocess.run(['bash', str(SOURCE.parent / 'tmux-agent-plane.tmux')], env=ENV, check=True)
     bindings = tmux('list-keys', '-T', 'root')
-    assert not any(' M-Up ' in row or ' M-Down ' in row for row in bindings.splitlines())
-    modifier = 7
+    assert not any(' M-k ' in row or ' M-j ' in row for row in bindings.splitlines())
+    keys = {'next': b'\x1b[1;7B', 'previous': b'\x1b[1;7A'}
     hop('next')
     hop('previous')
     tmux('bind-key', '-n', 'C-M-Up', 'display-message', 'user-owned-binding')
@@ -329,10 +331,10 @@ def assert_cycle_keys(client):
     bindings = tmux('list-keys', '-T', 'root')
     assert any('C-M-Up' in row and 'user-owned-binding' in row for row in bindings.splitlines())
     assert not any('C-M-Down' in row for row in bindings.splitlines())
-    modifier = 3
+    keys = default_keys
     hop('next')
     client.snapshot('cycle-keys')
-    return {'prefixless_modifier_arrows': True, 'plain_arrows_preserved': True,
+    return {'prefixless_option_keys': True, 'plain_arrows_preserved': True,
             'cross_session_wrap': True, 'rapid_keys': 11, 'no_modifier_input_leak': True,
             'explicit_client': True, 'shared_target_refused': True, 'departed_row': True,
             'works_with_sidebar_open': True, 'custom_keys_reload': True,

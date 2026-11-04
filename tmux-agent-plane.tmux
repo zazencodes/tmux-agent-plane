@@ -18,8 +18,8 @@ tmux bind-key "${sidebar_key:-S}" run-shell "tmux-agent-plane toggle-sidebar '#{
 # run-shell is synchronous so repeated keys resolve the live client in order.
 previous_key="$(tmux show-option -gqv @agent-plane-previous-key)"
 next_key="$(tmux show-option -gqv @agent-plane-next-key)"
-previous_key="${previous_key:-M-Up}"
-next_key="${next_key:-M-Down}"
+previous_key="${previous_key:-M-k}"
+next_key="${next_key:-M-j}"
 if [ "$previous_key" = "$next_key" ]; then
   tmux display-message "tmux-agent-plane: previous and next keys must differ"
   exit 1

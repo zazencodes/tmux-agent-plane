@@ -30,7 +30,7 @@ Claude Code, Codex and Antigravity use native signals. Pi and OpenCode use publi
 - **Every agent, every session.** One daemon watches every pane in every tmux session and keeps a single index of the agents in them: name, state, task, location and working directory.
 - **Know what needs you.** The status bar counts agents by state. An agent that finishes or blocks while you are looking elsewhere shows a five-second notice in every open sidebar footer and sends a desktop notification, and stays `done` until you look at it.
 - **A sidebar of agents.** Your sidebar key (default `prefix + S`) opens a live list of every agent down the left of every window, in every session, and puts you in it: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar is there too. Close it once and it closes everywhere.
-- **Flip through your agents.** Alt + ↑ / ↓ (Option + ↑ / ↓ on macOS) goes straight to the previous or next agent from anywhere, across sessions, with no prefix. Tap it repeatedly to scroll through them. See [Direct agent navigation](#direct-agent-navigation).
+- **Flip through your agents.** Alt + K / J (Option + K / J on macOS) goes straight to the previous or next agent from anywhere, across sessions, with no prefix. Tap it repeatedly to scroll through them. See [Direct agent navigation](#direct-agent-navigation).
 - **Search and peek before you jump.** `prefix + f` opens a fuzzy agent picker with a large live preview. Type to search names and descriptions across every session, browse with arrows or Ctrl-J/Ctrl-K, and press Enter to focus.
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
 - **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`. Optional AI naming can name the remaining default-named agents; press `c` in the sidebar to set it up.
@@ -130,13 +130,13 @@ Run your agents as usual. Then ask any of them things like:
 
 ### Direct agent navigation
 
-Press **Alt + ↑ / ↓** (Option + ↑ / ↓ on macOS) to focus the previous or next agent directly, without entering the sidebar or pressing the tmux prefix. The keys work with the sidebar open or closed, follow its global order across sessions, and wrap at either end. Sidebar search and state filters do not limit this navigation. From a shell or sidebar pane, ↓ starts at the first agent and ↑ at the last. Ordinary arrow keys keep going to the active application.
+Press **Alt + K / J** (Option + K / J on macOS) to focus the previous or next agent directly, without entering the sidebar or pressing the tmux prefix. The keys work with the sidebar open or closed, follow its global order across sessions, and wrap at either end. Sidebar search and state filters do not limit this navigation. From a shell or sidebar pane, J starts at the first agent and K at the last.
 
 The binding targets the exact tmux client that received the key. It refuses a destination session or linked window another client is using. To choose other direct bindings, set these before the plugin loads, then reload the plugin:
 
 ```tmux
-set -g @agent-plane-previous-key C-M-Up
-set -g @agent-plane-next-key C-M-Down
+set -g @agent-plane-previous-key C-M-k
+set -g @agent-plane-next-key C-M-j
 ```
 
 These are tmux key names (`C` is Ctrl, `M` is Alt). The defaults leave tmux's prefix-then-Alt-arrow bindings available for resizing. Your window manager and terminal must pass the chosen keys through to tmux.
