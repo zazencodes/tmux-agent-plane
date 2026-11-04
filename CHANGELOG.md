@@ -11,6 +11,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Restyle the configure screen to match the sidebar: rounded panel, section headings, an on/off badge, a tick on the active command and key hints in the footer
 - Open configuration with `c`, always shown as `c configure` above the sidebar footer; the `a` key and the `AI names` hint are gone
 
 ### Removed

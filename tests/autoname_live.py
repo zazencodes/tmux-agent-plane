@@ -309,7 +309,7 @@ try:
     wait('configure closes', lambda: 'v off' in client.text())
     # The supported agy preset resolves to our private fake binary, never the real CLI.
     client.key(b'c5')
-    wait('disclosure before enable', lambda: 'enter enable' in client.text() and 'AI provider may receive that data' in client.text() and 'Model: gemini-3.8-flash' in client.text() and 'Thinking: low' in client.text())
+    wait('disclosure before enable', lambda: '⏎ enable' in client.text() and 'What is sent' in client.text() and 'Model: gemini-3.8-flash' in client.text() and 'Thinking: low' in client.text())
     client.snapshot('agy-consent-38-columns')
     assert not calls()
     client.key(b'\r')
@@ -329,10 +329,10 @@ try:
     RESULTS['configure_always_available'] = True
     # Exercise custom configuration in the actual sidebar as well.
     client.key(b'c7')
-    wait('custom editor', lambda: 'Custom noninteractive command' in client.text())
+    wait('custom editor', lambda: 'Custom command' in client.text())
     command = [str(NAMER), '{prompt}']
     client.key(json.dumps(command).encode() + b'\r')
-    wait('custom review', lambda: 'enter enable' in client.text() and str(NAMER)[:12] in client.text())
+    wait('custom review', lambda: '⏎ enable' in client.text() and str(NAMER)[:12] in client.text())
     client.key(b'\r')
     wait('custom saved', lambda: json.loads(CONFIG.read_text())['auto_name']['command'] == command)
     RESULTS['custom_setup_by_keypress'] = True
@@ -403,9 +403,9 @@ try:
     assert len(calls()) == 5
     # Setup reports missing commands without enabling them.
     client.key(b'c7')
-    wait('custom editor again', lambda: 'Custom noninteractive command' in client.text())
+    wait('custom editor again', lambda: 'Custom command' in client.text())
     client.key(json.dumps([str(BIN / 'missing-ai'), '{prompt}']).encode() + b'\r')
-    wait('missing command shown in setup', lambda: 'not installed or executable' in client.text())
+    wait('missing command shown in setup', lambda: 'executable' in client.text())
     client.snapshot('missing-command')
     client.key(b'\x1b')
     settle(0.2)
