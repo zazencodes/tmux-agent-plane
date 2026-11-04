@@ -184,15 +184,14 @@ pub fn preset(choice: char) -> Option<Vec<String>> {
             "gemini-3.8-flash",
             "--effort",
             "low",
-            "--print",
             "--output-format",
             "text",
-            "--disable-slash-commands",
             "--mode",
             "plan",
             "--sandbox",
             "--print-timeout",
             "55s",
+            "--print",
             "{prompt}",
         ],
         '6' => &[
@@ -245,6 +244,13 @@ pub fn model_summary(command: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn agy_takes_the_prompt_as_the_value_of_print() {
+        let command = preset('5').unwrap();
+        let print = command.iter().position(|arg| arg == "--print").unwrap();
+        assert_eq!(command[print + 1], "{prompt}");
+    }
+
     #[test]
     fn presets_pin_the_exact_model_and_lowest_verified_thinking_argv() {
         let expected: [&[&str]; 6] = [
@@ -312,15 +318,14 @@ mod tests {
                 "gemini-3.8-flash",
                 "--effort",
                 "low",
-                "--print",
                 "--output-format",
                 "text",
-                "--disable-slash-commands",
                 "--mode",
                 "plan",
                 "--sandbox",
                 "--print-timeout",
                 "55s",
+                "--print",
                 "{prompt}",
             ],
             &[

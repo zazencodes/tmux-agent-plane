@@ -16,6 +16,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Fix AI naming with Antigravity: the preset passed its arguments in an order `agy` rejects, so no agent was ever named. Re-select it with `c`, `5`, `Enter`; changing the command retries agents that failed
 - Make daemon notices readable: they open in their own window a little below the top of the terminal, leaving the status bar visible, with a clear heading, the source and the log path on separate lines, and they stay until you press a key or for 10 seconds
 
 ### Removed

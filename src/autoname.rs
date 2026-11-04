@@ -86,6 +86,13 @@ struct Ledger {
     command: Option<Applied>,
 }
 
+impl Ledger {
+    fn forget_failures(&mut self) {
+        self.attempts
+            .retain(|_, outcome| outcome == "finished" || outcome == "started");
+    }
+}
+
 /// The settings the ledger last applied. Its own type, without `deny_unknown_fields`: a ledger
 /// written by an older version may hold config keys that have since been removed.
 #[derive(Deserialize, Serialize, PartialEq)]
@@ -196,6 +203,10 @@ impl Runtime {
         if self.ledger.command.as_ref() != Some(&applied) {
             if let Some(job) = &self.job {
                 job.cancel.store(true, Ordering::Relaxed);
+            }
+            // A different command gets its own chance at agents the old one failed to name.
+            if self.ledger.command.as_ref().map(|old| &old.command) != Some(&applied.command) {
+                self.ledger.forget_failures();
             }
             self.ledger.command = Some(applied);
             self.ledger.fault = None;
@@ -505,6 +516,17 @@ mod tests {
             visible: false,
         }
     }
+    #[test]
+    fn a_new_command_retries_failures_but_never_finished_or_started_attempts() {
+        let mut ledger = Ledger::default();
+        for (key, outcome) in [("a", "finished"), ("b", "started"), ("c", "exit status: 2")] {
+            ledger.attempts.insert(key.into(), outcome.into());
+        }
+        ledger.forget_failures();
+        assert_eq!(ledger.attempts.len(), 2);
+        assert!(!ledger.attempts.contains_key("c"));
+    }
+
     #[test]
     fn ledger_from_an_older_version_still_loads() {
         let ledger: Ledger = serde_json::from_str(

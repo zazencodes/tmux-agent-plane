@@ -196,9 +196,8 @@ The one configuration file is `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plan
     "enabled": true,
     "command": [
       "agy", "--model", "gemini-3.8-flash", "--effort", "low",
-      "--print", "--output-format", "text",
-      "--disable-slash-commands", "--mode", "plan", "--sandbox",
-      "--print-timeout", "55s", "{prompt}"
+      "--output-format", "text", "--mode", "plan", "--sandbox",
+      "--print-timeout", "55s", "--print", "{prompt}"
     ],
     "output": "text"
   }
@@ -213,7 +212,7 @@ A custom `command` is a JSON array containing an executable on the daemon's `PAT
 
 Naming waits for a title of at least eight bytes containing two words, excluding generic startup titles. It applies to every supported agent kind. Only agents with their generated `<kind>-<pane number>` name and no explicit pane name qualify. A name assigned with `--name`, `r` or `rename` stays yours, even if it resembles a generated name. Default names assigned by older versions already have an explicit pane option and are preserved; newly spawned agents leave that option unset. A live tmux condition checks the pane process, unassigned name and uniqueness across all sessions immediately before applying, so a racing manual rename wins.
 
-The daemon runs one naming process at a time, outside tmux with closed stdin and a private working directory under its state directory. Each eligible pane/process lifetime gets **one attempt**, recorded before launch in `${XDG_STATE_HOME:-$HOME/.local/state}/tmux-agent-plane/auto-name.json`, including across daemon restarts. There is a 60-second timeout and a 16 KiB limit on each output stream. A failure pauses new naming attempts for 60 seconds, never retries the failed agent, and persists a deduplicated `auto-name:worker` diagnostic in `daemon.log` with degraded status. Tracking continues. An explicit configuration change acknowledges the active naming fault and clears the pause; it does not repeat reserved attempts.
+The daemon runs one naming process at a time, outside tmux with closed stdin and a private working directory under its state directory. Each eligible pane/process lifetime gets **one attempt**, recorded before launch in `${XDG_STATE_HOME:-$HOME/. Changing the command gives agents it failed to name a fresh attempt.local/state}/tmux-agent-plane/auto-name.json`, including across daemon restarts. There is a 60-second timeout and a 16 KiB limit on each output stream. A failure pauses new naming attempts for 60 seconds, never retries the failed agent, and persists a deduplicated `auto-name:worker` diagnostic in `daemon.log` with degraded status. Tracking continues. An explicit configuration change acknowledges the active naming fault and clears the pause; it does not repeat reserved attempts.
 
 AI output must be two or three lowercase words joined by hyphens, each starting with a letter, at most 20 ASCII characters and unique. A single terminal newline is allowed; quotes, markdown, whitespace, commentary and duplicate names fail. Names are never repaired. Built-in commands use their noninteractive modes and restrict tools where the CLI provides that control; they run away from project folders and never alter your trust settings. No extra tmux commands run on idle naming ticks or while naming is disabled.
 
