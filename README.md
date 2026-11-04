@@ -183,7 +183,7 @@ All kinds except agy can be spawned without a task. `spawn agy` requires a task 
 
 AI naming is **off by default**. With it off, no naming command runs and no task data is sent. The sidebar shows a muted `a AI names · optional setup` line above its usual footer. Press `a`, then `h` to hide that hint permanently; `a` still opens setup later. Reopen other existing sidebars to refresh their cached hint.
 
-Press `a` and choose `1` Claude Code, `2` Codex, `3` Pi, `4` OpenCode, `5` Antigravity (`agy`), `6` Grok Build, or `7` for a custom command. Setup checks the executable is installed without running it, shows the command and data disclosure, and requires `Enter` to enable. `Esc` goes back or closes; `a`, then `d` disables naming. For Antigravity, authenticate `agy` normally first, then use **`a`, `5`, `Enter`**. Setup itself never calls a model or changes folder trust.
+Press `a` and choose `1` Claude Code, `2` Codex, `3` Pi, `4` OpenCode, `5` Antigravity (`agy`), `6` Grok Build, or `7` for a custom command. Setup checks the executable is installed without running it, shows the command and data disclosure, and requires `Enter` to enable. `Esc` goes back or closes; `a`, then `d` disables naming. For Antigravity, authenticate `agy` normally first, then use **`a`, `5`, `Enter`**. Setup itself never calls a model or changes folder trust. Use your configured sidebar key to open or reopen it (the plugin default is `prefix + S`).
 
 The one configuration file is `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/config.json`. Setup writes it; the daemon reads changes on its existing tick, without a restart. An Antigravity configuration looks like:
 
@@ -193,7 +193,8 @@ The one configuration file is `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plan
     "enabled": true,
     "hide_hint": false,
     "command": [
-      "agy", "--print", "--output-format", "text",
+      "agy", "--model", "gemini-3.8-flash", "--effort", "low",
+      "--print", "--output-format", "text",
       "--disable-slash-commands", "--mode", "plan", "--sandbox",
       "--print-timeout", "55s", "{prompt}"
     ],
@@ -202,9 +203,11 @@ The one configuration file is `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plan
 }
 ```
 
+Presets select inexpensive models explicitly: Claude `haiku` with `--effort low`; Codex `gpt-6-luna` with `--config 'model_reasoning_effort="low"'` (the lowest advertised by the CLI cache); Pi `google/gemini-flash-lite-latest` with `--thinking minimal` (its catalog does not support `off` for this model); OpenCode `opencode/ling-2.6-flash-free`, a free, non-reasoning model with no thinking flag; Antigravity `gemini-3.8-flash` with `--effort low`; Grok `grok-4.5` with `--reasoning-effort low`, selecting the lowest cached-input rate among the CLI's locally advertised standard models (which tie on uncached input/output rates), and avoiding the twice-priced Fast variant. API-only cheaper models were not advertised by this CLI's cache. Claude and Pi use floating aliases; Codex, OpenCode, agy and Grok use catalog IDs because a suitable floating alias could not be confirmed. Flags were checked against CLI help and read-only catalogs; real model availability and execution were not tested. Existing saved commands stay as configured; choose the preset again to adopt these settings.
+
 A custom `command` is a JSON array containing an executable on the daemon's `PATH` (or an absolute path) and literal arguments. Exactly one argument must be `"{prompt}"`; it is replaced with the naming instruction and task JSON. No shell interprets the command. The custom command must run noninteractively, use no tools, and print just the name to stdout; use `"output": "text"`. The OpenCode preset uses `"output": "opencode"` to extract text events from its JSON output. Unknown fields and malformed configuration produce a daemon diagnostic. With no file, naming stays off and the hint is visible.
 
-**What is sent:** the eligible agent's task title, working-directory path (`cwd`), and blocked detail. These are passed as JSON in the prompt to your chosen CLI; its configured AI provider may receive them. tmux-agent-plane sends no screen capture or file contents. The command uses your CLI's existing authentication and model/provider configuration. Review these before enabling. Custom commands must follow the same no-tools contract.
+**What is sent:** the eligible agent's task title, working-directory path (`cwd`), and blocked detail. These are passed as JSON in the prompt to your chosen CLI; its configured AI provider may receive them. tmux-agent-plane sends no screen capture or file contents. The command uses your CLI's existing authentication. Presets explicitly select the model and thinking shown during setup; custom commands control their own model/provider and thinking. Review these before enabling. Custom commands must follow the same no-tools contract.
 
 Naming waits for a title of at least eight bytes containing two words, excluding generic startup titles. It applies to every supported agent kind. Only agents with their generated `<kind>-<pane number>` name and no explicit pane name qualify. A name assigned with `--name`, `r` or `rename` stays yours, even if it resembles a generated name. Default names assigned by older versions already have an explicit pane option and are preserved; newly spawned agents leave that option unset. A live tmux condition checks the pane process, unassigned name and uniqueness across all sessions immediately before applying, so a racing manual rename wins.
 

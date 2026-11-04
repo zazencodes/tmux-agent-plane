@@ -10,6 +10,10 @@ before 1.0, a breaking change bumps the minor version.
 - Optional AI names for default-named agents, off by default: press `a` in the sidebar to choose a CLI or custom command, review what is sent, and enable; the setup hint can be hidden permanently
 - Serialized, time-limited naming attempts with strict output validation, persistent failure diagnostics, and protection for user-assigned names
 
+### Changed
+
+- Select low-cost models and the lowest verified thinking level explicitly in AI naming presets, and show those settings before enabling
+
 ### Fixed
 
 - Keep one agent order in every sidebar: rows no longer change as you move between windows and sessions, and `s` re-sorts them everywhere

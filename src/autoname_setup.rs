@@ -162,11 +162,12 @@ impl Setup {
             text.push_str(&tail.chars().rev().collect::<String>());
             text.push_str("▏\n\nenter review · ctrl-u clear\nesc back");
         } else if let Some(command) = &self.command {
-            text.push_str("Enabling sends each eligible agent's\ntitle, working-directory path (cwd)\nand blocked detail to this command.\nIts AI provider may receive that data.\nNo screen or file contents are sent.\n\nOne attempt per agent pane lifetime.\nManual and --name names stay yours.\n\nCommand (JSON):\n");
+            text.push_str(&config::model_summary(command));
+            text.push_str("\nSends title, cwd and blocked detail.\nIts AI provider may receive that data.\nWe pass no screens or file contents.\n\nOne attempt per agent pane lifetime.\nManual and --name names stay yours.\n\nCommand (JSON):\n");
             text.push_str(&serde_json::to_string(command).unwrap());
             text.push_str("\n\nenter enable · esc back");
         } else {
-            text.push_str("Choose the AI command you use:\n\n1 Claude Code\n2 Codex\n3 Pi\n4 OpenCode\n5 Antigravity (agy)\n6 Grok Build\n7 Custom command\n\nh Hide setup hint permanently\nd Disable auto-naming\nesc Close\n\nNo AI runs until you review and\nenable. Your CLI's authentication\nand selected model/provider apply.");
+            text.push_str("Choose the AI command you use:\n\n1 Claude Code\n2 Codex\n3 Pi\n4 OpenCode\n5 Antigravity (agy)\n6 Grok Build\n7 Custom command\n\nh Hide setup hint permanently\nd Disable auto-naming\nesc Close\n\nNo AI runs until you review and\nenable. Your CLI's authentication\napplies. Presets select a low-cost\nmodel and its lowest verified effort.");
         }
         if let Some(error) = &self.error {
             text.push_str(&format!("\n\nError: {error}"));
@@ -220,6 +221,8 @@ mod tests {
             .map(|y| (0..38).map(|x| buffer[(x, y)].symbol()).collect::<String>() + "\n")
             .collect();
         assert!(text.contains("enter enable"));
+        assert!(text.contains("Model: gemini-3.8-flash"));
+        assert!(text.contains("Thinking: low"));
         assert!(text.contains("AI provider may receive that data"));
     }
 }

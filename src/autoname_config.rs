@@ -123,6 +123,10 @@ pub fn preset(choice: char) -> Option<Vec<String>> {
     let args: &[&str] = match choice {
         '1' => &[
             "claude",
+            "--model",
+            "haiku",
+            "--effort",
+            "low",
             "--print",
             "--output-format",
             "text",
@@ -135,6 +139,10 @@ pub fn preset(choice: char) -> Option<Vec<String>> {
         '2' => &[
             "codex",
             "exec",
+            "--model",
+            "gpt-6-luna",
+            "--config",
+            "model_reasoning_effort=\"low\"",
             "--ephemeral",
             "--skip-git-repo-check",
             "--sandbox",
@@ -145,6 +153,12 @@ pub fn preset(choice: char) -> Option<Vec<String>> {
         ],
         '3' => &[
             "pi",
+            "--provider",
+            "google",
+            "--model",
+            "gemini-flash-lite-latest",
+            "--thinking",
+            "minimal",
             "--print",
             "--no-session",
             "--no-tools",
@@ -154,10 +168,23 @@ pub fn preset(choice: char) -> Option<Vec<String>> {
             "{prompt}",
         ],
         '4' => &[
-            "opencode", "run", "--pure", "--format", "json", "--agent", "plan", "{prompt}",
+            "opencode",
+            "run",
+            "--model",
+            "opencode/ling-2.6-flash-free",
+            "--pure",
+            "--format",
+            "json",
+            "--agent",
+            "plan",
+            "{prompt}",
         ],
         '5' => &[
             "agy",
+            "--model",
+            "gemini-3.8-flash",
+            "--effort",
+            "low",
             "--print",
             "--output-format",
             "text",
@@ -171,6 +198,10 @@ pub fn preset(choice: char) -> Option<Vec<String>> {
         ],
         '6' => &[
             "grok",
+            "--model",
+            "grok-4.5",
+            "--reasoning-effort",
+            "low",
             "--tools",
             "",
             "--disable-web-search",
@@ -185,9 +216,140 @@ pub fn preset(choice: char) -> Option<Vec<String>> {
     Some(args.iter().map(|s| s.to_string()).collect())
 }
 
+/// Describe exactly the explicit settings in the reviewed command array.
+pub fn model_summary(command: &[String]) -> String {
+    let value = |flag: &str| {
+        command
+            .windows(2)
+            .find(|pair| pair[0] == flag)
+            .map(|pair| pair[1].as_str())
+    };
+    let model = value("--model");
+    let effort = value("--effort")
+        .or_else(|| value("--thinking"))
+        .or_else(|| value("--reasoning-effort"))
+        .or_else(|| {
+            command.iter().find_map(|arg| {
+                arg.strip_prefix("model_reasoning_effort=\"")?
+                    .strip_suffix('"')
+            })
+        });
+    match (model, effort) {
+        (Some(model), Some(effort)) => format!("Model: {model}\nThinking: {effort}\n"),
+        (Some("opencode/ling-2.6-flash-free"), None) => {
+            "Model: Ling 2.6 Flash Free\nThinking: off (non-reasoning model)\n".into()
+        }
+        _ => "Model / thinking: custom command\n".into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn presets_pin_the_exact_model_and_lowest_verified_thinking_argv() {
+        let expected: [&[&str]; 6] = [
+            &[
+                "claude",
+                "--model",
+                "haiku",
+                "--effort",
+                "low",
+                "--print",
+                "--output-format",
+                "text",
+                "--tools",
+                "",
+                "--strict-mcp-config",
+                "--no-session-persistence",
+                "{prompt}",
+            ],
+            &[
+                "codex",
+                "exec",
+                "--model",
+                "gpt-6-luna",
+                "--config",
+                "model_reasoning_effort=\"low\"",
+                "--ephemeral",
+                "--skip-git-repo-check",
+                "--sandbox",
+                "read-only",
+                "--color",
+                "never",
+                "{prompt}",
+            ],
+            &[
+                "pi",
+                "--provider",
+                "google",
+                "--model",
+                "gemini-flash-lite-latest",
+                "--thinking",
+                "minimal",
+                "--print",
+                "--no-session",
+                "--no-tools",
+                "--no-extensions",
+                "--no-skills",
+                "--no-context-files",
+                "{prompt}",
+            ],
+            &[
+                "opencode",
+                "run",
+                "--model",
+                "opencode/ling-2.6-flash-free",
+                "--pure",
+                "--format",
+                "json",
+                "--agent",
+                "plan",
+                "{prompt}",
+            ],
+            &[
+                "agy",
+                "--model",
+                "gemini-3.8-flash",
+                "--effort",
+                "low",
+                "--print",
+                "--output-format",
+                "text",
+                "--disable-slash-commands",
+                "--mode",
+                "plan",
+                "--sandbox",
+                "--print-timeout",
+                "55s",
+                "{prompt}",
+            ],
+            &[
+                "grok",
+                "--model",
+                "grok-4.5",
+                "--reasoning-effort",
+                "low",
+                "--tools",
+                "",
+                "--disable-web-search",
+                "--no-subagents",
+                "--max-turns",
+                "1",
+                "--single",
+                "{prompt}",
+            ],
+        ];
+        for (choice, expected) in ('1'..='6').zip(expected) {
+            let command = preset(choice).unwrap();
+            assert_eq!(command, expected);
+            let summary = model_summary(&command);
+            assert!(summary.contains("Model:"));
+            assert!(summary.contains("Thinking:"));
+            assert!(!summary.contains("custom command"));
+        }
+    }
+
     #[test]
     fn absent_and_empty_config_are_off_and_hint_is_visible() {
         let config = read_path(Path::new("/absent-auto-name-fixture/config.json")).unwrap();
