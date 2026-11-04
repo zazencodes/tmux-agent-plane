@@ -378,6 +378,7 @@ fn session_endings(window: &str, attached_session: &str, windows: &str) -> Resul
 struct Sidebar {
     // Auto-naming setup is local UI state; it never performs periodic work.
     auto_name: crate::autoname_setup::Setup,
+    help: crate::sidebar_help::Help,
     all_agents: Vec<Agent>,
     agents: Vec<Agent>,
     navigation: Navigation,
@@ -765,7 +766,17 @@ impl Sidebar {
         commands::kill_pane(&current.pane)
     }
 
+    fn help_key(&mut self, key: KeyEvent) -> bool {
+        self.help.key(
+            key,
+            self.editing.is_none() && self.navigation.search.is_none() && !self.auto_name.open,
+        )
+    }
+
     fn key(&mut self, key: KeyEvent) -> bool {
+        if self.help_key(key) {
+            return false;
+        }
         if self.editing.is_some() {
             self.edit_key(key);
             return false;
@@ -974,6 +985,13 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<Exit> {
                 if let Event::Key(key) = event::read()?
                     && key.kind == KeyEventKind::Press
                 {
+                    // Help consumes every closing key before setup, kill or navigation.
+                    if sidebar.help_key(key) {
+                        if !event::poll(Duration::ZERO)? {
+                            break;
+                        }
+                        continue;
+                    }
                     // Setup consumes its keys before navigation/kill, including Enter.
                     if sidebar.killing.is_none()
                         && sidebar.editing.is_none()
@@ -1052,6 +1070,10 @@ fn truncate(s: &str, width: usize) -> String {
 }
 
 fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
+    if sidebar.help.open {
+        sidebar.help.draw(f);
+        return;
+    }
     if sidebar.auto_name.open {
         sidebar.auto_name.draw(f);
         return;
@@ -1218,13 +1240,7 @@ fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
                     colour(state),
                 )
             }
-            None => hints(&[
-                ("⏎", "jump"),
-                ("s", "sort"),
-                ("r", "rename"),
-                ("x", "kill"),
-                ("q", "close"),
-            ]),
+            None => hints(&[("⏎", "jump"), ("s", "sort"), ("x", "kill"), ("?", "keys")]),
         },
     }
 }
@@ -1327,6 +1343,74 @@ fn right<'a>(mut line: Line<'a>, end: Span<'a>, width: usize) -> Line<'a> {
 mod tests {
     use super::*;
     use crate::index::EventState;
+
+    #[test]
+    fn help_closing_keys_never_act_on_the_list_and_question_mark_is_literal_in_edits() {
+        let mut sidebar = Sidebar {
+            all_agents: vec![agent("%1", State::Working)],
+            ..Sidebar::default()
+        };
+        sidebar.rebuild();
+        for key in [
+            KeyCode::Char('q'),
+            KeyCode::Char('x'),
+            KeyCode::Char('j'),
+            KeyCode::Enter,
+            KeyCode::Esc,
+        ] {
+            assert!(!sidebar.key(KeyEvent::from(KeyCode::Char('?'))));
+            assert!(sidebar.help.open);
+            assert!(!sidebar.key(KeyEvent::from(key)));
+            assert!(!sidebar.help.open);
+            assert_eq!(sidebar.selected().unwrap().pane, "%1");
+            assert!(sidebar.killing.is_none());
+        }
+        press(&mut sidebar, KeyCode::Char('/'));
+        press(&mut sidebar, KeyCode::Char('?'));
+        assert_eq!(sidebar.navigation.query, "?");
+        assert!(!sidebar.help.open);
+        press(&mut sidebar, KeyCode::Esc);
+        press(&mut sidebar, KeyCode::Char('r'));
+        let before = sidebar.editing.as_ref().unwrap().name.clone();
+        press(&mut sidebar, KeyCode::Char('?'));
+        assert_eq!(sidebar.editing.as_ref().unwrap().name, before + "?");
+        assert!(!sidebar.help.open);
+    }
+
+    #[test]
+    fn help_footer_hint_and_confirmation_render_without_overlap() {
+        use ratatui::{Terminal, backend::TestBackend};
+        for height in [1, 2, 3, 4, 8, 28] {
+            let mut terminal = Terminal::new(TestBackend::new(38, height)).unwrap();
+            let mut sidebar = Sidebar::default();
+            terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
+            assert!(footer(&sidebar, 38, index::now_ms()).width() <= 38);
+            assert!(
+                footer(&sidebar, 38, index::now_ms())
+                    .to_string()
+                    .contains("? keys")
+            );
+            sidebar.help_key(KeyEvent::from(KeyCode::Char('?')));
+            terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
+            sidebar.help_key(KeyEvent::from(KeyCode::Char('q')));
+            sidebar.killing = Some(confirmation(State::Working));
+            terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
+            sidebar.help_key(KeyEvent::from(KeyCode::Char('?')));
+            terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
+            let help: String = (0..height)
+                .map(|y| {
+                    (0..38)
+                        .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                        .collect::<String>()
+                })
+                .collect();
+            assert!(!help.contains("optional setup"));
+            assert!(!help.contains("? Y/n"));
+            sidebar.help_key(KeyEvent::from(KeyCode::Char('x')));
+            assert!(sidebar.killing.is_some());
+            terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
+        }
+    }
 
     #[test]
     fn footer_priority_expiry_and_state_colour() {

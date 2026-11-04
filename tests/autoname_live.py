@@ -247,6 +247,60 @@ try:
     settle(2)
     assert not calls() and not automatic_commands()
     RESULTS['off_no_model_or_extra_naming_tmux_commands'] = True
+    # Help is a local modal: closing q/x/Enter never reaches list actions.
+    wait('compact help hint', lambda: '? keys' in client.footer())
+    selected_before = client.selected()
+    for closing in [b'q', b'x', b'\r', b'j']:
+        client.key(b'?')
+        wait('help opens', lambda: 'Keyboard shortcuts' in client.text())
+        assert 'Set up AI names' in client.text()
+        assert 'a AI names · optional setup' not in client.text()
+        client.snapshot('shortcuts-full-' + closing.hex())
+        client.key(closing)
+        wait('help closes safely', lambda: 'v off' in client.text() and 'a AI names' in client.text())
+        assert client.selected() == selected_before
+        assert '? Y/n' not in client.text()
+        assert len(index()['agents']) == 3
+    # Search and rename retain ? as ordinary text.
+    client.key(b'/?')
+    wait('literal question in search', lambda: '/ ?▏' in client.text())
+    assert 'Keyboard shortcuts' not in client.text()
+    client.key(b'\x1b')
+    wait('search cancelled before rename', lambda: '/ search' in client.text())
+    client.key(b'r?')
+    wait('literal question in rename', lambda: by_pane(default)['name'] + '?' in client.text())
+    assert 'Keyboard shortcuts' not in client.text()
+    client.key(b'\x1b')
+    wait('rename cancelled', lambda: 'save' not in client.footer())
+    # Help temporarily covers a kill confirmation and restores it without replay.
+    client.key(b'x')
+    wait('kill confirmation before help', lambda: '? Y/n' in client.text())
+    client.key(b'?')
+    wait('help covers confirmation', lambda: 'Keyboard shortcuts' in client.text())
+    assert '? Y/n' not in client.text()
+    client.key(b'x')
+    wait('closing x restores confirmation', lambda: '? Y/n' in client.text())
+    client.key(b'n')
+    wait('confirmation cancelled', lambda: '? Y/n' not in client.text())
+    # A short window pages the same list; every closing key is still consumed.
+    window = by_pane(default)['window']
+    original_height = tmux('display-message', '-p', '-t', window, '#{window_height}')
+    tmux('resize-window', '-t', window, '-y', '10')
+    seen_help = ''
+    for page in range(4):
+        client.key(b'?')
+        wait('short help page', lambda: 'Keyboard shortcuts' in client.text())
+        seen_help += client.text()
+        client.snapshot('shortcuts-short-' + str(page))
+        client.key(b'q')
+        wait('short help close', lambda: 'v off' in client.text())
+    assert 'Move selection' in seen_help and 'AI setup: back / close' in seen_help
+    assert 'Set up AI names' in seen_help
+    tmux('resize-window', '-t', window, '-y', original_height)
+    wait('full height restored', lambda: '? keys' in client.footer())
+    RESULTS.update(help_real_keypress=True, help_closing_keys_consumed=True,
+                   help_literal_during_edits=True, help_preserves_confirmation=True,
+                   help_short_height_all_pages_reachable=True)
     client.key(b'a')
     wait('setup menu', lambda: '5 Antigravity (agy)' in client.text())
     client.key(b'h')
@@ -261,7 +315,7 @@ try:
     RESULTS['hide_persists_after_reopening'] = True
     # The supported agy preset resolves to our private fake binary, never the real CLI.
     client.key(b'a5')
-    wait('disclosure before enable', lambda: 'enter enable' in client.text() and 'AI provider may receive that data' in client.text())
+    wait('disclosure before enable', lambda: 'enter enable' in client.text() and 'AI provider may receive that data' in client.text() and 'Model: gemini-3.8-flash' in client.text() and 'Thinking: low' in client.text())
     client.snapshot('agy-consent-38-columns')
     assert not calls()
     client.key(b'\r')

@@ -10,6 +10,7 @@ mod index;
 mod lifecycle;
 mod popup;
 mod sidebar;
+mod sidebar_help;
 mod tmux;
 mod ui;
 

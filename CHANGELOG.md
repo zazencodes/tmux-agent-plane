@@ -7,6 +7,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
+- Press `?` in the sidebar for keyboard shortcuts, with pages on short terminals and closing keys consumed safely
 - Optional AI names for default-named agents, off by default: press `a` in the sidebar to choose a CLI or custom command, review what is sent, and enable; the setup hint can be hidden permanently
 - Serialized, time-limited naming attempts with strict output validation, persistent failure diagnostics, and protection for user-assigned names
 

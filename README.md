@@ -29,7 +29,7 @@ Claude Code, Codex and Antigravity use native signals. Pi and OpenCode use publi
 
 - **Every agent, every session.** One daemon watches every pane in every tmux session and keeps a single index of the agents in them: name, state, task, location and working directory.
 - **Know what needs you.** The status bar counts agents by state. An agent that finishes or blocks while you are looking elsewhere shows a five-second notice in every open sidebar footer and sends a desktop notification, and stays `done` until you look at it.
-- **A sidebar of agents.** `prefix + S` opens a live list of every agent down the left of every window, in every session, and puts you in it: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar is there too. Close it once and it closes everywhere.
+- **A sidebar of agents.** Your sidebar key (default `prefix + S`) opens a live list of every agent down the left of every window, in every session, and puts you in it: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar is there too. Close it once and it closes everywhere.
 - **Peek before you jump.** `prefix + A` opens the agent list in a popup with a large live preview of the selected agent's screen.
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
 - **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`. Optional AI naming can name the remaining default-named agents; press `a` in the sidebar to set it up.
@@ -130,7 +130,7 @@ Run your agents as usual. Then ask any of them things like:
 
 | Key | Action |
 | --- | --- |
-| `prefix + S` | Open the sidebar in every window and move into it; close it everywhere when it is open |
+| Sidebar key (default `prefix + S`) | Open the sidebar in every window and move into it; close it everywhere when it is open |
 | `prefix + A` | Open the agent list popup, with a preview |
 | `j` `k` / `↓` `↑` | Move selection; in sidebar view mode, preview the selected agent’s window/session |
 | `v` | Toggle sidebar view mode (off initially): preview while keeping keyboard input in the sidebar |
@@ -139,9 +139,10 @@ Run your agents as usual. Then ask any of them things like:
 | `/` | Edit sidebar search across name, task, blocked detail, location and directory; matches ignore case. `Enter` keeps the query and previews its selection when view mode is on, `Esc` cancels the edit, `Ctrl-W` deletes a word, `Ctrl-U` clears; arrows move selection while editing |
 | `Esc` | Clear sidebar search outside editing; close the popup |
 | `Enter` | Jump to the agent. The sidebar stays open; the popup closes |
-| `x` | Ask to kill the selected agent’s pane. The footer pins its name/state; `Enter` or lowercase `y` confirms, every other key cancels without replay. Refuses to end your attached session; warns if a remote session would end |
+| `x` | Ask to kill the selected agent’s pane. The footer pins its name/state; `Enter` or lowercase `y` confirms; `?` temporarily shows help; other keys cancel without replay. Refuses to end your attached session; warns if a remote session would end |
 | `r` | Rename the agent (sidebar), starting from its current name. `Ctrl-W` deletes a word, `Ctrl-U` clears, `Enter` saves, `Esc` cancels |
 | `a` | Open AI naming setup in the sidebar: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `h` permanently hides the setup hint, `d` disables naming, `Esc` goes back or closes |
+| `?` | Show every sidebar shortcut. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search and rename |
 | `q` | Close: the sidebar everywhere, or the popup (also `Esc`) |
 
 An agent in a linked window has one index row, displayed under the first session by name. It counts as visible when its pane is visible through any link.
