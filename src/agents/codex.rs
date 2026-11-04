@@ -99,7 +99,9 @@ mod tests {
             pane_index: 0,
             cwd: "/".into(),
             title: "Fix tests | repo".into(),
-            visible: false,
+            active: false,
+            viewed: false,
+            sidebar: false,
             name: String::new(),
             parent: String::new(),
         }

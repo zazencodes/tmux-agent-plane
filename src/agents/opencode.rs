@@ -174,7 +174,9 @@ mod tests {
             pane_index: 1,
             cwd: "/same/cwd".into(),
             title: "irrelevant terminal title".into(),
-            visible: false,
+            active: false,
+            viewed: false,
+            sidebar: false,
             name: String::new(),
             parent: String::new(),
         }

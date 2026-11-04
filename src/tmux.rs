@@ -68,13 +68,22 @@ pub struct Pane {
     pub pane_index: u32,
     pub cwd: String,
     pub title: String,
-    /// The pane is on screen in an attached session: active pane of the active window.
-    pub visible: bool,
+    /// The active pane of its window.
+    pub active: bool,
+    /// Its window is on screen: the current window of an attached session.
+    pub viewed: bool,
+    /// This pane is a sidebar.
+    pub sidebar: bool,
     pub name: String,
     pub parent: String,
 }
 
 impl Pane {
+    /// The pane is on screen and takes the keyboard.
+    pub fn visible(&self) -> bool {
+        self.active && self.viewed
+    }
+
     pub fn location(&self) -> String {
         format!("{}:{}.{}", self.session, self.window_index, self.pane_index)
     }
@@ -90,7 +99,9 @@ pub fn list_panes() -> Result<Vec<Pane>> {
         "#{pane_index}",
         "#{pane_current_path}",
         "#{pane_title}",
-        "#{&&:#{&&:#{pane_active},#{window_active}},#{session_attached}}",
+        "#{pane_active}",
+        "#{&&:#{window_active},#{session_attached}}",
+        "#{@agent-plane-sidebar}",
         "#{@agent-plane-name}",
         "#{@agent-plane-parent}",
     ];
@@ -112,9 +123,11 @@ pub fn list_panes() -> Result<Vec<Pane>> {
                 pane_index: f[5].parse().context("pane_index")?,
                 cwd: f[6].to_string(),
                 title: f[7].to_string(),
-                visible: f[8] == "1",
-                name: f[9].to_string(),
-                parent: f[10].to_string(),
+                active: f[8] == "1",
+                viewed: f[9] == "1",
+                sidebar: f[10] == "1",
+                name: f[11].to_string(),
+                parent: f[12].to_string(),
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -122,13 +135,13 @@ pub fn list_panes() -> Result<Vec<Pane>> {
 }
 
 /// A linked window is listed once per session, but its processes belong to one
-/// physical pane. Choose the first session by name and retain visibility in any link.
+/// physical pane. Choose the first session by name and retain viewing through any link.
 fn physical_panes(mut panes: Vec<Pane>) -> Vec<Pane> {
     panes.sort_by(|a, b| a.session.cmp(&b.session));
     let mut unique: Vec<Pane> = Vec::new();
     for pane in panes {
         if let Some(existing) = unique.iter_mut().find(|p| p.id == pane.id) {
-            existing.visible |= pane.visible;
+            existing.viewed |= pane.viewed;
         } else {
             unique.push(pane);
         }
@@ -201,18 +214,20 @@ mod tests {
             pane_index: 0,
             cwd: "/tmp".into(),
             title: "agent".into(),
-            visible: false,
+            active: true,
+            viewed: false,
+            sidebar: false,
             name: "agent".into(),
             parent: String::new(),
         };
         let mut linked = first.clone();
         linked.session = "zeta".into();
         linked.window_index = 9;
-        linked.visible = true;
+        linked.viewed = true;
         let panes = physical_panes(vec![linked, first]);
         assert_eq!(panes.len(), 1);
         assert_eq!(panes[0].session, "alpha");
         assert_eq!(panes[0].window_index, 1);
-        assert!(panes[0].visible);
+        assert!(panes[0].visible());
     }
 }

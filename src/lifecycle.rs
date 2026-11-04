@@ -18,6 +18,8 @@ use std::time::{Duration, Instant};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(50);
+/// Room for a row order of about ten thousand panes.
+const REQUEST_LIMIT: u64 = 64 * 1024;
 static SIGNAL: AtomicI32 = AtomicI32::new(0);
 
 #[derive(Clone, Copy, Subcommand)]
@@ -306,14 +308,21 @@ fn control_loop(listener: UnixListener, done: &AtomicBool) -> Result<()> {
                 socket.set_read_timeout(Some(Duration::from_secs(1)))?;
                 socket.set_write_timeout(Some(Duration::from_secs(1)))?;
                 let mut command = String::new();
-                (&mut socket).take(32).read_to_string(&mut command)?;
+                (&mut socket)
+                    .take(REQUEST_LIMIT)
+                    .read_to_string(&mut command)?;
                 match command.as_str() {
                     "ping" => {}
                     "stop" => {
                         diagnostics::record("lifecycle", "graceful stop requested")?;
                         daemon::request_shutdown();
                     }
-                    _ => bail!("unknown daemon control request: {command:?}"),
+                    request => match request.strip_prefix("order ") {
+                        Some(order) => daemon::request_order(
+                            order.split_whitespace().map(String::from).collect(),
+                        ),
+                        None => bail!("unknown daemon control request: {command:?}"),
+                    },
                 }
                 socket.write_all(b"ok")?;
             }
