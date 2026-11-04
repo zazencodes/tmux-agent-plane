@@ -197,8 +197,22 @@ def input_bytes(name):
     return typed(agent(name)["pane"])
 
 
-def query(client, value):
-    client.key(b"/\x15" + value.encode() + b"\r")
+def select_row(client, name):
+    # Use sidebar navigation: a fuzzy query can retain several matching rows.
+    wait("row available " + name, lambda: name in shown_names(client) and
+         client.selected() in shown_names(client))
+    names = shown_names(client)
+    steps = (names.index(name) - names.index(client.selected())) % len(names)
+    client.key(b"\x1b[B" * steps)
+    selected(client, name)
+
+
+def query(client, value, select=None):
+    client.key(b"/\x15" + value.encode())
+    wait("editing query " + value, lambda: ("/ " + value + "▏") in client.text())
+    if select is not None:
+        select_row(client, select)
+    client.key(b"\r")
     wait("query " + value, lambda: ("/ " + value) in client.text() and "▏" not in client.text())
 
 
@@ -601,7 +615,7 @@ def extra_checks(client):
         assert '/ nav-' not in client.text() and 'save' not in client.footer()
     client.snapshot('kill-cancel-no-replay')
     # Native state and identity are validated independently of daemon refresh.
-    query(client, 'nav-idle')
+    query(client, 'nav-idle', select='nav-idle')
     client.key(b'x')
     wait('state pin prompt', lambda: '? Y/n' in client.text())
     change('nav-idle', 'working', 0)
@@ -633,7 +647,7 @@ def extra_checks(client):
     client.snapshot('kill-state-identity-rename-refused')
     # A tty/PID may stay identical while its session changes through a linked window.
     # The confirmation belongs to its original client context, even on the same pane.
-    query(client, 'nav-idle')
+    query(client, 'nav-idle', select='nav-idle')
     client.key(b'x')
     wait('client context pin prompt', lambda: '? Y/n' in client.text())
     pinned_context = client.context()
@@ -671,7 +685,7 @@ def extra_checks(client):
     assert client.selected() == 'nav-idle'
     client.snapshot('kill-enter-next-visible')
     # Remote final session warning plus lowercase y confirmation.
-    query(client, 'nav-away')
+    query(client, 'nav-away', select='nav-away')
     client.key(b'x')
     wait('named remote last-session warning', lambda: 'ends session nav-away? Y/n' in client.text())
     client.snapshot('kill-remote-session-warning')
@@ -690,7 +704,7 @@ def extra_checks(client):
     plane('spawn', 'pi', '--in', 'window', '--cwd', str(ROOT), '--name', 'nav-exit')
     SPAWNED.append('nav-exit')
     plane('follow-sidebar', agent('nav-exit')['window'])
-    query(client, 'nav-exit')
+    query(client, 'nav-exit', select='nav-exit')
     selected(client, 'nav-exit')
     exiting_window = agent('nav-exit')['window']
     client.key(b'x')
@@ -723,7 +737,7 @@ def extra_checks(client):
     linked_client.close()
     CLIENTS.remove(linked_client)
     settle(0.7)
-    query(client, 'nav-linked')
+    query(client, 'nav-linked', select='nav-linked')
     selected(client, 'nav-linked')
     client.key(b'x')
     wait('linked remote warning', lambda: 'ends session' in client.text() and '? Y/n' in client.text())
@@ -740,7 +754,7 @@ def extra_checks(client):
     plane('follow-sidebar', final['window'])
     tmux('switch-client', '-c', client.context()[0], '-t', sidebar_pane(final['window']))
     tmux('new-session', '-d', '-s', 'zzz-final-link', '-t', 'nav-final')
-    query(client, 'nav-final')
+    query(client, 'nav-final', select='nav-final')
     selected(client, 'nav-final')
     client.key(b'x')
     wait('attached final session refused', lambda: 'attached session' in client.footer())
@@ -753,7 +767,7 @@ def extra_checks(client):
     plane('spawn', 'pi', '--in', 'window', '--cwd', str(ROOT), '--name', 'nav-survivor')
     SPAWNED.append('nav-survivor')
     plane('follow-sidebar', agent('nav-survivor')['window'])
-    query(client, 'nav-idle')
+    query(client, 'nav-idle', select='nav-idle')
     tmux('resize-pane', '-t', client.context()[1], '-x', '20')
     client.key(b'x')
     wait('narrow confirmation readable', lambda: '(working)? Y/n' in client.text())
@@ -822,7 +836,7 @@ try:
     client.key(b"j")
     wait("normal move", lambda: client.selected() != "nav-away")
     assert client.context() == original
-    query(client, "nav-work")
+    query(client, "nav-work", select="nav-work")
     selected(client, "nav-work")
     assert client.context() == original
     tmux("refresh-client", "-f", "active-pane", "-t", client.context()[0])
@@ -884,17 +898,20 @@ try:
     settle(1.5)
     client.snapshot("timed-mixed-search")
     observed = client.text().splitlines()[2]
-    (ROOT / "mixed-order.json").write_text(json.dumps({"expected": "nav-done", "query_row": observed}) + "\n")
+    (ROOT / "mixed-order.json").write_text(json.dumps({"expected_query": "nav-done",
+        "expected_selection": "nav-idle", "query_row": observed}) + "\n")
     assert "/ nav-done▏" in observed, observed
     assert client.context() == editing_context, "search must stay in its originating sidebar"
     edit_calls = [json.loads(line) for line in (ROOT / "tmux.calls").read_text().splitlines()[calls_before_edit:]]
     assert not any("switch-client" in call for call in edit_calls), edit_calls
+    # The final Up selects nav-idle, which also matches nav-done across later fields.
+    selected(client, "nav-idle")
     client.key(b"\r")
-    previewed(client, "nav-done")
+    previewed(client, "nav-idle")
     wait("timed search accepted", lambda: "paused" not in client.text() and "/ nav-done" in client.text())
     client.key(b"\x1b")
     wait("timed query cleared", lambda: "/ search" in client.text())
-    expected = "nav-done"
+    expected = "nav-idle"
     # Successive arrows continue from the same selection after each preview.
     expected = ordered[(ordered.index(expected) + 1) % len(ordered)]
     client.key(b"\x1b[B")
@@ -909,6 +926,8 @@ try:
     assert client.context() == editing_context
     client.key(b"ne")
     wait("incremental query", lambda: "/ nav-done" in client.text() and "preview" in client.footer())
+    assert client.context() == editing_context
+    select_row(client, "nav-done")
     assert client.context() == editing_context
     client.key(b"\r")
     previewed(client, "nav-done")
@@ -951,7 +970,8 @@ try:
         client.key(b"f")
         wait("filter " + state, lambda state=state: "f " + state in client.text())
         client.snapshot("filter-" + state)
-    query(client, "NAV-WORK")
+    # This filter proof needs one match, including when the random cwd matches the name.
+    query(client, "NVWRK NPMTRVW")
     client.key(b"f")
     wait("query skips empty categories", lambda: "f working" in client.text())
     change("nav-work", "blocked", 0)
@@ -967,7 +987,7 @@ try:
     client.key(b"/qVFr")
     wait("empty literal query", lambda: "no matching agents" in client.text() and "keep" in client.footer())
     client.key(b"\x1b")
-    wait("cancel query", lambda: "/ NAV-WORK" in client.text() and "keep" not in client.footer())
+    wait("cancel query", lambda: "/ NVWRK NPMTRVW" in client.text() and "keep" not in client.footer())
     client.key(b"\x1b")
     wait("query cleared", lambda: "/ search" in client.text())
     client.key(b"f")  # blocked -> done
@@ -1000,7 +1020,7 @@ try:
     observer = CLIENTS[1]
     wait("observer", lambda: "v off" in observer.text())
     observer_context = observer.context()
-    query(client, "nav-away")
+    query(client, "nav-away", select="nav-away")
     client.key(b"v")
     previewed(client, "nav-away")
     assert observer.context() == observer_context
@@ -1008,13 +1028,13 @@ try:
     observer.snapshot("observer-unchanged")
     # Destination with another client must be refused before any pane or window changes.
     client.key(b"v")
-    query(client, "nav-work")
+    query(client, "nav-work", select="nav-work")
     client.key(b"v")
     previewed(client, "nav-work")
     tmux("switch-client", "-c", observer.context()[0], "-t", "=nav-away:")
     observer_context = observer.context()
     source_context = client.context()
-    query(client, "nav-away")  # view on: target shared; selection changes, no client moves
+    query(client, "nav-away", select="nav-away")  # view on: target shared; no client moves
     wait("shared target refusal", lambda: "target shared" in client.footer())
     assert client.context() == source_context and observer.context() == observer_context
     client.snapshot("shared-target-refused")
@@ -1029,7 +1049,7 @@ try:
     tmux("switch-client", "-c", observer.context()[0], "-t", "=observer:")
     # A failed preview command leaves the panes and the client where they were.
     client.key(b"v")  # off
-    query(client, "nav-done")
+    query(client, "nav-done", select="nav-done")
     target_sidebar = sidebar_pane(agent("nav-done")["window"])
     (ROOT / "switch.fail").touch()
     client.key(b"v")
@@ -1041,7 +1061,7 @@ try:
     assert_lone_sidebar_closes()
     extended_results = extra_checks(client)
     # Rename cancellation when its original target leaves: never rename the next row.
-    query(client, "nav-idle")
+    query(client, "nav-idle", select="nav-idle")
     client.key(b"r")
     wait("rename active", lambda: "save" in client.footer())
     plane("kill", "nav-idle")
