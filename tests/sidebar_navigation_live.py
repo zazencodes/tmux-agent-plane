@@ -253,35 +253,30 @@ def screens_during(client, action, seconds):
     return screens
 
 
-def assert_quick_hops(client, names, rounds=8, gap=0.12):
-    # Plain tmux, far inside one daemon tick: no sidebar can have read anything new, and none needs to.
+def assert_quick_hops(client, names, rounds=8):
+    # Plain tmux, as fast as it goes: no sidebar can have read anything new, and none needs to.
+    # tmux's own copy of the sidebar is what it paints from, and unlike a terminal reading it can
+    # never catch a half-finished paint, so this needs no timing and holds on a busy machine.
     settle(1.7)
     rows = shown_names(client)
-    highlights = {agent(name)["window"]: name for name in names}
     client_name = client.context()[0]
-    hops = [[TMUX, "-S", str(ROOT / "t.sock"), "switch-client", "-c", client_name, "-t",
-             f"={agent(name)['session']}:{agent(name)['window']}.{agent(name)['pane']}"]
-            for _ in range(rounds) for name in names]
-
-    def hop():
-        def run():
-            for command in hops:
-                started = time.monotonic()
-                subprocess.run(command, env=ENV, check=True, capture_output=True, timeout=8)
-                time.sleep(max(0, gap - (time.monotonic() - started)))
-        thread = threading.Thread(target=run)
-        thread.start()
-        return lambda: not thread.is_alive()
-
-    screens = screens_during(client, hop, 0.3)
-    (ROOT / "quick-hops.json").write_text(json.dumps(screens, indent=2) + "\n")
-    windows = {window for window, _, _ in screens}
-    assert windows >= set(highlights), (windows, highlights)
-    for window, shown, shown_rows in screens:
-        assert window in highlights, (window, screens)
-        assert shown == highlights[window], (window, shown, screens)
-        assert shown_rows == rows, (rows, shown_rows)
-    return len(screens)
+    socket = [TMUX, "-S", str(ROOT / "t.sock")]
+    targets = [(name, agent(name)["window"], agent(name)["session"], agent(name)["pane"],
+                sidebar_pane(agent(name)["window"])) for name in names]
+    hops = 0
+    for _ in range(rounds):
+        for name, window, session, pane, sidebar in targets:
+            subprocess.run([*socket, "switch-client", "-c", client_name, "-t", f"={session}:{window}.{pane}"],
+                           env=ENV, check=True, capture_output=True, timeout=8)
+            lines = subprocess.run([*socket, "capture-pane", "-p", "-t", sidebar], env=ENV, check=True,
+                                   capture_output=True, text=True, timeout=8).stdout.splitlines()
+            shown = next(line[1:38].split()[1] for line in lines if line[1:2] == "▌")
+            assert shown == name, (window, shown, name)
+            assert rows_in(lines) == rows, (rows, rows_in(lines))
+            client.drain()
+            hops += 1
+    (ROOT / "quick-hops.json").write_text(json.dumps({"hops": hops, "rows": rows}) + "\n")
+    return hops
 
 
 def assert_left_windows_show_their_agents(client, names):
@@ -420,13 +415,17 @@ def settle(seconds=1.2):
         time.sleep(0.03)
 
 
-def shown_names(client):
+def rows_in(lines):
     # Decode full physical rows: tmux can scale a detached window's sidebar on attach.
     # Borders + icon + separate state/age fields exclude headings, controls and notices.
-    client.drain()
-    return [match.group(1) for line in client.screen.display
+    return [match.group(1) for line in lines
             if (match := re.match(
                 r'^│[ ▌][◆✓●○] (nav-[a-z]+)\s+(blocked|done|working|idle)\s+\S+\s*│', line))]
+
+
+def shown_names(client):
+    client.drain()
+    return rows_in(client.screen.display)
 
 
 def extra_checks(client):

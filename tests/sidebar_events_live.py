@@ -254,7 +254,7 @@ try:
          for line in (ROOT / "tmux.calls").read_text().splitlines()) == 2)
     # Readable and clear of the top row: the status line stays, and a key dismisses it at once.
     original = CLIENTS[0]
-    wait("recovery notice on screen", lambda: any("✓ Recovered" in line for line in original.screen.display))
+    wait("recovery notice on screen", lambda: any("closes in" in line for line in original.screen.display))
     original.snapshot("recovery-notice")
     assert original.screen.display[0].startswith("TOP-STATUS")
     assert next(row for row, line in enumerate(original.screen.display) if "╭" in line and "tmux-agent-plane" in line) == 3
