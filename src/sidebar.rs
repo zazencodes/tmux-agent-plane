@@ -790,17 +790,22 @@ struct SwitchContext {
     clients: Vec<Client>,
     session: String,
     sidebar: Option<String>,
+    /// What the client's window had active before this sidebar.
+    previous: Option<String>,
 }
 
 fn parse_switch_context(output: &str) -> Result<SwitchContext> {
     let mut clients = Vec::new();
     let mut session = None;
     let mut sidebar = None;
+    let mut previous = None;
     for line in output.lines() {
         match line.split('\x1f').collect::<Vec<_>>().as_slice() {
             ["session", id] => session = Some(id.to_string()),
             ["pane", id, "1"] => sidebar = Some(id.to_string()),
             ["pane", _, _] => {}
+            ["left", id, "1"] => previous = Some(id.to_string()),
+            ["left", _, _] => {}
             _ => clients.push(parse_client(line)?),
         }
     }
@@ -808,7 +813,26 @@ fn parse_switch_context(output: &str) -> Result<SwitchContext> {
         clients,
         session: session.context("switch context has no session")?,
         sidebar,
+        previous,
     })
+}
+
+/// Carry this sidebar to `destination`'s window with the client. tmux runs the whole sequence
+/// before it redraws. Only once the client has left may the window take its previous pane back:
+/// nobody is viewing it by then, so that pane gets no focus event and no seen state. A window
+/// left this way shows its agent active on the next arrival, however quick.
+fn carry_command(
+    own: &str,
+    destination: &str,
+    switch: &[String],
+    previous: Option<&str>,
+) -> Vec<String> {
+    let swap = ["swap-pane", "-s", own, "-t", destination, ";"].map(String::from);
+    let mut command: Vec<_> = swap.into_iter().chain(switch.iter().cloned()).collect();
+    if let Some(previous) = previous {
+        command.extend([";", "select-pane", "-t", previous].map(String::from));
+    }
+    command
 }
 
 /// The tmux command for a preview or Enter jump, or None when the client is already there.
@@ -834,6 +858,12 @@ fn switch_command(sidebar: &Sidebar, own: &str, focus: bool) -> Result<Option<Ve
         &window_target,
         "-F",
         &format!("pane\x1f#{{pane_id}}\x1f#{{{MARK}}}"),
+        ";",
+        "list-panes",
+        "-t",
+        own,
+        "-F",
+        "left\x1f#{pane_id}\x1f#{pane_last}",
     ])?)?;
     let client = input_client(&context.clients, own)?;
     guard_destination(&context.clients, client, &context.session, &agent.window)?;
@@ -853,9 +883,13 @@ fn switch_command(sidebar: &Sidebar, own: &str, focus: bool) -> Result<Option<Ve
     ];
     if destination != own {
         // This pane travels with the client, so its selection and keyboard input stay continuous
-        // on screen. tmux runs the whole sequence before it redraws.
-        let swap = ["swap-pane", "-s", own, "-t", &destination, ";"].map(String::from);
-        return Ok(Some(swap.into_iter().chain(switch).collect()));
+        // on screen.
+        return Ok(Some(carry_command(
+            own,
+            &destination,
+            &switch,
+            context.previous.as_deref(),
+        )));
     }
     Ok(focus.then(|| switch.to_vec()))
 }
@@ -1654,16 +1688,33 @@ mod tests {
     #[test]
     fn switch_context_reads_clients_session_and_sidebar_from_one_output() {
         let context = parse_switch_context(
-            "/dev/ttys1\x1f42\x1f$1\x1f@1\x1f%1\nsession\x1f$2\npane\x1f%7\x1f\npane\x1f%8\x1f1\n",
+            "/dev/ttys1\x1f42\x1f$1\x1f@1\x1f%1\nsession\x1f$2\npane\x1f%7\x1f\npane\x1f%8\x1f1\n\
+             left\x1f%1\x1f0\nleft\x1f%2\x1f1\n",
         )
         .unwrap();
+        assert_eq!(context.previous.as_deref(), Some("%2"));
         assert_eq!(context.clients[0].name, "/dev/ttys1");
         assert_eq!(context.session, "$2");
         assert_eq!(context.sidebar.as_deref(), Some("%8"));
         let context = parse_switch_context("session\x1f$2\npane\x1f%7\x1f\n").unwrap();
         assert!(context.clients.is_empty() && context.sidebar.is_none());
+        assert!(context.previous.is_none());
         assert!(parse_switch_context("pane\x1f%7\x1f\n").is_err());
         assert!(parse_switch_context("session\x1f$2\nnot-a-client\n").is_err());
+    }
+
+    #[test]
+    fn a_window_takes_its_pane_back_only_after_the_client_has_left_it() {
+        let switch = ["switch-client", "-c", "c", "-t", "=s:@2.%9"].map(String::from);
+        assert_eq!(
+            carry_command("%9", "%8", &switch, Some("%1")).join(" "),
+            "swap-pane -s %9 -t %8 ; switch-client -c c -t =s:@2.%9 ; select-pane -t %1"
+        );
+        // Nothing to go back to: the sidebar swapped in stays active there.
+        assert_eq!(
+            carry_command("%9", "%8", &switch, None).join(" "),
+            "swap-pane -s %9 -t %8 ; switch-client -c c -t =s:@2.%9"
+        );
     }
 
     #[test]

@@ -284,6 +284,16 @@ def assert_quick_hops(client, names, rounds=8, gap=0.025):
     return len(screens)
 
 
+def assert_left_windows_show_their_agents(client, names):
+    # The daemon reports what tmux has: every window but the client's has its agent active.
+    current = client.context()[2]
+    def restored():
+        views = {view["id"]: view for view in index()["windows"]}
+        return all(views[agent(name)["window"]]["active_pane"] == agent(name)["pane"]
+                   for name in names if agent(name)["window"] != current)
+    wait("left windows have their agent active", restored)
+
+
 def assert_lone_sidebar_closes():
     window = tmux("new-window", "-d", "-t", "=scratch:", "-P", "-F", "#{window_id}", "/bin/sh")
     plane("follow-sidebar", window)
@@ -696,6 +706,7 @@ try:
     tmux("set-option", "-g", "status-position", "top")
     tmux("set-option", "-g", "status-format[0]", "TOP-STATUS #{window_id}")
     tmux("set-option", "-as", "terminal-features", ",xterm-256color:RGB")
+    tmux("set-option", "-s", "focus-events", "on")  # So a stray focus event reaches a fixture.
     plane("daemon", "start")
     wait("daemon index", lambda: (STATE / "agents.json").exists())
     for name, placement in [("nav-work", "window"), ("nav-done", "window"), ("nav-idle", "window"), ("nav-away", "session")]:
@@ -705,6 +716,7 @@ try:
     CLIENTS.append(Client("scratch"))
     client = CLIENTS[0]
     wait("client attached", lambda: tmux("list-clients", "-F", "#{client_name}"))
+    client.key(b"\x1b[I")  # The terminal has focus.
     change("nav-idle", "idle", 0)
     plane("focus", "nav-idle")
     wait("idle seen", lambda: agent("nav-idle")["state"] == "idle")
@@ -758,8 +770,26 @@ try:
     settle(0.7)
     assert client.selected() == expected
     client.snapshot("timed-stream-seven-j")
+    # Visiting an agent does reach it, so the comparison below can fail.
+    assert b"\x1b[I" in raw_input_bytes(agent("nav-work")["pane"])
+    input_before_previews = {name: raw_input_bytes(pane) for name, pane in FIXTURES.items()}
     assert_no_stale_preview_frame(client)
     client.snapshot("no-stale-preview-frame")
+    # Giving a left window its pane back reaches no agent: no key, no focus event, no seen state.
+    assert_left_windows_show_their_agents(client, ["nav-work", "nav-done", "nav-idle", "nav-away"])
+    for name, pane in FIXTURES.items():
+        assert raw_input_bytes(pane) == input_before_previews[name], (name, raw_input_bytes(pane))
+    assert agent("nav-done")["state"] == "done" and not agent("nav-done")["visible"]
+    client.snapshot("left-windows-restored")
+    # So those windows are right on arrival, with no fresh data, however quick.
+    travelling = client.context()[1]
+    settle(1.7)
+    left_behind = [name for name in ("nav-work", "nav-idle", "nav-away")
+                   if agent(name)["window"] != client.context()[2]]
+    hop_screens += assert_quick_hops(client, left_behind)
+    tmux("switch-client", "-c", client.context()[0], "-t", travelling)
+    wait("back after hops", lambda: client.context()[1] == travelling)
+    settle(1.7)
     expected = client.selected()
     # Mix text, movement and editing across preview switches. Assert content/order,
     # rather than only the commutative count of j presses.
@@ -963,7 +993,7 @@ try:
     assert not any(call[0] in ("copy-mode", "clock-mode") for call in calls)
     RESULTS = {**extended_results, "passed": True, "native_fixtures": len(FIXTURES), "models_used": 0,
         "quick_hop_screens": hop_screens, "idle_commands_in_10s": idle_calls, "lone_sidebar_closes": True,
-        "sort_everywhere_without_snap_back": True,
+        "left_windows_restored_without_input": True, "sort_everywhere_without_snap_back": True,
         "same_window": True, "cross_window_and_session": True, "view_off_selects_only": True,
         "burst_jjj_exact_net_movement": True, "timed_stream_seven_j_exact_net_movement": True,
         "arrow_selection_identity": True, "timed_mixed_text_arrows_backspace_order": True,
