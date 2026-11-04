@@ -196,6 +196,10 @@ try:
     assert client.selected() == 'quartz-helper'
     client.key(b'\x1b[A')
     wait('up', lambda: client.selected() == 'quartz-build')
+    client.key(b'\n')
+    wait('ctrl-j', lambda: client.selected() == 'quartz-helper')
+    client.key(b'\x0b')
+    wait('ctrl-k', lambda: client.selected() == 'quartz-build')
     client.snapshot('search')
     assert client.context() == origin and other.context() == untouched
     query(client, 'zzzzzz', None)
@@ -227,7 +231,7 @@ try:
     for row in rows.values():
         path = ROOT / (row['pane'] + '.input')
         assert not path.exists() or path.read_bytes().replace(b'\x1b[I', b'').replace(b'\x1b[O', b'') == b''
-    print('PASS: lowercase binding; empty/no-match Enter; fuzzy name/title/detail and spanning queries; arrows; refresh selection; Esc/Ctrl-C; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
+    print('PASS: lowercase binding; empty/no-match Enter; fuzzy name/title/detail and spanning queries; arrows; Ctrl-J/K; refresh selection; Esc/Ctrl-C; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
     print('Evidence:', ROOT, flush=True)
 finally:
     for name in SPAWNED:

@@ -7,6 +7,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
+- Browse the `prefix + f` agent picker with Ctrl-J/Ctrl-K as well as the arrow keys
 - Start a new agent from the sidebar: press `n`, pick the kind, and it opens in a new window of the selected agent's project and directory, with you in it
 - Organize project sessions from the sidebar: press `o`, then Enter or Space to group all agents across every session using the configured background AI command; opening or canceling runs nothing
 - Focus the previous or next agent directly with Alt+↑/↓, across sessions and without entering the sidebar; configure the keys with `@agent-plane-previous-key` and `@agent-plane-next-key`

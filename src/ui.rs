@@ -157,6 +157,8 @@ impl App {
             }
             KeyCode::Down => self.step(1),
             KeyCode::Up => self.step(-1),
+            KeyCode::Char('j') if ctrl => self.step(1),
+            KeyCode::Char('k') if ctrl => self.step(-1),
             KeyCode::Char('u') if ctrl => {
                 self.query.clear();
                 self.filter(false);
@@ -377,7 +379,7 @@ fn draw(f: &mut Frame, app: &mut App) {
     f.render_widget(
         Paragraph::new(hints(&[
             ("type", "search"),
-            ("↑/↓", "browse"),
+            ("↑/↓ ctrl-j/k", "browse"),
             ("⏎", "focus"),
             ("esc", "cancel"),
         ])),
@@ -567,6 +569,19 @@ mod tests {
         app.all_agents.retain(|a| a.pane != "%10");
         app.filter(true);
         assert_eq!(app.selected().unwrap().pane, "%11");
+    }
+
+    #[test]
+    fn ctrl_j_and_k_browse_while_plain_j_and_k_stay_query_text() {
+        let mut app = app();
+        let first = app.list.selected().unwrap();
+        let _ = app.key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL));
+        assert_eq!(app.list.selected().unwrap(), first + 1);
+        let _ = app.key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+        assert_eq!(app.list.selected().unwrap(), first);
+        assert!(app.query.is_empty());
+        type_query(&mut app, "jk");
+        assert_eq!(app.query, "jk");
     }
 
     #[test]
