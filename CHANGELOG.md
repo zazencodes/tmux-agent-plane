@@ -26,6 +26,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Give an AI name that breaks the naming rule one corrected retry, and show the rejected answer in the error if the retry fails too
+- Clear the `auto-name:worker` warning once a later agent is named, and stop repeating an old naming error after every daemon restart
 - Run global organization through the same configured background command/model as AI naming, with progress in the sidebar and guarded native session moves; never send organization tasks into open agent panes
 - Show the default-yes confirmation as `[Y/n]` for organization and kill; Enter accepts, and Space also accepts organization
 - Close a window's sidebar immediately when its last other pane disappears, removing the full-screen sidebar pause before the window closes

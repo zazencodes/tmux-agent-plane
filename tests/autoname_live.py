@@ -174,6 +174,7 @@ with (root / 'namer.calls').open('a') as log: log.write(json.dumps(record) + '\\
 while (root / 'namer.hold').exists(): time.sleep(0.05)
 mode = (root / 'namer.mode').read_text() if (root / 'namer.mode').exists() else 'good'
 if mode == 'bad': print('`bad-output`')
+elif mode == 'retry' and 'rejected_answer' not in data: print('much-too-long-for-an-agent-name')
 elif mode == 'fail': print('fixture failed', file=sys.stderr); sys.exit(7)
 elif mode == 'duplicate': print('keep-name')
 else: print('auto-p' + data['title'].rsplit('%', 1)[-1])
@@ -377,22 +378,34 @@ try:
     # Disable/re-enable a default agent after reserving: the ledger survives restart.
     (ROOT / 'namer.mode').write_text('bad')
     bad = spawn()
-    wait('bad output call', lambda: len(calls()) == 4)
+    wait('bad output retried once', lambda: len(calls()) == 5)
+    assert calls()[4]['data']['rejected_answer'] == '`bad-output`\n'
     wait('bad output diagnostic', lambda: '[auto-name:worker] ERROR:' in (STATE / 'daemon.log').read_text())
     assert by_pane(bad)['name'] == 'pi-' + bad[1:]
+    assert 'it answered "`bad-output`\\n"' in (STATE / 'daemon.log').read_text()
     settle(3)
-    assert len(calls()) == 4
+    assert len(calls()) == 5
     assert (STATE / 'daemon.log').read_text().count('[auto-name:worker] ERROR:') == 1
     assert 'auto-name:worker' in tmux('show-options', '-gqv', '@agent_plane_status')
     plane('daemon', 'restart')
     settle(3)
-    assert len(calls()) == 4, 'failed attempts repeated after restart'
-    RESULTS.update(bad_output_rejected=True, failure_persisted_and_deduplicated=True, attempts_survive_restart=True)
+    assert len(calls()) == 5, 'failed attempts repeated after restart'
+    assert (STATE / 'daemon.log').read_text().count('[auto-name:worker] ERROR:') == 1, 'restart raised a stale fault'
+    assert 'auto-name:worker' not in tmux('show-options', '-gqv', '@agent_plane_status')
+    RESULTS.update(bad_output_rejected=True, failure_logged_and_deduplicated=True, attempts_survive_restart=True, restart_drops_stale_fault=True)
+    # A rejected answer is corrected by its retry, without a fault.
+    (ROOT / 'namer.mode').write_text('retry')
+    corrected = spawn()
+    wait('retry names the agent', lambda: by_pane(corrected)['name'] == 'auto-p' + corrected[1:])
+    assert len(calls()) == 7
+    assert calls()[6]['data']['rejected_answer'] == 'much-too-long-for-an-agent-name\n'
+    assert (STATE / 'daemon.log').read_text().count('[auto-name:worker] ERROR:') == 1
+    RESULTS['rejected_answer_corrected_by_retry'] = True
     # Change command explicitly to acknowledge the fault and clear global backoff.
     (ROOT / 'namer.mode').write_text('duplicate')
     save_config([str(NAMER), 'fixture-duplicate', '{prompt}'])
     duplicate = spawn()
-    wait('duplicate name rejected', lambda: len(calls()) == 5 and 'already the name' in (STATE / 'daemon.log').read_text())
+    wait('duplicate name rejected', lambda: len(calls()) == 9 and 'already the name' in (STATE / 'daemon.log').read_text())
     assert by_pane(duplicate)['name'] == 'pi-' + duplicate[1:]
     RESULTS['duplicate_output_rejected'] = True
     # Missing executables fail once without affecting live tracking.
@@ -400,7 +413,7 @@ try:
     missing = spawn()
     wait('missing command diagnostic', lambda: 'not installed or executable' in (STATE / 'daemon.log').read_text())
     assert len(index()['agents']) == len(PANES)
-    assert len(calls()) == 5
+    assert len(calls()) == 9
     # Setup reports missing commands without enabling them.
     client.key(b'c7')
     wait('custom editor again', lambda: 'Custom command' in client.text())
