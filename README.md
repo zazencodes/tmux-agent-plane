@@ -69,7 +69,7 @@ set -g @plugin 'zazencodes/tmux-agent-plane'
 
 Without TPM, clone the repo and add `run-shell /path/to/tmux-agent-plane/tmux-agent-plane.tmux` to `~/.tmux.conf`.
 
-The plugin starts the daemon once the first session exists, binds `prefix + S` to the sidebar and `prefix + A` to the agent list popup, and sets a `session-created[90]` hook to start the watcher and `session-window-changed[90]` and `client-session-changed[90]` hooks that bring the open sidebar to each window you visit. To use another sidebar key, set it before the plugin loads:
+The plugin starts the daemon once the first session exists, binds `prefix + S` to the sidebar and `prefix + A` to the agent list popup, and sets a `session-created[90]` hook to start the watcher and `session-window-changed[90]` and `client-session-changed[90]` hooks that bring the open sidebar to each window you visit. A `window-layout-changed[90]` hook closes a sidebar as soon as its last other pane disappears. To use another sidebar key, set it before the plugin loads:
 
 ```tmux
 set -g @agent-plane-sidebar-key Space   # replaces tmux's next-layout binding
@@ -147,7 +147,7 @@ Run your agents as usual. Then ask any of them things like:
 
 An agent in a linked window has one index row, displayed under the first session by name. It counts as visible when its pane is visible through any link.
 
-While the sidebar is open, every window has one, including windows and sessions you create later; each keeps its own selection. A window's sidebar closes with the window: when its other panes are gone, the daemon closes it within a second or so. The sidebar and popup start on the first blocked agent, or else the first done one. The agent you are looking at is shown in bold in the sidebar.
+While the sidebar is open, every window has one, including windows and sessions you create later; each keeps its own selection. A window's sidebar closes with the window: when its other panes are gone, the layout hook closes it immediately. The sidebar and popup start on the first blocked agent, or else the first done one. The agent you are looking at is shown in bold in the sidebar.
 
 View mode starts off. With `v` on, moving with arrows or `j`/`k` previews the selected agent's window/session and keeps keyboard input in its sidebar. The sidebar pane itself moves into the previewed window, so selection, view mode, filter, search and order stay exactly as they were, and the sidebar it swapped with takes its place in the window you left, which gets back the pane it had active before the sidebar: come back with plain tmux and you land on that agent, with no key or focus event sent to it while you were away. `v` again returns to selecting without preview. Preview keeps the sidebar active, so a done agent remains unseen; `Enter` focuses it and makes it seen, and the sidebar moves with you the same way when view mode is off. Navigation requires a unique client in the input sidebar and refuses a destination session/window used by another client.
 

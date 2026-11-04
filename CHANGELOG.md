@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Fixed
+
+- Close a window's sidebar immediately when its last other pane disappears, removing the full-screen sidebar pause before the window closes
+
 ## 0.4.3 - 2026-11-04
 
 ### Added

@@ -264,7 +264,7 @@ fn kill_identity(agent: &Agent) -> Result<Option<i32>> {
     }
 }
 
-/// Include the daemon closing the lone sidebar left behind, and every session linking this window.
+/// Include the layout hook closing the lone sidebar, and every session linking this window.
 /// Refuse to remove the originating client's attached session, even indirectly.
 fn ending_sessions(agent: &Agent, client: &Client) -> Result<Vec<String>> {
     let panes = tmux::run(&[

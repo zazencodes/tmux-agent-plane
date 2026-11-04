@@ -295,11 +295,11 @@ def assert_lone_sidebar_closes():
     sidebar = sidebar_pane(window)
     panes = tmux("list-panes", "-t", window, "-F", "#{pane_id}").split()
     shell = next(pane for pane in panes if pane != sidebar)
+    started = time.monotonic()
     tmux("kill-pane", "-t", shell)
     wait("lone sidebar's window closes",
-         lambda: window not in tmux("list-windows", "-a", "-F", "#{window_id}").split())
-    calls = [json.loads(line) for line in (ROOT / "tmux.calls").read_text().splitlines()]
-    assert ["kill-pane", "-t", sidebar] in calls, "the daemon closes it"
+         lambda: window not in tmux("list-windows", "-a", "-F", "#{window_id}").split(), timeout=0.3)
+    assert time.monotonic() - started < 0.3, "layout hook closes it without a daemon tick"
     assert "sidebar:close" not in (STATE / "daemon.log").read_text()
 
 
@@ -706,7 +706,10 @@ try:
     tmux("set-option", "-g", "status-format[0]", "TOP-STATUS #{window_id}")
     tmux("set-option", "-as", "terminal-features", ",xterm-256color:RGB")
     tmux("set-option", "-s", "focus-events", "on")  # So a stray focus event reaches a fixture.
-    plane("daemon", "start")
+    subprocess.run(["bash", str(SOURCE.parent / "tmux-agent-plane.tmux")], env=ENV, check=True)
+    # This suite controls sidebar arrivals explicitly; retain the plugin's close hook.
+    for hook in ("session-created", "session-window-changed", "client-session-changed"):
+        tmux("set-hook", "-gu", hook + "[90]")
     wait("daemon index", lambda: (STATE / "agents.json").exists())
     for name, placement in [("nav-work", "window"), ("nav-done", "window"), ("nav-idle", "window"), ("nav-away", "session")]:
         plane("spawn", "pi", "--in", placement, "--cwd", str(ROOT), "--name", name)

@@ -19,6 +19,11 @@ tmux bind-key "${sidebar_key:-S}" run-shell "tmux-agent-plane toggle-sidebar '#{
 follow="run-shell -b \"tmux-agent-plane follow-sidebar '#{window_id}'\""
 tmux set-hook -g 'session-window-changed[90]' "$follow"
 tmux set-hook -g 'client-session-changed[90]' "$follow"
+# Close a lone sidebar on the layout event, before waiting for a daemon scan.
+# Pin the event's window: its removed active pane may invalidate the hook's default target.
+# run-shell -C runs tmux commands directly; ## defers the condition until that target is set.
+tmux set-hook -g 'window-layout-changed[90]' \
+  'run-shell -C "if-shell -F -t #{hook_window} '\''##{&&:##{==:##{window_panes},1},##{==:##{@agent-plane-sidebar},1}}'\'' '\''kill-pane -t #{hook_window}'\''"'
 # prefix + A: the agent list with a large preview, in a popup.
 tmux bind-key A display-popup -E -w 90% -h 85% -T " agents " "tmux-agent-plane ui"
 

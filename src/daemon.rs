@@ -117,11 +117,6 @@ fn run_inner() -> Result<()> {
         let agents = batch.values;
         let mut issues = batch.issues;
         issues.extend(crate::autoname::tick(&mut auto_name, &agents, &panes, now));
-        for pane in lone_sidebars(&panes) {
-            if let Err(error) = close_sidebar(pane) {
-                issues.push(Issue::new(format!("sidebar:close:{pane}"), error));
-            }
-        }
         order = next_order(order, requested_order, &agents, &panes);
         last_agent = last_used(last_agent, &before, &agents, &panes);
         recent_event = recent_event.filter(|event| event.is_live(now));
@@ -219,29 +214,6 @@ fn last_used(
         .map(|a| a.pane.clone())
         .or_else(|| last.filter(|pane| panes.iter().any(|p| &p.id == pane)))
         .or_else(|| visible().next().map(|a| a.pane.clone()))
-}
-
-/// Sidebars in windows whose other panes are gone. Leaving one lets tmux close the window.
-fn lone_sidebars(panes: &[tmux::Pane]) -> Vec<&str> {
-    panes
-        .iter()
-        .filter(|pane| {
-            pane.sidebar && panes.iter().filter(|p| p.window == pane.window).count() == 1
-        })
-        .map(|pane| pane.id.as_str())
-        .collect()
-}
-
-/// A pane that went away since the snapshot needed no closing: that is not a fault.
-fn close_sidebar(pane: &str) -> Result<()> {
-    let Err(error) = tmux::run(&["kill-pane", "-t", pane]) else {
-        return Ok(());
-    };
-    let panes = tmux::run(&["list-panes", "-a", "-F", "#{pane_id}"])?;
-    if panes.lines().any(|line| line == pane) {
-        return Err(error);
-    }
-    Ok(())
 }
 
 /// Status writes and client refreshes are presentation; none can invalidate tracking.
@@ -754,17 +726,6 @@ mod tests {
             last_used(Some("%9".into()), &before(&on_none), &on_none, &live),
             None
         );
-    }
-
-    #[test]
-    fn only_a_window_holding_nothing_but_a_sidebar_is_lone() {
-        let mut sidebar = pane("%1", "@1");
-        sidebar.sidebar = true;
-        let beside = pane("%2", "@1");
-        assert!(lone_sidebars(&[sidebar.clone(), beside]).is_empty());
-        assert_eq!(lone_sidebars(std::slice::from_ref(&sidebar)), ["%1"]);
-        let plain = pane("%3", "@2");
-        assert!(lone_sidebars(&[plain]).is_empty());
     }
 
     fn batch(values: Vec<Detected>, issues: Vec<Issue>) -> Batch<Detected> {
