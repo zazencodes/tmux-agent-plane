@@ -58,12 +58,24 @@ pub fn toggle(window: &str) -> Result<()> {
     tmux::run(&["select-pane", "-t", &pane]).map(drop)
 }
 
-/// Run by the plugin's hooks when a window comes on screen: add the sidebar to it while open.
+/// Run by the plugin's hook when a window is created: add the sidebar to it while open, so its
+/// agent has its final width before anyone looks at it.
 pub fn follow(window: &str) -> Result<()> {
-    if is_open()? {
-        add(window)?;
+    if !is_open()? {
+        return Ok(());
     }
-    Ok(())
+    match add(window) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            // A window can close as soon as it opens, and a failed hook would open tmux's view
+            // mode over the pane on screen. Any other failure is real.
+            let windows = tmux::run(&["list-windows", "-a", "-F", "#{window_id}"])?;
+            if windows.lines().any(|id| id == window) {
+                return Err(error);
+            }
+            Ok(())
+        }
+    }
 }
 
 fn is_open() -> Result<bool> {

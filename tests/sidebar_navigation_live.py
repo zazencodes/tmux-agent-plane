@@ -908,7 +908,7 @@ try:
     tmux("set-option", "-s", "focus-events", "on")  # So a stray focus event reaches a fixture.
     subprocess.run(["bash", str(SOURCE.parent / "tmux-agent-plane.tmux")], env=ENV, check=True)
     # This suite controls sidebar arrivals explicitly; retain the plugin's close hook.
-    for hook in ("session-created", "session-window-changed", "client-session-changed"):
+    for hook in ("session-created", "window-linked"):
         tmux("set-hook", "-gu", hook + "[90]")
     wait("daemon index", lambda: (STATE / "agents.json").exists())
     for name, placement in [("nav-work", "window"), ("nav-done", "window"), ("nav-idle", "window"), ("nav-away", "session")]:

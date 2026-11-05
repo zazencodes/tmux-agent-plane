@@ -19,7 +19,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
-- Moving between agents no longer makes them reflow on arrival: the daemon keeps hidden windows at your terminal's size, including after the terminal resizes, and new windows start at that size. This sets tmux's global `default-size`
+- Moving between agents no longer makes them reflow on arrival: the daemon keeps hidden windows at your terminal's size, including after the terminal resizes, and new windows start at that size with their sidebar already in place. This sets tmux's global `default-size`
 - Confirm global organization in a compact yes/no footer like kill: `o`, then Enter, Space or `y` to accept; `n` / Esc cancels while the agent list stays visible
 
 - Clarify sidebar organization covers all tracked agents across every tmux session, including hidden sidebar rows

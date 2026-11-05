@@ -53,7 +53,7 @@ enum Cmd {
         /// tmux window id or target, e.g. `@104` or `work:2`
         window: String,
     },
-    /// Add the sidebar to a window while it is open (run by the plugin when a window comes on screen)
+    /// Add the sidebar to a window while it is open (run by the plugin when a window is created)
     FollowSidebar {
         /// tmux window id or target
         window: String,

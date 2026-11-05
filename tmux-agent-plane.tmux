@@ -41,11 +41,10 @@ tmux bind-key -n "$previous_key" run-shell "tmux-agent-plane cycle previous --cl
 tmux bind-key -n "$next_key" run-shell "tmux-agent-plane cycle next --client #{q:client_name}"
 tmux set-option -g @agent-plane-bound-previous-key "$previous_key"
 tmux set-option -g @agent-plane-bound-next-key "$next_key"
-# While the sidebar is open, a window gets one when it comes on screen (new windows, sessions).
+# While the sidebar is open, a window gets one as soon as it exists, so its agent has its final
+# width before anyone looks at it. window-linked also fires for new sessions and moved panes.
 # A fixed hook index, so reloading tmux.conf replaces these hooks and keeps any of your own.
-follow="run-shell -b \"tmux-agent-plane follow-sidebar '#{window_id}'\""
-tmux set-hook -g 'session-window-changed[90]' "$follow"
-tmux set-hook -g 'client-session-changed[90]' "$follow"
+tmux set-hook -g 'window-linked[90]' "run-shell -b \"tmux-agent-plane follow-sidebar '#{hook_window}'\""
 # Close a lone sidebar on the layout event, before waiting for a daemon scan.
 # Pin the event's window: its removed active pane may invalidate the hook's default target.
 # run-shell -C runs tmux commands directly; ## defers the condition until that target is set.

@@ -71,7 +71,7 @@ set -g @plugin 'zazencodes/tmux-agent-plane'
 
 Without TPM, clone the repo and add `run-shell /path/to/tmux-agent-plane/tmux-agent-plane.tmux` to `~/.tmux.conf`.
 
-The plugin starts the daemon once the first session exists, binds `prefix + S` to the sidebar and `prefix + a` to the agent list popup, and sets a `session-created[90]` hook to start the watcher and `session-window-changed[90]` and `client-session-changed[90]` hooks that bring the open sidebar to each window you visit. A `window-layout-changed[90]` hook closes a sidebar as soon as its last other pane disappears. To use another sidebar key, set it before the plugin loads:
+The plugin starts the daemon once the first session exists, binds `prefix + S` to the sidebar and `prefix + a` to the agent list popup, and sets a `session-created[90]` hook to start the watcher and a `window-linked[90]` hook that gives each new window the open sidebar. A `window-layout-changed[90]` hook closes a sidebar as soon as its last other pane disappears. To use another sidebar key, set it before the plugin loads:
 
 ```tmux
 set -g @agent-plane-sidebar-key Space   # replaces tmux's next-layout binding
@@ -314,7 +314,7 @@ AI output must be two or three lowercase words joined by hyphens, each starting 
 | `kill <agent>` | Close the agent's pane |
 | `spawn claude\|codex\|pi\|opencode\|agy\|grok ["<task>"] [--in pane\|window\|session] [--session SESSION] [--cwd DIR] [--name NAME] [--wait] [--timeout S]` | Start an agent. `--in pane` (default) splits the caller's pane; `--session` selects an existing project with `--in window`, or names a new one with `--in session` |
 | `toggle-sidebar <window>` | What the sidebar key does, from a window (a window or pane id) |
-| `follow-sidebar <window>` | Add the sidebar to a window while it is open. The plugin runs it when a window comes on screen |
+| `follow-sidebar <window>` | Add the sidebar to a window while it is open. The plugin runs it when a window is created |
 | `sidebar` | The sidebar's agent list, run in the sidebar pane |
 | `ui --client <client-name>` | The fuzzy agent picker popup (the plugin supplies the client) |
 | `daemon start` | Start the detached watcher; the plugin runs this automatically |
