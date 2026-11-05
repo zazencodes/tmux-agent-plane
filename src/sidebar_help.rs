@@ -12,7 +12,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("j k", "Move selection"),
     ("↑ ↓", "Move selection or in search"),
     ("^j ^k", "Move selection or in search"),
-    ("enter", "Jump / keep search / save"),
+    ("enter", "Open, even from search / save"),
     ("v", "Sidebar: window previews"),
     ("s", "Re-sort agents"),
     ("f", "Cycle state filter"),

@@ -614,10 +614,6 @@ impl Sidebar {
                 self.rebuild();
                 return;
             }
-            KeyCode::Enter => {
-                self.navigation.search = None;
-                return;
-            }
             // `/` again freezes the search: its matches stay, and the keys are commands again.
             KeyCode::Char('/') if key.modifiers.is_empty() => {
                 self.navigation.search = None;
@@ -650,6 +646,17 @@ impl Sidebar {
         // Results select the best match after every edit.
         self.navigation.pane = None;
         self.rebuild();
+    }
+
+    /// Enter: the agent to open, if any. A search that opened something is finished. A frozen
+    /// search stays, since keeping it was deliberate.
+    pub(crate) fn open_selected(&mut self) -> Option<Agent> {
+        let agent = self.selected()?.clone();
+        if self.navigation.search.take().is_some() {
+            self.navigation.query.clear();
+            self.rebuild();
+        }
+        Some(agent)
     }
 
     fn step(&mut self, delta: isize) {
@@ -1182,12 +1189,14 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
                     }
                     continue;
                 }
-                let command = sidebar.editing.is_none() && sidebar.navigation.search.is_none();
-                focus = key.code == KeyCode::Enter && command;
-                // Search edits, including arrows, stay in this pane. Only accepting the
-                // query previews its final selection; cancellation never switches context.
-                preview |= (matches!(key.code, KeyCode::Enter | KeyCode::Char('/'))
-                    && sidebar.navigation.search.is_some())
+                let searching = sidebar.navigation.search.is_some();
+                let command = sidebar.editing.is_none() && !searching;
+                focus = key.code == KeyCode::Enter
+                    && sidebar.editing.is_none()
+                    && sidebar.open_selected().is_some();
+                // Search edits, including arrows, stay in this pane. Only freezing the query
+                // previews its final selection; cancellation never switches context.
+                preview |= (searching && key.code == KeyCode::Char('/'))
                     || (command
                         && matches!(
                             key.code,
@@ -1330,7 +1339,11 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let footer = confirmation.map_or_else(
         || {
             Text::from(vec![
-                hints(&[("n", "new"), ("c", "configure"), ("o", "organize all")]),
+                if sidebar.navigation.search.is_some() {
+                    hints(&[("^j/^k", "browse"), ("^w ^u", "clear")])
+                } else {
+                    hints(&[("n", "new"), ("c", "configure"), ("o", "organize all")])
+                },
                 footer(sidebar, inner + 2, index::now_ms()),
             ])
         },
@@ -1478,18 +1491,9 @@ pub(crate) fn status_footer(sidebar: &Sidebar, width: usize, now: u64) -> Option
             colour(State::Blocked),
         ),
         (None, Some(_)) => hints(&[("⏎", "save"), ("esc", "cancel"), ("^w ^u", "clear")]),
-        (None, None) if sidebar.navigation.search.is_some() => hints(&[
-            (
-                "⏎",
-                if sidebar.navigation.view {
-                    "preview"
-                } else {
-                    "keep"
-                },
-            ),
-            ("esc", "cancel"),
-            ("^w ^u", "clear"),
-        ]),
+        (None, None) if sidebar.navigation.search.is_some() => {
+            hints(&[("⏎", "open"), ("/", "freeze"), ("esc", "cancel")])
+        }
         (None, None)
             if sidebar.organize_status.as_ref().is_some_and(|s| {
                 s.running || s.failed || now.saturating_sub(s.updated_at) < 10_000
@@ -1844,9 +1848,8 @@ mod tests {
             query: String::new(),
             pane: None,
         });
-        assert!(footer(&sidebar, 38, 100).to_string().contains("keep"));
-        sidebar.navigation.view = true;
-        assert!(footer(&sidebar, 38, 100).to_string().contains("preview"));
+        assert!(footer(&sidebar, 38, 100).to_string().contains("open"));
+        assert!(footer(&sidebar, 38, 100).to_string().contains("freeze"));
         sidebar.editing = Some(Rename {
             pane: "%1".into(),
             name: "rename".into(),
@@ -2269,7 +2272,7 @@ mod tests {
         press(&mut sidebar, KeyCode::Char('/'));
         sidebar.rebuild();
         assert_eq!(order(&sidebar), ["%3", "%2", "%1", "%4"]);
-        press(&mut sidebar, KeyCode::Enter);
+        press(&mut sidebar, KeyCode::Char('/'));
         assert_eq!(order(&sidebar), ["%3", "%2", "%1", "%4"]);
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
         sidebar.all_agents[2].state = State::Idle;
@@ -2287,7 +2290,7 @@ mod tests {
             press(&mut sidebar, KeyCode::Char(c));
         }
         assert_eq!(sidebar.agents.len(), 2);
-        press(&mut sidebar, KeyCode::Enter);
+        press(&mut sidebar, KeyCode::Char('/'));
         assert!(sidebar.navigation.search.is_none());
         assert_eq!(sidebar.navigation.query, "PaYmEnT");
         press(&mut sidebar, KeyCode::Char('/'));
@@ -2309,6 +2312,31 @@ mod tests {
             sidebar.rebuild();
             assert_eq!(sidebar.selected().unwrap().pane, "%1");
         }
+    }
+
+    #[test]
+    fn enter_opens_from_a_search_and_ends_it_but_keeps_a_frozen_one() {
+        let mut sidebar = showing(vec![agent("%1", State::Idle), agent("%2", State::Idle)]);
+        press(&mut sidebar, KeyCode::Char('/'));
+        for c in "%2".chars() {
+            press(&mut sidebar, KeyCode::Char(c));
+        }
+        assert_eq!(sidebar.open_selected().unwrap().pane, "%2");
+        assert!(sidebar.navigation.search.is_none() && sidebar.navigation.query.is_empty());
+        assert_eq!(order(&sidebar).len(), 2);
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
+        // No match: nothing to open, and the search stays open to edit.
+        press(&mut sidebar, KeyCode::Char('/'));
+        press(&mut sidebar, KeyCode::Char('☃'));
+        assert!(sidebar.open_selected().is_none());
+        press(&mut sidebar, KeyCode::Enter);
+        assert_eq!(sidebar.navigation.query, "☃");
+        assert!(sidebar.navigation.search.is_some());
+        sidebar.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        press(&mut sidebar, KeyCode::Char('1'));
+        press(&mut sidebar, KeyCode::Char('/'));
+        assert_eq!(sidebar.open_selected().unwrap().pane, "%1");
+        assert_eq!(sidebar.navigation.query, "1");
     }
 
     #[test]

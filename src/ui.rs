@@ -309,14 +309,14 @@ impl App {
             }
             return ControlFlow::Continue(());
         }
+        if key.code == KeyCode::Enter && self.sidebar.editing.is_none() {
+            return match self.sidebar.open_selected() {
+                Some(agent) => ControlFlow::Break(Some(agent)),
+                None => ControlFlow::Continue(()),
+            };
+        }
         if self.sidebar.editing.is_none() && self.sidebar.navigation.search.is_none() {
             match key.code {
-                KeyCode::Enter => {
-                    if let Some(agent) = self.sidebar.selected() {
-                        return ControlFlow::Break(Some(agent.clone()));
-                    }
-                    return ControlFlow::Continue(());
-                }
                 KeyCode::Char('q') => return ControlFlow::Break(None),
                 KeyCode::Esc if self.sidebar.navigation.query.is_empty() => {
                     return ControlFlow::Break(None);
@@ -635,8 +635,9 @@ fn draw(f: &mut Frame, app: &mut App) {
                 hints(&[
                     ("type", "search"),
                     ("^j/^k", "browse"),
+                    ("⏎", "open"),
                     ("tab", "type to agent"),
-                    ("/ ⏎", "freeze"),
+                    ("/", "freeze"),
                     ("esc", "cancel"),
                     ("^w ^u", "clear"),
                 ])
@@ -920,9 +921,8 @@ mod tests {
         assert_eq!(app.sidebar.selected().unwrap().pane, "%12");
         type_query(&mut app, "cedarr");
         assert_eq!(app.sidebar.selected().unwrap().pane, "%10");
-        let _ = press(&mut app, KeyCode::Enter);
         let ControlFlow::Break(Some(chosen)) = press(&mut app, KeyCode::Enter) else {
-            panic!("second Enter focuses the selection");
+            panic!("Enter opens the selection from the search");
         };
         assert_eq!(chosen.pane, "%10");
     }
@@ -1125,7 +1125,7 @@ mod tests {
         assert!(app.sidebar.navigation.query.is_empty());
         assert_eq!(selected(&app), "quartz-build");
         type_query(&mut app, "cedar");
-        assert!(press(&mut app, KeyCode::Enter).is_continue());
+        assert!(press(&mut app, KeyCode::Char('/')).is_continue());
         assert_eq!(app.sidebar.navigation.query, "cedar");
         assert!(press(&mut app, KeyCode::Esc).is_continue());
         assert!(app.sidebar.navigation.query.is_empty());
