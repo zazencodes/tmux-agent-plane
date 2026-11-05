@@ -27,7 +27,7 @@ before 1.0, a breaking change bumps the minor version.
 - Open sidebar organization with lowercase `o`
 - Open the tmux agent picker with lowercase `prefix + a`; it opens on the list, where `j`/`k` browse and letters are commands; press `/` to fuzzy-search names and descriptions and `/` again to freeze the matches and use commands on them, Enter to focus the exact pane in the originating client, or `q`/Esc/Ctrl-C to close
 - Let the agent picker inherit the terminal background, with selection using the terminal palette
-- Fuzzy search sidebar rows by name and description together, allowing gaps and abbreviations while ignoring case; task, blocked detail, location and directory stay searchable, and matching rows keep their order
+- The sidebar and the agent picker share one search: fuzzy across agent name, project (tmux session), task and blocked detail, in any word order and ignoring case, with the best match first. Location and directory are no longer searched, and `/` during a search freezes its matches in both
 
 ### Fixed
 

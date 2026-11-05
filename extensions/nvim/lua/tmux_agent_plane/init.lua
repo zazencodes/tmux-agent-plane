@@ -31,7 +31,7 @@ local function agents()
     return
   end
   for _, row in ipairs(rows) do
-    for _, field in ipairs({ "name", "title", "pane", "state", "location" }) do
+    for _, field in ipairs({ "name", "title", "session", "pane", "state", "location" }) do
       if type(row) ~= "table" or type(row[field]) ~= "string" then
         error_message("tmux-agent-plane list --json: invalid agent field " .. field)
         return
@@ -64,7 +64,7 @@ function M.agents(opts)
         local description = agent.state == "blocked" and type(agent.detail) == "string" and detail or agent.title
         return {
           value = agent,
-          ordinal = agent.name .. " " .. agent.title .. " " .. detail,
+          ordinal = agent.name .. " " .. agent.session .. " " .. agent.title .. " " .. detail,
           display = agent.name .. "  " .. description .. "  [" .. agent.state .. " · " .. agent.location .. "]",
         }
       end,

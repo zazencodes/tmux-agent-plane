@@ -16,7 +16,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("v", "Sidebar: window previews"),
     ("s", "Re-sort agents"),
     ("f", "Cycle state filter"),
-    ("/", "Search; picker: again freezes"),
+    ("/", "Search; again freezes"),
     ("esc", "Clear / cancel / close"),
     ("r", "Rename selected agent"),
     ("x", "Confirm kill of agent"),

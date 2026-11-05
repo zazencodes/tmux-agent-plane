@@ -6,8 +6,8 @@ use crate::sidebar::{Origin, Sidebar, clients, confirmation_footer, input_client
 use crate::tmux;
 use ansi_to_tui::IntoText;
 use anyhow::{Context, Result, bail};
-use nucleo_matcher::pattern::{Atom, AtomKind, CaseMatching, Normalization};
-use nucleo_matcher::{Config, Matcher, Utf32Str};
+use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization, Pattern};
+use nucleo_matcher::{Matcher, Utf32Str};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -49,22 +49,24 @@ pub(crate) fn age(since_ms: u64) -> String {
     }
 }
 
-/// Search matches for `query`, best first. Stable ties preserve the given order.
+/// Search matches for `query`, best first. Stable ties preserve the given order. The one search:
+/// every list goes through here. Each word of the query can match any field, so a project,
+/// name and description can come in any order. An empty query matches every agent.
 pub(crate) fn rank(matcher: &mut Matcher, query: &str, agents: &[Agent]) -> Vec<Agent> {
-    let pattern = Atom::new(
+    let pattern = Pattern::new(
         query,
         CaseMatching::Ignore,
         Normalization::Never,
         AtomKind::Fuzzy,
-        false,
     );
     let mut buffer = Vec::new();
     let mut matches: Vec<_> = agents
         .iter()
         .filter_map(|agent| {
             let text = format!(
-                "{} {} {}",
+                "{} {} {} {}",
                 agent.name,
+                agent.session,
                 agent.title,
                 agent.detail.as_deref().unwrap_or("")
             );
@@ -174,7 +176,7 @@ struct App {
 impl App {
     fn new(client: &str) -> Self {
         let mut sidebar = Sidebar::default();
-        sidebar.ranker = Some(Matcher::new(Config::DEFAULT));
+        sidebar.opens_on_top = true;
         Self {
             sidebar,
             client: client.to_string(),
@@ -305,14 +307,6 @@ impl App {
             {
                 self.talking = Some(agent.pane.clone());
             }
-            return ControlFlow::Continue(());
-        }
-        // `/` again freezes the search: its matches stay, and the keys are commands again.
-        if self.sidebar.navigation.search.is_some()
-            && key.code == KeyCode::Char('/')
-            && key.modifiers.is_empty()
-        {
-            self.sidebar.key(KeyEvent::from(KeyCode::Enter));
             return ControlFlow::Continue(());
         }
         if self.sidebar.editing.is_none() && self.sidebar.navigation.search.is_none() {
@@ -480,7 +474,7 @@ fn draw(f: &mut Frame, app: &mut App) {
             .scroll((0, scroll))
             .style(Style::default().fg(if searching { TEXT } else { SUBTEXT }))
             .block(
-                panel(Line::from(" search names / descriptions ")).title_top(
+                panel(Line::from(" search names / projects / descriptions ")).title_top(
                     Line::styled(
                         format!(" {} / {} ", sidebar.agents.len(), sidebar.all_agents.len()),
                         SUBTEXT,
@@ -890,13 +884,16 @@ mod tests {
     }
 
     #[test]
-    fn fuzzy_queries_span_names_titles_and_details_and_ignore_case() {
+    fn fuzzy_queries_span_names_projects_titles_and_details_in_any_order() {
         let mut app = app();
+        app.sidebar.all_agents[1].session = "zeta".into();
         for (query, expected) in [
             ("CDRRV", "cedar-review"),
             ("audpay", "cedar-review"),
             ("qrtzbldshpcmp", "quartz-build"),
             ("approvecache", "quartz-build"),
+            ("zeta", "quartz-build"),
+            ("compiler zeta quartz", "quartz-build"),
         ] {
             type_query(&mut app, query);
             assert_eq!(selected(&app), expected);
@@ -1230,13 +1227,13 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
         let mut app = app();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert!(!screen(&terminal).contains("search names / descriptions"));
+        assert!(!screen(&terminal).contains("search names / projects / descriptions"));
         let _ = press(&mut app, KeyCode::Char('/'));
         terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert!(screen(&terminal).contains("search names / descriptions"));
+        assert!(screen(&terminal).contains("search names / projects / descriptions"));
         let _ = press(&mut app, KeyCode::Esc);
         terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert!(!screen(&terminal).contains("search names / descriptions"));
+        assert!(!screen(&terminal).contains("search names / projects / descriptions"));
     }
 
     #[test]
@@ -1249,7 +1246,7 @@ mod tests {
                 terminal.draw(|f| draw(f, &mut app)).unwrap();
                 if width == 120 {
                     let shown = screen(&terminal);
-                    assert!(shown.contains("search names / descriptions"));
+                    assert!(shown.contains("search names / projects / descriptions"));
                     if query == "missing" {
                         assert!(shown.contains("no matching agents"));
                     }

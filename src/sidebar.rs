@@ -8,7 +8,7 @@ use crate::navigation::{CLIENT_FORMAT, Client, guard_destination, parse_client};
 use crate::tmux;
 use crate::ui::{
     LAVENDER, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, counts, hints, icon,
-    message, name_style, panel, state_style,
+    message, name_style, panel, rank, state_style,
 };
 use anyhow::{Context, Result, bail};
 use nucleo_matcher::Matcher;
@@ -392,8 +392,9 @@ pub(crate) struct Sidebar {
     pub(crate) all_agents: Vec<Agent>,
     pub(crate) agents: Vec<Agent>,
     pub(crate) navigation: Navigation,
-    /// The picker ranks search matches, best first; the sidebar keeps its rows in place.
-    pub(crate) ranker: Option<Matcher>,
+    matcher: Matcher,
+    /// The picker starts on the top row; a sidebar starts on what wants attention.
+    pub(crate) opens_on_top: bool,
     /// `n` took the client to its new agent, so a popup has nothing left to show.
     pub(crate) left: bool,
     recent_event: Option<RecentEvent>,
@@ -418,27 +419,8 @@ pub(crate) struct Sidebar {
 }
 
 impl Navigation {
-    fn matches_query(&self, agent: &Agent) -> bool {
-        // One row lets a query span the name and description. Match characters in order;
-        // this is only a filter, so the published row order stays in charge.
-        let text = [
-            agent.name.as_str(),
-            agent.title.as_str(),
-            agent.detail.as_deref().unwrap_or(""),
-            agent.location.as_str(),
-            agent.cwd.as_str(),
-        ]
-        .join(" ")
-        .to_lowercase();
-        let mut characters = text.chars();
-        self.query
-            .to_lowercase()
-            .chars()
-            .all(|query| characters.by_ref().any(|c| c == query))
-    }
-
     /// Only a deliberate f skips categories. Refreshing must never change the filter.
-    fn cycle_filter(&mut self, agents: &[Agent]) {
+    fn cycle_filter(&mut self, matches: &[Agent]) {
         let cycle = [
             None,
             Some(State::Blocked),
@@ -452,12 +434,7 @@ impl Navigation {
             .unwrap();
         self.filter = (1..=cycle.len())
             .map(|step| cycle[(current + step) % cycle.len()])
-            .find(|state| {
-                state.is_none()
-                    || agents
-                        .iter()
-                        .any(|a| Some(a.state) == *state && self.matches_query(a))
-            })
+            .find(|state| state.is_none() || matches.iter().any(|a| Some(a.state) == *state))
             .unwrap(); // All is always available, including an empty index/query.
     }
 }
@@ -549,34 +526,27 @@ impl Sidebar {
     }
 
     pub(crate) fn rebuild(&mut self) {
-        let ranked = self.ranker.is_some() && !self.navigation.query.is_empty();
-        self.agents = self
+        let mut listed: Vec<Agent> = self
             .navigation
             .order
             .iter()
             .filter_map(|pane| self.all_agents.iter().find(|a| &a.pane == pane))
-            .filter(|a| {
-                self.navigation.filter.is_none_or(|state| a.state == state)
-                    && (ranked || self.navigation.matches_query(a))
-            })
+            .filter(|a| self.navigation.filter.is_none_or(|state| a.state == state))
             .cloned()
             .collect();
         // Sessions by name: a stable sort keeps the list's order within each.
-        self.agents.sort_by(|a, b| a.session.cmp(&b.session));
-        if ranked && let Some(ranker) = &mut self.ranker {
-            self.agents = crate::ui::rank(ranker, &self.navigation.query, &self.agents);
-        }
+        listed.sort_by(|a, b| a.session.cmp(&b.session));
+        self.agents = rank(&mut self.matcher, &self.navigation.query, &listed);
         let selected = self
             .navigation
             .pane
             .as_ref()
             .and_then(|pane| self.agents.iter().position(|a| &a.pane == pane))
-            // A sidebar starts on what wants attention. The picker starts on the top row, and
-            // ranked results put the best match there.
+            // Search results put the best match on the top row.
             .or_else(|| {
                 [State::Blocked, State::Done]
                     .into_iter()
-                    .filter(|_| self.ranker.is_none())
+                    .filter(|_| !self.opens_on_top && self.navigation.query.is_empty())
                     .find_map(|state| self.agents.iter().position(|a| a.state == state))
             })
             .or_else(|| (!self.agents.is_empty()).then_some(0));
@@ -641,9 +611,17 @@ impl Sidebar {
                 let before = self.navigation.search.take().unwrap();
                 self.navigation.query = before.query;
                 self.navigation.pane = before.pane;
+                self.rebuild();
+                return;
             }
             KeyCode::Enter => {
                 self.navigation.search = None;
+                return;
+            }
+            // `/` again freezes the search: its matches stay, and the keys are commands again.
+            KeyCode::Char('/') if key.modifiers.is_empty() => {
+                self.navigation.search = None;
+                return;
             }
             KeyCode::Down => {
                 self.step(1);
@@ -669,10 +647,8 @@ impl Sidebar {
             KeyCode::Char(c) if !ctrl => self.navigation.query.push(c),
             _ => return,
         }
-        // Ranked results select the best match after every edit.
-        if self.ranker.is_some() && !matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
-            self.navigation.pane = None;
-        }
+        // Results select the best match after every edit.
+        self.navigation.pane = None;
         self.rebuild();
     }
 
@@ -949,7 +925,8 @@ impl Sidebar {
             KeyCode::Char('k') | KeyCode::Up => self.step(-1),
             KeyCode::Char('v') => self.navigation.view = !self.navigation.view,
             KeyCode::Char('f') => {
-                self.navigation.cycle_filter(&self.all_agents);
+                let matches = rank(&mut self.matcher, &self.navigation.query, &self.all_agents);
+                self.navigation.cycle_filter(&matches);
                 self.rebuild();
             }
             KeyCode::Char('s') => self.resort(),
@@ -1209,7 +1186,8 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
                 focus = key.code == KeyCode::Enter && command;
                 // Search edits, including arrows, stay in this pane. Only accepting the
                 // query previews its final selection; cancellation never switches context.
-                preview |= (key.code == KeyCode::Enter && sidebar.navigation.search.is_some())
+                preview |= (matches!(key.code, KeyCode::Enter | KeyCode::Char('/'))
+                    && sidebar.navigation.search.is_some())
                     || (command
                         && matches!(
                             key.code,
@@ -1919,13 +1897,16 @@ mod tests {
         sidebar.key(KeyEvent::new(code, KeyModifiers::NONE));
     }
 
+    fn matches(query: &str, agent: &Agent) -> bool {
+        !rank(&mut Matcher::default(), query, std::slice::from_ref(agent)).is_empty()
+    }
+
     #[test]
     fn fuzzy_search_matches_case_insensitive_ordered_characters() {
         let mut a = agent("%1", State::Idle);
         a.name = "Sidebar-Search".into();
         a.title.clear();
-        a.location.clear();
-        a.cwd.clear();
+        a.session = "pro".into();
         for (query, expected) in [
             ("", true),
             ("SIDEBAR", true),
@@ -1936,72 +1917,61 @@ mod tests {
             ("sidebar-search-search", false),
             ("missing", false),
         ] {
-            let navigation = Navigation {
-                query: query.into(),
-                ..Navigation::default()
-            };
-            assert_eq!(navigation.matches_query(&a), expected, "{query:?}");
+            assert_eq!(matches(query, &a), expected, "{query:?}");
         }
         a.name = "Éclair-Über".into();
-        let navigation = Navigation {
-            query: "éLÜB".into(),
-            ..Navigation::default()
-        };
-        assert!(navigation.matches_query(&a));
+        assert!(matches("éLÜB", &a));
     }
 
     #[test]
-    fn fuzzy_search_spans_name_description_and_existing_fields() {
+    fn fuzzy_search_covers_name_project_and_description_only() {
         let mut a = agent("%1", State::Blocked);
         a.name = "api-builder".into();
         a.detail = Some("Confirm permission".into());
         for query in [
-            "ABLD",        // Agent name.
-            "RVPMT",       // Task title, retained even while blocked.
-            "CNFPRM",      // The displayed blocked description.
-            "WK:1",        // Location includes the tmux session name.
-            "TMP/CKT",     // Working directory.
-            "ABLD RVPMT",  // Name and task in one query.
-            "ABLD CNFPRM", // Name and displayed blocked description.
-            "ABLD RVPMT CNFPRM WK:1 TMP/CKT",
+            "ABLD",   // Agent name.
+            "WRK",    // Project: the tmux session.
+            "RVPMT",  // Task title, retained even while blocked.
+            "CNFPRM", // The displayed blocked description.
+            "ABLD RVPMT",
+            "RVPMT ABLD",
+            "CNFPRM WRK ABLD RVPMT",
         ] {
-            let navigation = Navigation {
-                query: query.into(),
-                ..Navigation::default()
-            };
-            assert!(navigation.matches_query(&a), "{query:?}");
+            assert!(matches(query, &a), "{query:?}");
+        }
+        // Paths would match nearly everything.
+        for query in ["TMP/CKT", "work:1"] {
+            assert!(!matches(query, &a), "{query:?}");
         }
     }
 
     #[test]
-    fn fuzzy_search_keeps_order_selection_filters_and_incremental_edits() {
+    fn search_ranks_best_first_and_composes_with_filters_and_edits() {
         let mut agents = vec![
             agent("%1", State::Working),
             agent("%2", State::Blocked),
             agent("%3", State::Idle),
         ];
         agents[0].name = "api-builder".into();
-        agents[1].name = "abld".into(); // A tighter match still keeps its published row.
+        agents[1].name = "abld".into(); // The tighter match goes first.
+        agents[2].name = "zzz".into();
         agents[2].title = "Unrelated task".into();
         let mut sidebar = showing(agents);
         sidebar.navigation.order = ["%1", "%2", "%3"].map(String::from).to_vec();
         sidebar.rebuild();
-        sidebar.select(Some(1));
-        press(&mut sidebar, KeyCode::Char('v'));
+        sidebar.select(Some(0));
         press(&mut sidebar, KeyCode::Char('/'));
         for c in "ABLD RVPMT".chars() {
             press(&mut sidebar, KeyCode::Char(c));
             assert!(sidebar.navigation.search.is_some());
-            assert!(sidebar.navigation.view);
-            assert_eq!(sidebar.selected().unwrap().pane, "%2");
         }
-        assert_eq!(order(&sidebar), ["%1", "%2"]);
-        assert!(footer(&sidebar, 38, 100).to_string().contains("preview"));
-        press(&mut sidebar, KeyCode::Up);
+        assert_eq!(order(&sidebar), ["%2", "%1"]);
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
+        press(&mut sidebar, KeyCode::Down);
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
-        press(&mut sidebar, KeyCode::Enter);
+        press(&mut sidebar, KeyCode::Char('/'));
         assert!(sidebar.navigation.search.is_none());
-        assert_eq!(order(&sidebar), ["%1", "%2"]);
+        assert_eq!(order(&sidebar), ["%2", "%1"]);
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
         press(&mut sidebar, KeyCode::Char('f'));
         assert_eq!(sidebar.navigation.filter, Some(State::Blocked));
@@ -2026,7 +1996,6 @@ mod tests {
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
         press(&mut sidebar, KeyCode::Esc);
         assert!(sidebar.navigation.query.is_empty());
-        assert!(sidebar.navigation.view);
     }
 
     #[test]
@@ -2335,7 +2304,7 @@ mod tests {
         assert!(sidebar.navigation.query.is_empty());
         let a = sidebar.all_agents.first_mut().unwrap();
         a.detail = Some("Please approve".into());
-        for query in ["approve", "CHECKOUT", "work:1", "AGENT-%1"] {
+        for query in ["approve", "PAYMENT", "work", "AGENT-%1"] {
             sidebar.navigation.query = query.into();
             sidebar.rebuild();
             assert_eq!(sidebar.selected().unwrap().pane, "%1");
