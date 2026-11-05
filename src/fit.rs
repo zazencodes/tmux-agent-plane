@@ -13,6 +13,7 @@ use crate::diagnostics::Issue;
 use crate::index::WindowView;
 use crate::sidebar;
 use crate::tmux::{self, Geometry, Size};
+use anyhow::Result;
 
 const LATEST: &str = "latest";
 
@@ -35,23 +36,35 @@ impl Fit {
         let Some(size) = settled else {
             return Vec::new();
         };
-        let command = command(size, self.default_size, views, geometry);
-        if command.is_empty() {
-            return Vec::new();
+        let mut result = Ok(());
+        if self.default_size != Some(size) {
+            // New windows in sessions nobody is attached to start at this size, and agents start there.
+            let value = format!("{}x{}", size.width, size.height);
+            match tmux::run(&["set-option", "-g", "default-size", &value]) {
+                Ok(_) => self.default_size = Some(size),
+                Err(error) => result = Err(error),
+            }
         }
-        let command: Vec<_> = command.iter().map(String::as_str).collect();
-        match tmux::run(&command) {
-            Ok(_) => {
-                self.default_size = Some(size);
-                Vec::new()
+        for command in window_commands(size, views, geometry) {
+            let command: Vec<_> = command.iter().map(String::as_str).collect();
+            if let Err(error) = tmux::run(&command) {
+                result = result.and(Err(error));
             }
-            // A window can close after the snapshot. The next tick retries on a fresh one, so
-            // only a second failure in a row is a fault.
-            Err(_) if !failed => {
-                self.failed = true;
-                Vec::new()
-            }
-            Err(error) => vec![Issue::new("fit", error)],
+        }
+        self.settle(failed, result)
+    }
+
+    /// A window can close after the snapshot. The next tick retries on a fresh one, so only a
+    /// second failure in a row is a fault, and it stays one until a tick succeeds.
+    fn settle(&mut self, failed: bool, result: Result<()>) -> Vec<Issue> {
+        let Err(error) = result else {
+            return Vec::new();
+        };
+        self.failed = true;
+        if failed {
+            vec![Issue::new("fit", error)]
+        } else {
+            Vec::new()
         }
     }
 }
@@ -67,47 +80,39 @@ fn target(geometry: &Geometry) -> Option<Size> {
         .then_some(first.size)
 }
 
-/// One tmux command, so each window goes straight to its final layout and its panes get one
-/// resize. `resize-window` pins the window to manual sizing; unsetting that hands it back to tmux.
+/// One tmux command per window, so each goes straight to its final layout and its panes get one
+/// resize, however many windows are stale. tmux refuses a single command that is too long.
+/// `resize-window` pins the window to manual sizing; unsetting that hands it back to tmux.
 /// `resize-pane` would unzoom a zoomed window, so those wait for tmux to size them on arrival.
-fn command(
-    size: Size,
-    default_size: Option<Size>,
-    views: &[WindowView],
-    geometry: &Geometry,
-) -> Vec<String> {
-    let mut commands: Vec<Vec<String>> = Vec::new();
-    if default_size != Some(size) {
-        // New windows in sessions nobody is attached to start at this size, and agents start there.
-        commands.push(args(&[
-            "set-option",
-            "-g",
-            "default-size",
-            &format!("{}x{}", size.width, size.height),
-        ]));
-    }
-    for view in views.iter().filter(|view| !view.viewed) {
-        let stale = geometry.windows.iter().any(|window| {
-            window.id == view.id && window.size != size && window.sizing == LATEST && !window.zoomed
-        });
-        if !stale {
-            continue;
-        }
-        commands.push(args(&[
-            "resize-window",
-            "-t",
-            &view.id,
-            "-x",
-            &size.width.to_string(),
-            "-y",
-            &size.height.to_string(),
-        ]));
-        if let Some(pane) = &view.sidebar {
-            commands.push(args(&["resize-pane", "-t", pane, "-x", sidebar::WIDTH]));
-        }
-        commands.push(args(&["set-option", "-wu", "-t", &view.id, "window-size"]));
-    }
-    commands.join(&";".to_string())
+fn window_commands(size: Size, views: &[WindowView], geometry: &Geometry) -> Vec<Vec<String>> {
+    views
+        .iter()
+        .filter(|view| !view.viewed)
+        .filter(|view| {
+            geometry.windows.iter().any(|window| {
+                window.id == view.id
+                    && window.size != size
+                    && window.sizing == LATEST
+                    && !window.zoomed
+            })
+        })
+        .map(|view| {
+            let mut steps = vec![args(&[
+                "resize-window",
+                "-t",
+                &view.id,
+                "-x",
+                &size.width.to_string(),
+                "-y",
+                &size.height.to_string(),
+            ])];
+            if let Some(pane) = &view.sidebar {
+                steps.push(args(&["resize-pane", "-t", pane, "-x", sidebar::WIDTH]));
+            }
+            steps.push(args(&["set-option", "-wu", "-t", &view.id, "window-size"]));
+            steps.join(&";".to_string())
+        })
+        .collect()
 }
 
 fn args(args: &[&str]) -> Vec<String> {
@@ -118,6 +123,7 @@ fn args(args: &[&str]) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::tmux::{ClientSize, WindowSize};
+    use anyhow::anyhow;
 
     const SCREEN: Size = Size {
         width: 200,
@@ -158,14 +164,14 @@ mod tests {
 
     #[test]
     fn a_hidden_window_and_its_sidebar_go_to_the_final_layout_in_one_command() {
-        let command = command(
+        let commands = window_commands(
             SCREEN,
-            Some(SCREEN),
             &[view("@1", false, Some("%9"))],
             &geometry(vec![window("@1", 80)]),
         );
+        assert_eq!(commands.len(), 1);
         assert_eq!(
-            command.join(" "),
+            commands[0].join(" "),
             format!(
                 "resize-window -t @1 -x 200 -y 50 ; resize-pane -t %9 -x {} ; \
                  set-option -wu -t @1 window-size",
@@ -175,17 +181,22 @@ mod tests {
     }
 
     #[test]
+    fn each_window_gets_its_own_command() {
+        let ids: Vec<String> = (0..100).map(|id| format!("@{id}")).collect();
+        let views: Vec<_> = ids.iter().map(|id| view(id, false, Some("%9"))).collect();
+        let windows = ids.iter().map(|id| window(id, 80)).collect();
+        assert_eq!(
+            window_commands(SCREEN, &views, &geometry(windows)).len(),
+            100
+        );
+    }
+
+    #[test]
     fn nothing_runs_once_every_window_fits() {
         let mut fitted = window("@1", 200);
         fitted.size.height = 50;
         assert!(
-            command(
-                SCREEN,
-                Some(SCREEN),
-                &[view("@1", false, None)],
-                &geometry(vec![fitted]),
-            )
-            .is_empty()
+            window_commands(SCREEN, &[view("@1", false, None)], &geometry(vec![fitted])).is_empty()
         );
     }
 
@@ -196,9 +207,8 @@ mod tests {
         let mut manual = window("@3", 80);
         manual.sizing = "manual".into();
         assert!(
-            command(
+            window_commands(
                 SCREEN,
-                Some(SCREEN),
                 &[
                     view("@1", true, None),
                     view("@2", false, None),
@@ -211,17 +221,17 @@ mod tests {
     }
 
     #[test]
-    fn a_new_size_becomes_the_default_for_new_windows_once() {
-        let command = command(
-            SCREEN,
-            Some(Size {
-                width: 1,
-                height: 1,
-            }),
-            &[],
-            &geometry(vec![]),
-        );
-        assert_eq!(command.join(" "), "set-option -g default-size 200x50");
+    fn a_fault_stays_raised_until_a_tick_succeeds() {
+        let mut fit = Fit::default();
+        let mut tick = |result: Result<()>| {
+            let failed = std::mem::take(&mut fit.failed);
+            fit.settle(failed, result).len()
+        };
+        assert_eq!(tick(Err(anyhow!("window closed"))), 0);
+        assert_eq!(tick(Err(anyhow!("still failing"))), 1);
+        assert_eq!(tick(Err(anyhow!("still failing"))), 1);
+        assert_eq!(tick(Ok(())), 0);
+        assert_eq!(tick(Err(anyhow!("window closed"))), 0);
     }
 
     #[test]
