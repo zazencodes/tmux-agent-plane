@@ -217,11 +217,9 @@ fn codex_pids(agents: &[Agent], panes: &[tmux::Pane]) -> Result<BTreeMap<String,
                 .iter()
                 .find(|p| p.id == agent.pane)
                 .context("Codex pane exited")?;
-            let pids = processes.descendants_named(pane.pid, "codex");
-            let [process] = pids.as_slice() else {
-                bail!("Codex process missing or ambiguous; organization refused");
-            };
-            result.insert(agent.pane.clone(), process.pid);
+            let pid = crate::agents::codex::agent_pid(&processes, pane.pid)
+                .context("Codex process missing or ambiguous; organization refused")?;
+            result.insert(agent.pane.clone(), pid);
         }
     }
     Ok(result)

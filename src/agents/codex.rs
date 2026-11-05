@@ -1,5 +1,5 @@
 //! Codex publishes activity and approvals in its terminal title.
-use super::{Launch, Observation, RawState, ScanContext};
+use super::{Launch, Observation, ProcessTable, RawState, ScanContext};
 use anyhow::Result;
 
 pub fn launch(task: Option<&str>) -> Result<Launch> {
@@ -12,27 +12,7 @@ pub fn launch(task: Option<&str>) -> Result<Launch> {
 pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
     let mut found = Vec::new();
     for pane in context.panes {
-        // Codex starts helper `codex` children; only the outermost process is the agent.
-        // A `codex` run by a Claude Code session in the same pane is that session's tool.
-        let all: Vec<_> = context
-            .processes
-            .descendants_named(pane.pid, "codex")
-            .into_iter()
-            .filter(|p| {
-                !context
-                    .processes
-                    .has_ancestor_named(p.pid, pane.pid, "claude")
-            })
-            .collect();
-        let processes: Vec<_> = all
-            .iter()
-            .filter(|p| {
-                !all.iter()
-                    .any(|a| a.pid != p.pid && context.processes.is_descendant(p.pid, a.pid))
-            })
-            .collect();
-        // Several top-level `codex` processes (parallel one-off runs) do not identify an agent.
-        if processes.len() != 1 {
+        if agent_pid(context.processes, pane.pid).is_none() {
             continue;
         }
         let (state, detail) = codex_state(&pane.title);
@@ -48,6 +28,28 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
         });
     }
     Ok(found)
+}
+
+/// The pane's Codex agent process. Codex starts helper `codex` children; only the outermost
+/// process is the agent. A `codex` run by a Claude Code session in the same pane is that
+/// session's tool. Several top-level `codex` processes (parallel one-off runs) identify no agent.
+pub fn agent_pid(processes: &ProcessTable, pane_pid: i32) -> Option<i32> {
+    let all: Vec<_> = processes
+        .descendants_named(pane_pid, "codex")
+        .into_iter()
+        .filter(|p| !processes.has_ancestor_named(p.pid, pane_pid, "claude"))
+        .collect();
+    let outermost: Vec<_> = all
+        .iter()
+        .filter(|p| {
+            !all.iter()
+                .any(|a| a.pid != p.pid && processes.is_descendant(p.pid, a.pid))
+        })
+        .collect();
+    match outermost.as_slice() {
+        [agent] => Some(agent.pid),
+        _ => None,
+    }
 }
 
 fn clean_title(title: &str) -> String {
@@ -75,7 +77,7 @@ fn codex_state(title: &str) -> (RawState, Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agents::{Process, ProcessTable};
+    use crate::agents::Process;
     use crate::tmux::Pane;
     use std::collections::HashMap;
 
@@ -122,6 +124,20 @@ mod tests {
             processes: &processes,
         };
         assert_eq!(scan(&context).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn agent_pid_is_the_outermost_codex_past_helpers_under_other_processes() {
+        let processes = ProcessTable {
+            processes: HashMap::from([
+                process(10, 1, "/bin/zsh"),
+                process(11, 10, "/bin/codex"),
+                process(12, 11, "/bin/node_repl"),
+                process(13, 12, "/bin/codex"),
+                process(14, 12, "/bin/codex"),
+            ]),
+        };
+        assert_eq!(agent_pid(&processes, 10), Some(11));
     }
 
     #[test]

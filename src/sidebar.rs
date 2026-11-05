@@ -303,11 +303,9 @@ fn action_identity(agent: &Agent) -> Result<Option<i32>> {
         bail!("agent state/identity changed; refresh and confirm again");
     }
     if agent.kind == index::Kind::Codex {
-        let pids = processes.descendants_named(pane.pid, "codex");
-        if pids.len() != 1 {
-            bail!("agent process changed; refresh and confirm again");
-        }
-        Ok(Some(pids[0].pid))
+        let pid = crate::agents::codex::agent_pid(&processes, pane.pid)
+            .context("agent process changed; refresh and confirm again")?;
+        Ok(Some(pid))
     } else {
         if agent.session_id.is_none() {
             bail!("agent has no native identity; action cancelled");

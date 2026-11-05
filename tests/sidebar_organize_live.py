@@ -53,6 +53,8 @@ for tool in ('osascript', 'notify-send'):
     path.chmod(0o755)
 subprocess.run(['cc', '-Wall', '-Wextra', '-Werror', str(SOURCE / 'tests/fixtures/sidebar/agent.c'),
                 '-o', str(BIN / 'pi')], check=True)
+subprocess.run(['cc', '-Wall', '-Wextra', '-Werror', str(SOURCE / 'tests/fixtures/sidebar/codex.c'),
+                '-o', str(BIN / 'codex')], check=True)
 
 CONFIG = ROOT / 'config/tmux-agent-plane/config.json'
 CONFIG.parent.mkdir(parents=True)
@@ -334,6 +336,15 @@ try:
     assert inputs() == baseline_input and input_calls() == baseline_calls
     solo_client.close()
     proof('all agents across projects move together; a final attached source retains a shell and its client, including blocked agents with zero input')
+
+    # Real Codex runs nested `codex` helpers; only the outermost process is the agent.
+    plane('spawn', 'codex', '--in', 'window', '--cwd', ROOT, '--name', 'codex-fixture')
+    wait('nested codex helper running', lambda: (ROOT / 'codex-helper').exists())
+    count = len(calls()) + 1
+    confirm()
+    assert 'organized all 4 agents' in finished(count)['message'], status()
+    wait('codex organized', lambda: agent('codex-fixture')['session'] == 'collected-project')
+    proof('a Codex agent with nested codex helpers is organized')
 
     # Full-roster validation rejects malformed output and identity changes before any moves.
     for kind in ('incomplete', 'unknown', 'bad-json', 'failure'):
