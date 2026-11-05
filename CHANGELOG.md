@@ -7,7 +7,6 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
-- `prefix + a`, then `f`, opens the agent picker already searching, ready to type
 - Sidebar session headings use the same per-session colours as the agent picker
 - `gg` and `G` jump to the first and last agent in the sidebar and the agent picker
 - The agent picker has the sidebar's actions: `n` new, `x` kill, `r` rename, `o` organize, `f` filter, `s` sort, `c` configure and `?` shortcuts
@@ -31,7 +30,7 @@ before 1.0, a breaking change bumps the minor version.
 
 - Clarify sidebar organization covers all tracked agents across every tmux session, including hidden sidebar rows
 - Open sidebar organization with lowercase `o`
-- Open the tmux agent picker with `prefix + a`, then `a`; it opens on the list, where `j`/`k` browse and letters are commands; press `/` to fuzzy-search names and descriptions and `/` again to freeze the matches and use commands on them, Enter to focus the exact pane in the originating client, or `q`/Esc/Ctrl-C to close
+- Open the tmux agent picker with lowercase `prefix + a`; it opens on the list, where `j`/`k` browse and letters are commands; press `/` to fuzzy-search names and descriptions and `/` again to freeze the matches and use commands on them, Enter to focus the exact pane in the originating client, or `q`/Esc/Ctrl-C to close
 - Let the agent picker inherit the terminal background, with selection using the terminal palette
 - The sidebar and the agent picker share one search: fuzzy across agent name, project (tmux session), task and blocked detail, in any word order and ignoring case, with the best match first. Location and directory are no longer searched, and `/` during a search freezes its matches in both
 
