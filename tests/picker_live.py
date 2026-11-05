@@ -149,7 +149,7 @@ def open_picker():
     """A state change may have a notification popup up, which takes keys until it times out."""
     def opened():
         if '▌' not in client.text():
-            client.key(b'\x01f')
+            client.key(b'\x01a')
             time.sleep(.4)
         return '▌' in client.text()
     wait('picker opens', opened)
@@ -173,14 +173,14 @@ try:
     tmux('set-option', '-g', 'popup-style', 'bg=#1e1e2e,fg=#cdd6f4')
     tmux('set-option', '-as', 'terminal-features', ',xterm-256color:RGB')
     subprocess.run(['bash', str(SOURCE / 'tmux-agent-plane.tmux')], env=ENV, check=True)
-    binding = next(line for line in tmux('list-keys', '-T', 'prefix').splitlines() if re.search(r'-T prefix f\s', line))
+    binding = next(line for line in tmux('list-keys', '-T', 'prefix').splitlines() if re.search(r'-T prefix a\s', line))
     assert 'bg=terminal,fg=terminal' in binding and '--client' in binding, binding
     client, other = Client('origin'), Client('other')
     CLIENTS += [client, other]
     wait('attached', lambda: len(tmux('list-clients').splitlines()) == 2)
     origin, untouched = client.context(), other.context()
     wait('index', lambda: (ROOT / 's/tmux-agent-plane/agents.json').exists())
-    client.key(b'\x01f')
+    client.key(b'\x01a')
     wait('empty picker', lambda: 'no agents running' in client.text())
     client.key(b'\r')
     time.sleep(.15)
@@ -193,7 +193,7 @@ try:
     rows = {row['name']: row for row in agents()}
     (ROOT / (rows['quartz-build']['pane'] + '.command')).write_text('blocked 0 0')
     wait('blocked publisher', lambda: next(a for a in agents() if a['name'] == 'quartz-build')['state'] == 'blocked')
-    client.key(b'\x01f')
+    client.key(b'\x01a')
     wait('picker', lambda: client.selected() == 'quartz-build')
     client.snapshot('all-agents')
     # The list opens in command mode: no search box, and letters are commands.
@@ -250,7 +250,7 @@ try:
     wait('cancelled', lambda: 'j/k browse' not in client.text())
     assert client.context() == origin
     # Esc in the search box cancels the edit and keeps the picker.
-    client.key(b'\x01f')
+    client.key(b'\x01a')
     wait('reopen fresh', lambda: client.selected() == 'quartz-build' and '› ' not in client.text())
     client.key(b'/qjk')
     wait('literal letters', lambda: '› qjk' in client.text())
@@ -279,7 +279,7 @@ try:
     client.key(b'\x03')
     wait('ctrl-c cancel', lambda: 'search names / descriptions' not in client.text() and '▌' not in client.text())
     assert client.context() == origin
-    client.key(b'\x01f')
+    client.key(b'\x01a')
     wait('reopen for rename', lambda: client.selected() == 'quartz-build')
     query(client, 'qrtzhlpr', 'quartz-helper')
     client.key(b'\r')
@@ -326,7 +326,7 @@ try:
     assert client.context() == origin and other.context() == untouched
     client.key(b'\x1b')
     wait('closed after kill', lambda: 'j/k browse' not in client.text())
-    client.key(b'\x01f')
+    client.key(b'\x01a')
     wait('reopen for focus', lambda: client.selected() == 'quartz-build')
     query(client, 'cdrrv', 'cedar-review')
     # Another client remains attached and active while the picker focuses its own client.
@@ -343,7 +343,7 @@ try:
     (BIN / 'claude').chmod(0o755)
     windows = lambda: tmux('list-windows', '-t', '=' + rows['quartz-build']['session'], '-F', '#{window_id}').split()
     before = windows()
-    client.key(b'\x01f')
+    client.key(b'\x01a')
     wait('reopen for new', lambda: client.selected() == 'quartz-build')
     client.key(b'n')
     wait('new prompt', lambda: 'new agent in ' + rows['quartz-build']['session'] in client.text())
@@ -368,7 +368,7 @@ try:
     placed = {a['name']: a['session'] for a in agents()}
     status = lambda: json.loads((ROOT / 's/tmux-agent-plane/agents.json').read_text()).get('organize')
     assert status() is None
-    client.key(b'\x01f')
+    client.key(b'\x01a')
     wait('reopen for organize', lambda: 'j/k browse' in client.text())
     client.key(b'o')
     wait('organize prompt', lambda: 'organize all agents? [Y/n]' in client.text() and 'via agy' in client.text())
