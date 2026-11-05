@@ -421,7 +421,7 @@ const GROUP_COLOURS: [Color; 8] = [
 
 /// Colour by position among all sessions, so groups differ until the palette runs out and
 /// searching or filtering rows never recolours one.
-fn group_colour(agents: &[Agent], session: &str) -> Color {
+pub(crate) fn group_colour(agents: &[Agent], session: &str) -> Color {
     let sessions: BTreeSet<&str> = agents.iter().map(|a| a.session.as_str()).collect();
     let position = sessions.iter().position(|s| *s == session).unwrap_or(0);
     GROUP_COLOURS[position % GROUP_COLOURS.len()]

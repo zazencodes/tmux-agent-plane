@@ -7,8 +7,8 @@ use crate::lifecycle;
 use crate::navigation::{CLIENT_FORMAT, Client, guard_destination, parse_client};
 use crate::tmux;
 use crate::ui::{
-    LAVENDER, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, counts, hints, icon,
-    message, name_style, panel, rank, state_style,
+    LAVENDER, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, counts, group_colour, hints,
+    icon, message, name_style, panel, rank, state_style,
 };
 use anyhow::{Context, Result, bail};
 use nucleo_matcher::Matcher;
@@ -1274,7 +1274,10 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     f.render_widget(block, list_area);
     let [mode_area, agents_area] =
         Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(content);
-    let mode = format!(" f {}", sidebar.navigation.filter.map_or("all", State::as_str));
+    let mode = format!(
+        " f {}",
+        sidebar.navigation.filter.map_or("all", State::as_str)
+    );
     let query = &sidebar.navigation.query;
     let search = sidebar.navigation.search.is_some();
     let room = inner.saturating_sub(mode.chars().count() + 4);
@@ -1321,6 +1324,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         let selected = sidebar.list.selected();
         let items = items(
             &sidebar.agents,
+            &sidebar.all_agents,
             selected,
             sidebar.editing.as_ref().map(|edit| &edit.name),
             inner,
@@ -1505,10 +1509,12 @@ pub(crate) fn status_footer(sidebar: &Sidebar, width: usize, now: u64) -> Option
     })
 }
 
-/// One item per agent, grouped under a heading per tmux session, with a blank line between
-/// agents. The selected agent gets an accent bar and a background; its heading does not.
+/// One item per agent, grouped under a heading per tmux session in that session's picker colour,
+/// with a blank line between agents. The selected agent gets an accent bar and a background; its
+/// heading does not. `all` is every agent, filtered out or not, so no search recolours a session.
 fn items<'a>(
     agents: &'a [Agent],
+    all: &[Agent],
     selected: Option<usize>,
     editing: Option<&String>,
     width: usize,
@@ -1527,7 +1533,10 @@ fn items<'a>(
                 let name = truncate(&a.session, width.saturating_sub(4));
                 let rule = "─".repeat(width.saturating_sub(name.chars().count() + 3));
                 lines.push(Line::from(vec![
-                    Span::styled(format!(" {name} "), Style::default().fg(LAVENDER).bold()),
+                    Span::styled(
+                        format!(" {name} "),
+                        Style::default().fg(group_colour(all, &a.session)).bold(),
+                    ),
                     Span::styled(rule, SURFACE2),
                 ]));
             }
@@ -2379,6 +2388,31 @@ mod tests {
                 .unwrap()
                 .contains("rename cancelled")
         );
+    }
+
+    #[test]
+    fn session_headings_use_the_pickers_colours_whatever_the_search() {
+        let mut other = agent("%2", State::Idle);
+        other.session = "zeta".into();
+        other.name = "elsewhere".into();
+        let mut sidebar = showing(vec![agent("%1", State::Idle), other]);
+        let heading_colour = |sidebar: &mut Sidebar| {
+            let mut terminal = Terminal::new(TestBackend::new(38, 12)).unwrap();
+            terminal.draw(|frame| draw(frame, sidebar)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let row = (0..12)
+                .find(|&y| (0..38).any(|x| buffer[(x, y)].symbol() == "z"))
+                .unwrap();
+            let x = (0..38).find(|&x| buffer[(x, row)].symbol() == "z").unwrap();
+            buffer[(x, row)].fg
+        };
+        let zeta = group_colour(&sidebar.all_agents, "zeta");
+        assert_ne!(zeta, group_colour(&sidebar.all_agents, "work"));
+        assert_eq!(heading_colour(&mut sidebar), zeta);
+        sidebar.navigation.query = "elsewhere".into();
+        sidebar.rebuild();
+        assert_eq!(order(&sidebar), ["%2"]);
+        assert_eq!(heading_colour(&mut sidebar), zeta);
     }
 
     #[test]

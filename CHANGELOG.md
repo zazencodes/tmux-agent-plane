@@ -7,6 +7,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
+- Sidebar session headings use the same per-session colours as the agent picker
 - `gg` and `G` jump to the first and last agent in the sidebar and the agent picker
 - The `prefix + a` agent picker has the sidebar's actions: `n` new, `x` kill, `r` rename, `o` organize, `f` filter, `s` sort, `c` configure and `?` shortcuts
 - Press `Tab` in the agent picker to type to the selected agent in its live preview, and `Tab` again to return to the menu
