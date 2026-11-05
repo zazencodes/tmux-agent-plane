@@ -149,6 +149,7 @@ These are tmux key names (`C` is Ctrl, `M` is Alt). The defaults leave tmux's pr
 | `prefix + a` | Open the agent picker: the sidebar's list and actions, with a live screen preview |
 | `Alt + ↑` / `Alt + ↓` | Focus previous/next agent directly, across sessions; no prefix or sidebar focus needed |
 | `↓` `↑` | Move selection. In the sidebar, moving previews the selected agent's window/session while keyboard input stays in the sidebar; the popup previews inside itself. Both also accept `j` / `k` |
+| `gg` / `G` | Move to the first / last agent in the list, previewing it like any other move |
 | `s` | Re-sort agents within each session by attention, then longest in state; keep the selected pane |
 | `f` | Cycle sidebar state filter: All → Blocked → Done → Working → Idle → All, skipping states with no search matches when pressed |
 | `Ctrl-J` / `Ctrl-K` | Move selection, including while editing a search |

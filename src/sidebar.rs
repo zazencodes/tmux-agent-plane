@@ -415,6 +415,8 @@ pub(crate) struct Sidebar {
     steering: bool,
     /// When a key last reached this sidebar, which proves the keyboard is here.
     pressed_at: u64,
+    /// The last key was the first `g` of `gg`.
+    pending_g: bool,
 }
 
 impl Navigation {
@@ -874,7 +876,7 @@ impl Sidebar {
     /// Help, setup, new agent, organize and kill, in priority order. True when one consumed
     /// the key.
     pub(crate) fn action_key(&mut self, key: KeyEvent, origin: Origin<'_>) -> bool {
-        self.help_key(key)
+        let consumed = self.help_key(key)
             // Setup consumes its keys before navigation/kill, including Enter.
             || (self.killing.is_none()
                 && self.organizing.is_none()
@@ -884,7 +886,9 @@ impl Sidebar {
                 && self.auto_name.key(key))
             || self.new_agent_key(key, origin)
             || self.organize_key(key, origin)
-            || self.kill_key(key, origin)
+            || self.kill_key(key, origin);
+        self.pending_g &= !consumed;
+        consumed
     }
 
     /// Hand the order `s` chose to the daemon, which publishes it to every list.
@@ -919,6 +923,7 @@ impl Sidebar {
             self.search_key(key);
             return false;
         }
+        let pending_g = std::mem::take(&mut self.pending_g);
         match key.code {
             KeyCode::Char('q') => return true,
             KeyCode::Char('r') => {
@@ -929,6 +934,9 @@ impl Sidebar {
             }
             KeyCode::Char('j') | KeyCode::Down => self.step(1),
             KeyCode::Char('k') | KeyCode::Up => self.step(-1),
+            KeyCode::Char('g') if pending_g => self.select((!self.agents.is_empty()).then_some(0)),
+            KeyCode::Char('g') => self.pending_g = true,
+            KeyCode::Char('G') => self.select(self.agents.len().checked_sub(1)),
             KeyCode::Char('f') => {
                 let matches = rank(&mut self.matcher, &self.navigation.query, &self.all_agents);
                 self.navigation.cycle_filter(&matches);
@@ -2001,6 +2009,43 @@ mod tests {
         sidebar.all_agents.retain(|a| a.pane != "%2");
         sidebar.rebuild();
         assert_eq!(sidebar.selected().unwrap().pane, "%3");
+    }
+
+    #[test]
+    fn gg_goes_to_the_top_and_capital_g_to_the_bottom() {
+        let mut sidebar = showing(vec![
+            agent("%1", State::Idle),
+            agent("%2", State::Idle),
+            agent("%3", State::Idle),
+        ]);
+        sidebar.select(Some(1));
+        press(&mut sidebar, KeyCode::Char('G'));
+        assert_eq!(sidebar.navigation.pane.as_deref(), Some("%3"));
+        press(&mut sidebar, KeyCode::Char('g'));
+        assert_eq!(sidebar.navigation.pane.as_deref(), Some("%3"));
+        press(&mut sidebar, KeyCode::Char('g'));
+        assert_eq!(sidebar.navigation.pane.as_deref(), Some("%1"));
+        // Another key between the two is no gg, whether it reaches the list or an action.
+        press(&mut sidebar, KeyCode::Char('G'));
+        press(&mut sidebar, KeyCode::Char('g'));
+        press(&mut sidebar, KeyCode::Char('k'));
+        press(&mut sidebar, KeyCode::Char('g'));
+        assert_eq!(sidebar.navigation.pane.as_deref(), Some("%2"));
+        assert!(sidebar.action_key(KeyEvent::from(KeyCode::Char('?')), Origin::Sidebar("%9")));
+        press(&mut sidebar, KeyCode::Char('q'));
+        press(&mut sidebar, KeyCode::Char('g'));
+        assert_eq!(sidebar.navigation.pane.as_deref(), Some("%2"));
+        // In a search, g is text.
+        press(&mut sidebar, KeyCode::Char('/'));
+        press(&mut sidebar, KeyCode::Char('g'));
+        press(&mut sidebar, KeyCode::Char('g'));
+        assert_eq!(sidebar.navigation.query, "gg");
+        // An empty list has nowhere to go.
+        let mut empty = showing(vec![]);
+        for code in [KeyCode::Char('G'), KeyCode::Char('g'), KeyCode::Char('g')] {
+            press(&mut empty, code);
+        }
+        assert!(empty.selected().is_none());
     }
 
     #[test]

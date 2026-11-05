@@ -10,6 +10,7 @@ use ratatui::widgets::Paragraph;
 const SHORTCUTS: &[(&str, &str)] = &[
     ("Alt-↑/↓", "Prev/next agent (global)"),
     ("j k", "Move selection and preview it"),
+    ("g G", "gg first agent, G last agent"),
     ("↑ ↓", "Move selection or in search"),
     ("^j ^k", "Move selection or in search"),
     ("enter", "Open, even from search / save"),
