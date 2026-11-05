@@ -89,49 +89,127 @@ impl Pane {
     }
 }
 
+const PANE_FIELDS: [&str; 13] = [
+    "#{pane_id}",
+    "#{pane_pid}",
+    "#{session_name}",
+    "#{window_id}",
+    "#{window_index}",
+    "#{pane_index}",
+    "#{pane_current_path}",
+    "#{pane_title}",
+    "#{pane_active}",
+    "#{&&:#{window_active},#{session_attached}}",
+    "#{@agent-plane-sidebar}",
+    "#{@agent-plane-name}",
+    "#{@agent-plane-parent}",
+];
+
+fn parse_pane(line: &str) -> Result<Pane> {
+    let f: Vec<&str> = line.split(SEP).collect();
+    if f.len() != PANE_FIELDS.len() {
+        bail!("unexpected list-panes line: {line:?}");
+    }
+    Ok(Pane {
+        id: f[0].to_string(),
+        pid: f[1].parse().context("pane_pid")?,
+        session: f[2].to_string(),
+        window: f[3].to_string(),
+        window_index: f[4].parse().context("window_index")?,
+        pane_index: f[5].parse().context("pane_index")?,
+        cwd: f[6].to_string(),
+        title: f[7].to_string(),
+        active: f[8] == "1",
+        viewed: f[9] == "1",
+        sidebar: f[10] == "1",
+        name: f[11].to_string(),
+        parent: f[12].to_string(),
+    })
+}
+
 pub fn list_panes() -> Result<Vec<Pane>> {
-    let fields = [
-        "#{pane_id}",
-        "#{pane_pid}",
-        "#{session_name}",
-        "#{window_id}",
-        "#{window_index}",
-        "#{pane_index}",
-        "#{pane_current_path}",
-        "#{pane_title}",
-        "#{pane_active}",
-        "#{&&:#{window_active},#{session_attached}}",
-        "#{@agent-plane-sidebar}",
-        "#{@agent-plane-name}",
-        "#{@agent-plane-parent}",
-    ];
-    let format = fields.join(&SEP.to_string());
-    let out = run(&["list-panes", "-a", "-F", &format])?;
-    let panes = out
+    let format = PANE_FIELDS.join(&SEP.to_string());
+    let panes = run(&["list-panes", "-a", "-F", &format])?
         .lines()
-        .map(|line| {
-            let f: Vec<&str> = line.split(SEP).collect();
-            if f.len() != fields.len() {
-                bail!("unexpected list-panes line: {line:?}");
-            }
-            Ok(Pane {
-                id: f[0].to_string(),
-                pid: f[1].parse().context("pane_pid")?,
-                session: f[2].to_string(),
-                window: f[3].to_string(),
-                window_index: f[4].parse().context("window_index")?,
-                pane_index: f[5].parse().context("pane_index")?,
-                cwd: f[6].to_string(),
-                title: f[7].to_string(),
-                active: f[8] == "1",
-                viewed: f[9] == "1",
-                sidebar: f[10] == "1",
-                name: f[11].to_string(),
-                parent: f[12].to_string(),
-            })
-        })
+        .map(parse_pane)
         .collect::<Result<Vec<_>>>()?;
     Ok(physical_panes(panes))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Size {
+    pub width: u32,
+    pub height: u32,
+}
+
+/// What an attached client is showing.
+pub struct ClientSize {
+    pub size: Size,
+    /// The `window-size` option of the window on its screen.
+    pub sizing: String,
+}
+
+pub struct WindowSize {
+    pub id: String,
+    pub size: Size,
+    pub zoomed: bool,
+    /// The window's `window-size` option.
+    pub sizing: String,
+}
+
+#[derive(Default)]
+pub struct Geometry {
+    pub clients: Vec<ClientSize>,
+    pub windows: Vec<WindowSize>,
+}
+
+const CLIENT_ROW: &str = "client\x1f#{window_width}\x1f#{window_height}\x1f#{window-size}";
+const WINDOW_ROW: &str = "window\x1f#{window_id}\x1f#{window_width}\x1f#{window_height}\x1f#{window_zoomed_flag}\x1f#{window-size}";
+
+fn parse_size(width: &str, height: &str) -> Result<Size> {
+    Ok(Size {
+        width: width.parse().context("window_width")?,
+        height: height.parse().context("window_height")?,
+    })
+}
+
+/// The daemon's view of tmux each tick: panes and sizes from one tmux process, so reading the
+/// sizes costs no extra process.
+pub fn snapshot() -> Result<(Vec<Pane>, Geometry)> {
+    let format = PANE_FIELDS.join(&SEP.to_string());
+    let out = run(&[
+        "list-panes",
+        "-a",
+        "-F",
+        &format,
+        ";",
+        "list-clients",
+        "-F",
+        CLIENT_ROW,
+        ";",
+        "list-windows",
+        "-a",
+        "-F",
+        WINDOW_ROW,
+    ])?;
+    let mut panes = Vec::new();
+    let mut geometry = Geometry::default();
+    for line in out.lines() {
+        match line.split(SEP).collect::<Vec<_>>().as_slice() {
+            ["client", width, height, sizing] => geometry.clients.push(ClientSize {
+                size: parse_size(width, height)?,
+                sizing: sizing.to_string(),
+            }),
+            ["window", id, width, height, zoomed, sizing] => geometry.windows.push(WindowSize {
+                id: id.to_string(),
+                size: parse_size(width, height)?,
+                zoomed: *zoomed == "1",
+                sizing: sizing.to_string(),
+            }),
+            _ => panes.push(parse_pane(line)?),
+        }
+    }
+    Ok((physical_panes(panes), geometry))
 }
 
 /// A linked window is listed once per session, but its processes belong to one

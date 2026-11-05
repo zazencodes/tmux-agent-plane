@@ -24,7 +24,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
 
-const WIDTH: &str = "38";
+pub(crate) const WIDTH: &str = "38";
 /// How often a sidebar reads the index. Reading a file spawns nothing; the daemon rewrites it
 /// once a second.
 const REFRESH: Duration = Duration::from_millis(500);

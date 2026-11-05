@@ -7,6 +7,7 @@ mod commands;
 mod daemon;
 mod detect;
 mod diagnostics;
+mod fit;
 mod index;
 mod lifecycle;
 mod navigation;

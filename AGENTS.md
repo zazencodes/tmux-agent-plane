@@ -8,6 +8,7 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 - `src/detect.rs`: takes one process-table snapshot, joins adapter observations to tmux panes and rejects ambiguous identities.
 - `extensions/`: opt-in Pi/OpenCode publishers and Grok leader configuration. Keep install instructions in README More agents.
 - `src/daemon.rs`: one-second loop. Folds detection into `Done`/seen state, writes the index, sets the `@agent_plane_status` tmux option, notifies.
+- `src/fit.rs`: keeps hidden windows at the size they will be shown at, so arriving at one resizes nothing. Runs from the daemon's tick on its existing snapshot.
 - `src/diagnostics.rs`: persistent full-chain errors, deduplication, fault/recovery status and partial scan results.
 - `src/lifecycle.rs`: detached watcher start/restart/stop and private control socket.
 - `src/index.rs`: the index file (`~/.local/state/tmux-agent-plane/agents.json`) and its types. The daemon is its only writer.

@@ -4,6 +4,7 @@
 use crate::agents::RawState;
 use crate::detect::{self, Detected};
 use crate::diagnostics::{self, Active, Batch, Issue};
+use crate::fit::Fit;
 use crate::index::{self, Agent, Index, RecentEvent, State, WindowView};
 use crate::popup::{self, Announcements};
 use crate::tmux;
@@ -105,6 +106,7 @@ fn run_inner() -> Result<()> {
     // Optional naming runs outside tmux and never blocks this loop.
     let mut auto_name = None;
     let mut auto_name_issues = Vec::new();
+    let mut fit = Fit::default();
 
     loop {
         if SHUTDOWN.load(Ordering::Relaxed) {
@@ -114,7 +116,7 @@ fn run_inner() -> Result<()> {
         // a sidebar compares it with the moment of a key press or an acknowledged sort.
         let now = index::now_ms();
         let requested_order = REQUESTED_ORDER.lock().expect("order lock").take();
-        let panes = tmux::list_panes().context("listing tmux panes")?;
+        let (panes, geometry) = tmux::snapshot().context("listing tmux panes")?;
         let before = prev.clone();
         let batch = fold(&mut prev, detect::detect(&panes)?, &panes, now);
         let agents = batch.values;
@@ -140,12 +142,14 @@ fn run_inner() -> Result<()> {
         issues.extend(notifications.deliver());
         // A failed popup is retried while its client is idle. Its failure never announces itself.
         issues.extend(announcements.deliver());
+        let views = windows(&panes);
+        issues.extend(fit.tick(&views, &geometry));
         // Index persistence remains fatal and independent of status presentation.
         index::write(&Index {
             updated_at: now,
             agents: agents.clone(),
             recent_event: recent_event.clone(),
-            windows: windows(&panes),
+            windows: views,
             order: order.clone(),
             last_agent: last_agent.clone(),
             organize: organizer.status.clone(),
