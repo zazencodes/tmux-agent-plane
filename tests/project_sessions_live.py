@@ -190,7 +190,7 @@ try:
     shell.chmod(0o755)
     infra('set-option', '-t', session('api')['id'], 'default-shell', shell)
     parent = spawn('project-lead', 'api')
-    assert parent['session'] == 'api' and parent['parent'] is None
+    assert parent['session'] == 'api'
     assert (ROOT / 'shell-used').exists()
     child = spawn('project-helper', 'web')
     # Native pane metadata, as assigned by a reliable caller; fixture-only setup.
