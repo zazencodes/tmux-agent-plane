@@ -314,8 +314,9 @@ fn action_identity(agent: &Agent) -> Result<Option<i32>> {
 }
 
 /// Include the layout hook closing the lone sidebar, and every session linking this window.
-/// Refuse to remove the originating client's attached session, even indirectly.
-fn ending_sessions(agent: &Agent, client: &Client) -> Result<Vec<String>> {
+/// Refuse to remove the session the client will still be in, even indirectly. A sidebar moves to
+/// the next row before it kills, so `leaving` says the client gets out first.
+fn ending_sessions(agent: &Agent, client: &Client, leaving: bool) -> Result<Vec<String>> {
     let panes = tmux::run(&[
         "list-panes",
         "-t",
@@ -332,7 +333,8 @@ fn ending_sessions(agent: &Agent, client: &Client) -> Result<Vec<String>> {
         "-F",
         "#{session_id}\x1f#{session_name}\x1f#{window_id}",
     ])?;
-    session_endings(&agent.window, &client.session, &windows)
+    let stays_in = (!leaving).then_some(client.session.as_str());
+    session_endings(&agent.window, stays_in, &windows)
 }
 
 fn window_will_end(target: &str, panes: &str) -> Result<bool> {
@@ -354,7 +356,7 @@ fn window_will_end(target: &str, panes: &str) -> Result<bool> {
     Ok(remaining.is_empty() || remaining == [true])
 }
 
-fn session_endings(window: &str, attached_session: &str, windows: &str) -> Result<Vec<String>> {
+fn session_endings(window: &str, stays_in: Option<&str>, windows: &str) -> Result<Vec<String>> {
     let mut sessions: BTreeMap<String, (String, HashSet<String>)> = BTreeMap::new();
     for line in windows.lines() {
         let fields: Vec<_> = line.split('\x1f').collect();
@@ -372,7 +374,7 @@ fn session_endings(window: &str, attached_session: &str, windows: &str) -> Resul
     let mut ending = Vec::new();
     for (id, (name, windows)) in sessions {
         if windows.len() == 1 && windows.contains(window) {
-            if id == attached_session {
+            if stays_in == Some(id.as_str()) {
                 bail!("would end your attached session; kill refused");
             }
             ending.push(name);
@@ -607,6 +609,7 @@ impl Sidebar {
 
     fn search_key(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let before = self.navigation.query.clone();
         match key.code {
             KeyCode::Esc => {
                 let before = self.navigation.search.take().unwrap();
@@ -645,8 +648,10 @@ impl Sidebar {
             _ => return,
         }
         // Results select the best match after every edit.
-        self.navigation.pane = None;
-        self.rebuild();
+        if self.navigation.query != before {
+            self.navigation.pane = None;
+            self.rebuild();
+        }
     }
 
     pub(crate) fn start_search(&mut self) {
@@ -683,16 +688,8 @@ impl Sidebar {
             if kill_accepts(key) {
                 match self.confirm_kill(&confirmation, origin) {
                     Ok(()) => {
-                        let position = self
-                            .agents
-                            .iter()
-                            .position(|a| a.pane == confirmation.agent.pane);
-                        let next = position
-                            .and_then(|i| {
-                                self.agents
-                                    .get(i + 1)
-                                    .or_else(|| i.checked_sub(1).and_then(|i| self.agents.get(i)))
-                            })
+                        let next = self
+                            .next_row(&confirmation.agent.pane)
                             .map(|a| a.pane.clone());
                         self.closed.insert(confirmation.agent.pane.clone());
                         self.all_agents
@@ -731,7 +728,7 @@ impl Sidebar {
             }
             let clients = clients()?;
             let client = input_client(&clients, origin)?;
-            let ends_sessions = ending_sessions(current, client)?;
+            let ends_sessions = ending_sessions(current, client, self.leaves(current, origin))?;
             Ok(Some(KillConfirmation {
                 agent: current.clone(),
                 codex_pid: action_identity(current)?,
@@ -771,7 +768,9 @@ impl Sidebar {
         if !same_action_target(&confirmation.agent, current) {
             bail!("agent changed; press x again");
         }
-        if ending_sessions(current, client)? != confirmation.ends_sessions {
+        if ending_sessions(current, client, self.leaves(current, origin))?
+            != confirmation.ends_sessions
+        {
             bail!("session/window changed; press x again");
         }
         // Read the native signal last, after the topology queries. Pane IDs are
@@ -779,7 +778,28 @@ impl Sidebar {
         if action_identity(current)? != confirmation.codex_pid {
             bail!("agent changed; press x again");
         }
+        // Move off first: the agent's window may close with it, and with it this sidebar, which
+        // would drop your keys into whatever pane tmux shows next.
+        if let (Origin::Sidebar(own), Some(next)) = (origin, self.next_row(&current.pane))
+            && let Some(command) = switch_to(own, &next.session, &next.window, &next.pane, false)?
+        {
+            let command: Vec<_> = command.iter().map(String::as_str).collect();
+            tmux::run(&command)?;
+        }
         commands::kill_pane(&current.pane)
+    }
+
+    /// The row the selection moves to when this agent goes.
+    fn next_row(&self, pane: &str) -> Option<&Agent> {
+        let i = self.agents.iter().position(|a| a.pane == pane)?;
+        self.agents
+            .get(i + 1)
+            .or_else(|| i.checked_sub(1).and_then(|i| self.agents.get(i)))
+    }
+
+    /// Killing this agent takes the client elsewhere first: a sidebar moves to the next row.
+    fn leaves(&self, agent: &Agent, origin: Origin<'_>) -> bool {
+        matches!(origin, Origin::Sidebar(_)) && self.next_row(&agent.pane).is_some()
     }
 
     /// Enter, Space or y dispatches; every other closing key is consumed.
@@ -2359,6 +2379,11 @@ mod tests {
         assert!(sidebar.navigation.search.is_none() && sidebar.navigation.query.is_empty());
         assert_eq!(order(&sidebar).len(), 2);
         assert_eq!(sidebar.selected().unwrap().pane, "%2");
+        // A key that edits nothing leaves the selection alone.
+        press(&mut sidebar, KeyCode::Char('/'));
+        press(&mut sidebar, KeyCode::Backspace);
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
+        press(&mut sidebar, KeyCode::Esc);
         // No match: nothing to open, and the search stays open to edit.
         press(&mut sidebar, KeyCode::Char('/'));
         press(&mut sidebar, KeyCode::Char('☃'));
@@ -2551,6 +2576,20 @@ mod tests {
     }
 
     #[test]
+    fn a_sidebar_leaves_for_the_next_row_before_a_kill_and_the_picker_stays() {
+        let sidebar = showing(vec![agent("%1", State::Idle), agent("%2", State::Idle)]);
+        let first = &sidebar.agents[0];
+        let last = &sidebar.agents[1];
+        assert_eq!(sidebar.next_row(&first.pane).unwrap().pane, last.pane);
+        assert_eq!(sidebar.next_row(&last.pane).unwrap().pane, first.pane);
+        assert!(sidebar.leaves(first, Origin::Sidebar("%9")));
+        assert!(!sidebar.leaves(first, Origin::Popup("client")));
+        // The only row: nowhere to go, so an attached final session stays refused.
+        let alone = showing(vec![agent("%1", State::Idle)]);
+        assert!(!alone.leaves(&alone.agents[0], Origin::Sidebar("%9")));
+    }
+
+    #[test]
     fn kill_guard_pins_native_identity_state_turn_name_and_location() {
         let original = agent("%1", State::Working);
         assert!(same_action_target(&original, &original));
@@ -2575,20 +2614,29 @@ mod tests {
     #[test]
     fn kill_last_window_refuses_attached_session_and_names_remote_linked_sessions() {
         let windows = "$1\x1fscratch\x1f@1\n$1\x1fscratch\x1f@2\n$2\x1fremote\x1f@3\n";
-        assert!(session_endings("@2", "$1", windows).unwrap().is_empty());
-        assert_eq!(session_endings("@3", "$1", windows).unwrap(), ["remote"]);
         assert!(
-            session_endings("@3", "$2", windows)
+            session_endings("@2", Some("$1"), windows)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            session_endings("@3", Some("$1"), windows).unwrap(),
+            ["remote"]
+        );
+        assert!(
+            session_endings("@3", Some("$2"), windows)
                 .unwrap_err()
                 .to_string()
                 .contains("attached session")
         );
+        // A client that leaves first can end the session it was in.
+        assert_eq!(session_endings("@3", None, windows).unwrap(), ["remote"]);
         let linked = format!("{windows}$3\x1flinked\x1f@3\n");
         assert_eq!(
-            session_endings("@3", "$1", &linked).unwrap(),
+            session_endings("@3", Some("$1"), &linked).unwrap(),
             ["linked", "remote"]
         );
-        assert!(session_endings("@3", "$3", &linked).is_err());
+        assert!(session_endings("@3", Some("$3"), &linked).is_err());
         assert!(window_will_end("%1", "%1\x1f\n").unwrap());
         assert!(window_will_end("%1", "%1\x1f\n%sidebar\x1f1\n").unwrap());
         assert!(!window_will_end("%1", "%1\x1f\n%shell\x1f\n%sidebar\x1f1\n").unwrap());
