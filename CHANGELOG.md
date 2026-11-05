@@ -19,6 +19,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Moving the sidebar selection always previews the selected agent's window, with the keyboard staying in the sidebar; the `v` toggle is gone
 - `Enter` during a search opens the selected match right away, in the agent picker and the sidebar; `/` freezes the search when you want to keep it
 - The `prefix + a` agent picker opens on the agent you are looking at, including from a sidebar beside it, so you browse from where you are; with no agent in view it opens on the top row
 - Moving between agents no longer makes them reflow on arrival: the daemon keeps hidden windows at your terminal's size, including after the terminal resizes, and new windows start at that size with their sidebar already in place. This sets tmux's global `default-size`

@@ -186,7 +186,6 @@ pub fn run() -> Result<()> {
 
 #[derive(Default)]
 pub(crate) struct Navigation {
-    pub(crate) view: bool,
     pub(crate) filter: Option<State>,
     pub(crate) query: String,
     pub(crate) pane: Option<String>,
@@ -930,7 +929,6 @@ impl Sidebar {
             }
             KeyCode::Char('j') | KeyCode::Down => self.step(1),
             KeyCode::Char('k') | KeyCode::Up => self.step(-1),
-            KeyCode::Char('v') => self.navigation.view = !self.navigation.view,
             KeyCode::Char('f') => {
                 let matches = rank(&mut self.matcher, &self.navigation.query, &self.all_agents);
                 self.navigation.cycle_filter(&matches);
@@ -1191,23 +1189,18 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
                 }
                 let searching = sidebar.navigation.search.is_some();
                 let command = sidebar.editing.is_none() && !searching;
+                let before = sidebar.navigation.pane.clone();
                 focus = key.code == KeyCode::Enter
                     && sidebar.editing.is_none()
                     && sidebar.open_selected().is_some();
-                // Search edits, including arrows, stay in this pane. Only freezing the query
-                // previews its final selection; cancellation never switches context.
-                preview |= (searching && key.code == KeyCode::Char('/'))
-                    || (command
-                        && matches!(
-                            key.code,
-                            KeyCode::Up
-                                | KeyCode::Down
-                                | KeyCode::Esc
-                                | KeyCode::Char('j' | 'k' | 'f' | 'v')
-                        ));
                 if sidebar.key(key) {
                     return Ok(());
                 }
+                // Moving the selection previews it. Search edits, including arrows, stay in this
+                // pane: only freezing the query previews its final selection, and cancelling
+                // never switches context.
+                preview |= (searching && key.code == KeyCode::Char('/'))
+                    || (command && sidebar.navigation.pane != before);
             }
             if focus || !event::poll(Duration::ZERO)? {
                 break;
@@ -1218,7 +1211,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             screen.show(&mut sidebar)?;
             sidebar.send_order(&order);
         }
-        if focus || (preview && sidebar.navigation.view && sidebar.navigation.search.is_none()) {
+        if focus || (preview && sidebar.navigation.search.is_none()) {
             match switch_command(&sidebar, &own, focus) {
                 Ok(Some(command)) => {
                     // Draw last, so the selection moves on screen together with the window.
@@ -1273,16 +1266,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     f.render_widget(block, list_area);
     let [mode_area, agents_area] =
         Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(content);
-    let mode = format!(
-        " v {}{}  f {}",
-        if sidebar.navigation.view { "on" } else { "off" },
-        if sidebar.navigation.view && sidebar.navigation.search.is_some() {
-            " · paused"
-        } else {
-            ""
-        },
-        sidebar.navigation.filter.map_or("all", State::as_str)
-    );
+    let mode = format!(" f {}", sidebar.navigation.filter.map_or("all", State::as_str));
     let query = &sidebar.navigation.query;
     let search = sidebar.navigation.search.is_some();
     let room = inner.saturating_sub(mode.chars().count() + 4);
@@ -2002,13 +1986,12 @@ mod tests {
     }
 
     #[test]
-    fn selection_priority_identity_and_mode_off() {
+    fn selection_priority_and_identity() {
         let mut sidebar = showing(vec![
             agent("%1", State::Working),
             agent("%2", State::Done),
             agent("%3", State::Blocked),
         ]);
-        assert!(!sidebar.navigation.view);
         assert_eq!(sidebar.navigation.pane.as_deref(), Some("%3"));
         press(&mut sidebar, KeyCode::Down);
         assert_eq!(sidebar.navigation.pane.as_deref(), Some("%2"));
@@ -2018,10 +2001,6 @@ mod tests {
         sidebar.all_agents.retain(|a| a.pane != "%2");
         sidebar.rebuild();
         assert_eq!(sidebar.selected().unwrap().pane, "%3");
-        press(&mut sidebar, KeyCode::Char('v'));
-        assert!(sidebar.navigation.view);
-        press(&mut sidebar, KeyCode::Char('v'));
-        assert!(!sidebar.navigation.view);
     }
 
     #[test]
@@ -2294,10 +2273,9 @@ mod tests {
         assert!(sidebar.navigation.search.is_none());
         assert_eq!(sidebar.navigation.query, "PaYmEnT");
         press(&mut sidebar, KeyCode::Char('/'));
-        for c in "qVFr".chars() {
+        for c in "qFr".chars() {
             press(&mut sidebar, KeyCode::Char(c));
         }
-        assert!(!sidebar.navigation.view);
         assert!(sidebar.editing.is_none());
         assert_eq!(sidebar.navigation.filter, None);
         assert!(sidebar.agents.is_empty());
@@ -2484,7 +2462,6 @@ mod tests {
             assert!(sidebar.kill_key(key, Origin::Sidebar("%sidebar")));
             assert!(sidebar.killing.is_none());
             assert_eq!(sidebar.selected().unwrap().pane, "%1");
-            assert!(!sidebar.navigation.view);
             assert!(sidebar.navigation.filter.is_none());
             assert!(sidebar.navigation.search.is_none());
             assert!(sidebar.editing.is_none());

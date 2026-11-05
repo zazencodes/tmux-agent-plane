@@ -321,8 +321,6 @@ impl App {
                 KeyCode::Esc if self.sidebar.navigation.query.is_empty() => {
                     return ControlFlow::Break(None);
                 }
-                // The popup's preview is always on.
-                KeyCode::Char('v') => return ControlFlow::Continue(()),
                 _ => {}
             }
         }
@@ -1136,10 +1134,8 @@ mod tests {
     }
 
     #[test]
-    fn q_and_ctrl_c_close_without_a_target_and_v_is_inert() {
+    fn q_and_ctrl_c_close_without_a_target() {
         let mut app = app();
-        assert!(press(&mut app, KeyCode::Char('v')).is_continue());
-        assert!(!app.sidebar.navigation.view);
         assert!(matches!(
             press(&mut app, KeyCode::Char('q')),
             ControlFlow::Break(None)
