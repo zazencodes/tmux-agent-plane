@@ -14,7 +14,7 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 - `src/index.rs`: the index file (`~/.local/state/tmux-agent-plane/agents.json`) and its types. The daemon is its only writer.
 - `src/commands.rs`: `list`, `read`, `send`, `keys`, `focus`, `kill`, `wait`, `spawn`. Agents are told never to use raw tmux on agent panes, so every agent job needs a command here.
 - `src/sessions.rs`: session/project inventory and creation, exact spawn destinations and guarded native agent-pane moves.
-- `src/ui.rs`: the `prefix + a` picker popup: the sidebar's list and actions, drawn with a large preview and ranked search.
+- `src/ui.rs`: the picker popup (`prefix + a`, then `a`, or `f` to start searching): the sidebar's list and actions, drawn with a large preview and ranked search.
 - `src/sidebar.rs`: the always-on agent list in a sidebar pane (`prefix + S`), and its toggle. Idle, a sidebar runs no tmux commands: it learns everything from the index, and only keys run tmux. The plugin’s layout hook closes lone sidebars.
 - `tmux-agent-plane.tmux`: plugin entry point. Binds the key and starts the daemon.
 - `skill/tmux-agent-plane/SKILL.md`: the agent skill. Keep it in sync with the CLI.

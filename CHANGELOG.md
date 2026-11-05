@@ -7,9 +7,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
+- `prefix + a`, then `f`, opens the agent picker already searching, ready to type
 - Sidebar session headings use the same per-session colours as the agent picker
 - `gg` and `G` jump to the first and last agent in the sidebar and the agent picker
-- The `prefix + a` agent picker has the sidebar's actions: `n` new, `x` kill, `r` rename, `o` organize, `f` filter, `s` sort, `c` configure and `?` shortcuts
+- The agent picker has the sidebar's actions: `n` new, `x` kill, `r` rename, `o` organize, `f` filter, `s` sort, `c` configure and `?` shortcuts
 - Press `Tab` in the agent picker to type to the selected agent in its live preview, and `Tab` again to return to the menu
 - The agent picker lists rows by session and shows each session name in its own colour
 - Browse with Ctrl-J/Ctrl-K in the agent picker, and while editing a search in the sidebar
@@ -23,13 +24,13 @@ before 1.0, a breaking change bumps the minor version.
 
 - Moving the sidebar selection always previews the selected agent's window, with the keyboard staying in the sidebar; the `v` toggle is gone
 - `Enter` during a search opens the selected match right away, in the agent picker and the sidebar; `/` freezes the search when you want to keep it
-- The `prefix + a` agent picker opens on the agent you are looking at, including from a sidebar beside it, so you browse from where you are; with no agent in view it opens on the top row
+- The agent picker opens on the agent you are looking at, including from a sidebar beside it, so you browse from where you are; with no agent in view it opens on the top row
 - Moving between agents no longer makes them reflow on arrival: the daemon keeps hidden windows at your terminal's size, including after the terminal resizes, and new windows start at that size with their sidebar already in place. This sets tmux's global `default-size`
 - Confirm global organization in a compact yes/no footer like kill: `o`, then Enter, Space or `y` to accept; `n` / Esc cancels while the agent list stays visible
 
 - Clarify sidebar organization covers all tracked agents across every tmux session, including hidden sidebar rows
 - Open sidebar organization with lowercase `o`
-- Open the tmux agent picker with lowercase `prefix + a`; it opens on the list, where `j`/`k` browse and letters are commands; press `/` to fuzzy-search names and descriptions and `/` again to freeze the matches and use commands on them, Enter to focus the exact pane in the originating client, or `q`/Esc/Ctrl-C to close
+- Open the tmux agent picker with `prefix + a`, then `a`; it opens on the list, where `j`/`k` browse and letters are commands; press `/` to fuzzy-search names and descriptions and `/` again to freeze the matches and use commands on them, Enter to focus the exact pane in the originating client, or `q`/Esc/Ctrl-C to close
 - Let the agent picker inherit the terminal background, with selection using the terminal palette
 - The sidebar and the agent picker share one search: fuzzy across agent name, project (tmux session), task and blocked detail, in any word order and ignoring case, with the best match first. Location and directory are no longer searched, and `/` during a search freezes its matches in both
 

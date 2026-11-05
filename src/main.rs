@@ -42,6 +42,9 @@ enum Cmd {
         /// tmux client that opened the popup (supplied by the plugin)
         #[arg(long)]
         client: String,
+        /// Open in search mode, ready to type
+        #[arg(long)]
+        search: bool,
     },
     /// Run the always-on agent list (shown in the sidebar pane)
     Sidebar,
@@ -167,7 +170,7 @@ enum Cmd {
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Cmd::Daemon { action } => lifecycle::run(action),
-        Cmd::Ui { client } => ui::run(&client),
+        Cmd::Ui { client, search } => ui::run(&client, search),
         Cmd::Sidebar => sidebar::run(),
         Cmd::Notice => popup::notice(),
         Cmd::ToggleSidebar { window } => sidebar::toggle(&commands::target_pane(&window)?),

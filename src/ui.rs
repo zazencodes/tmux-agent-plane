@@ -329,9 +329,9 @@ impl App {
     }
 }
 
-pub fn run(client: &str) -> Result<()> {
+pub fn run(client: &str, search: bool) -> Result<()> {
     let mut terminal = ratatui::init();
-    let result = event_loop(&mut terminal, client);
+    let result = event_loop(&mut terminal, client, search);
     ratatui::restore();
     let jump = result?;
     if let Some(agent) = jump {
@@ -361,9 +361,12 @@ pub fn run(client: &str) -> Result<()> {
     Ok(())
 }
 
-fn event_loop(terminal: &mut DefaultTerminal, client: &str) -> Result<Option<Agent>> {
+fn event_loop(terminal: &mut DefaultTerminal, client: &str, search: bool) -> Result<Option<Agent>> {
     let mut app = App::new(client);
     app.open_on_agent_in_view()?;
+    if search {
+        app.sidebar.start_search();
+    }
     app.refresh();
     let mut refreshed = Instant::now();
     loop {
@@ -1216,6 +1219,23 @@ mod tests {
         assert_eq!(buffer[cell].fg, zeta);
         type_query(&mut app, "quartz");
         assert_eq!(group_colour(&app.sidebar.all_agents, "zeta"), zeta);
+    }
+
+    #[test]
+    fn opening_in_search_mode_takes_letters_as_text_and_enter_opens_the_match() {
+        let mut app = app();
+        app.sidebar.start_search();
+        let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(screen(&terminal).contains("search names / projects / descriptions"));
+        for c in "qrtz".chars() {
+            assert!(press(&mut app, KeyCode::Char(c)).is_continue());
+        }
+        assert_eq!(selected(&app), "quartz-build");
+        let ControlFlow::Break(Some(chosen)) = press(&mut app, KeyCode::Enter) else {
+            panic!("Enter opens the match");
+        };
+        assert_eq!(chosen.pane, "%11");
     }
 
     #[test]

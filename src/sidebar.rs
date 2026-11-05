@@ -649,6 +649,13 @@ impl Sidebar {
         self.rebuild();
     }
 
+    pub(crate) fn start_search(&mut self) {
+        self.navigation.search = Some(SearchEdit {
+            query: self.navigation.query.clone(),
+            pane: self.navigation.pane.clone(),
+        });
+    }
+
     /// Enter: the agent to open, if any. A search that opened something is finished. A frozen
     /// search stays, since keeping it was deliberate.
     pub(crate) fn open_selected(&mut self) -> Option<Agent> {
@@ -943,12 +950,7 @@ impl Sidebar {
                 self.rebuild();
             }
             KeyCode::Char('s') => self.resort(),
-            KeyCode::Char('/') => {
-                self.navigation.search = Some(SearchEdit {
-                    query: self.navigation.query.clone(),
-                    pane: self.navigation.pane.clone(),
-                });
-            }
+            KeyCode::Char('/') => self.start_search(),
             KeyCode::Esc => {
                 self.navigation.query.clear();
                 self.rebuild();
