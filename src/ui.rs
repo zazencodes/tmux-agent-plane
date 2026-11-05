@@ -1,6 +1,7 @@
 //! The agent list: every agent with its state, and a live preview of the selected one.
 
-use crate::index::{self, Agent, State};
+use crate::index::{self, Agent, Index, State};
+use crate::navigation::Client;
 use crate::sidebar::{Origin, Sidebar, clients, confirmation_footer, input_client, status_footer};
 use crate::tmux;
 use ansi_to_tui::IntoText;
@@ -137,6 +138,26 @@ fn send_keys_command(pane: &str, keys: &[KeyEvent]) -> Vec<String> {
     command
 }
 
+/// The agent a client is looking at: its own pane, or from a sidebar, the agent in that window,
+/// preferring the last one used when the window has several.
+fn agent_in_view(index: &Index, client: &Client) -> Option<String> {
+    if index.agents.iter().any(|a| a.pane == client.pane) {
+        return Some(client.pane.clone());
+    }
+    if !index
+        .windows
+        .iter()
+        .any(|w| w.sidebar.as_ref() == Some(&client.pane))
+    {
+        return None;
+    }
+    let mut here = index.agents.iter().filter(|a| a.window == client.window);
+    here.clone()
+        .find(|a| index.last_agent.as_ref() == Some(&a.pane))
+        .or_else(|| here.next())
+        .map(|a| a.pane.clone())
+}
+
 /// The sidebar's list and actions, in a popup with a large preview.
 struct App {
     sidebar: Sidebar,
@@ -164,12 +185,13 @@ impl App {
         }
     }
 
-    /// Start on the pane the client is in. A pane that is no agent never reaches the list, so
-    /// the list's usual first row is selected.
-    fn open_on_active_pane(&mut self) -> Result<()> {
+    /// Start on the agent in view. The first refresh shows any failure to read the index.
+    fn open_on_agent_in_view(&mut self) -> Result<()> {
         let clients = clients()?;
         let client = input_client(&clients, Origin::Popup(&self.client))?;
-        self.sidebar.navigation.pane = Some(client.pane.clone());
+        self.sidebar.navigation.pane = index::read()
+            .ok()
+            .and_then(|index| agent_in_view(&index, client));
         Ok(())
     }
 
@@ -349,7 +371,7 @@ pub fn run(client: &str) -> Result<()> {
 
 fn event_loop(terminal: &mut DefaultTerminal, client: &str) -> Result<Option<Agent>> {
     let mut app = App::new(client);
-    app.open_on_active_pane()?;
+    app.open_on_agent_in_view()?;
     app.refresh();
     let mut refreshed = Instant::now();
     loop {
@@ -781,6 +803,57 @@ mod tests {
         app.sidebar.navigation.order = vec!["%10".into(), "%11".into()];
         app.sidebar.rebuild();
         app
+    }
+
+    #[test]
+    fn agent_in_view_is_the_clients_pane_or_the_agent_beside_its_sidebar() {
+        let mut other_window = agent("elsewhere", "%3", "");
+        other_window.window = "@2".into();
+        let index = Index {
+            updated_at: 0,
+            agents: vec![
+                other_window,
+                agent("first", "%1", ""),
+                agent("second", "%2", ""),
+            ],
+            recent_event: None,
+            windows: vec![index::WindowView {
+                id: "@1".into(),
+                active_pane: "%9".into(),
+                viewed: true,
+                sidebar: Some("%9".into()),
+            }],
+            order: Vec::new(),
+            last_agent: Some("%3".into()),
+            organize: None,
+        };
+        let client = |pane: &str| Client {
+            name: "client".into(),
+            pid: "1".into(),
+            session: "$1".into(),
+            window: "@1".into(),
+            pane: pane.into(),
+        };
+        let view = |index: &Index, pane| agent_in_view(index, &client(pane));
+        assert_eq!(view(&index, "%2").as_deref(), Some("%2"));
+        // A shell beside an agent is not looking at it.
+        assert_eq!(view(&index, "%8"), None);
+        // The last agent used is elsewhere, so the sidebar's window picks its first.
+        assert_eq!(view(&index, "%9").as_deref(), Some("%1"));
+        let index = Index {
+            last_agent: Some("%2".into()),
+            ..index
+        };
+        assert_eq!(view(&index, "%9").as_deref(), Some("%2"));
+    }
+
+    #[test]
+    fn opens_on_the_top_row_ahead_of_agents_wanting_attention() {
+        let mut app = app();
+        app.sidebar.all_agents[1].state = State::Blocked;
+        app.sidebar.navigation.pane = None;
+        app.sidebar.rebuild();
+        assert_eq!(selected(&app), "cedar-review");
     }
 
     fn press(app: &mut App, code: KeyCode) -> ControlFlow<Option<Agent>> {

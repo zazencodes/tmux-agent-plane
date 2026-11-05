@@ -573,10 +573,12 @@ impl Sidebar {
             .pane
             .as_ref()
             .and_then(|pane| self.agents.iter().position(|a| &a.pane == pane))
+            // A sidebar starts on what wants attention. The picker starts on the top row, and
+            // ranked results put the best match there.
             .or_else(|| {
                 [State::Blocked, State::Done]
                     .into_iter()
-                    .filter(|_| !ranked)
+                    .filter(|_| self.ranker.is_none())
                     .find_map(|state| self.agents.iter().position(|a| a.state == state))
             })
             .or_else(|| (!self.agents.is_empty()).then_some(0));
