@@ -7,6 +7,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
+- `prefix + f` opens the agent picker already searching, ready to type; this replaces tmux's window finder on that key
 - Sidebar session headings use the same per-session colours as the agent picker
 - `gg` and `G` jump to the first and last agent in the sidebar and the agent picker
 - The agent picker has the sidebar's actions: `n` new, `x` kill, `r` rename, `o` organize, `f` filter, `s` sort, `c` configure and `?` shortcuts

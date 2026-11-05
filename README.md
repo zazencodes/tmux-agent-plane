@@ -31,7 +31,7 @@ Claude Code, Codex and Antigravity use native signals. Pi and OpenCode use publi
 - **Know what needs you.** The status bar counts agents by state. An agent that finishes or blocks while you are looking elsewhere shows a five-second notice in every open sidebar footer and sends a desktop notification, and stays `done` until you look at it.
 - **A sidebar of agents.** Your sidebar key (default `prefix + S`) opens a live list of every agent down the left of every window, in every session, and puts you in it: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar is there too. Close it once and it closes everywhere.
 - **Flip through your agents.** Alt + K / J (Option + K / J on macOS) goes straight to the previous or next agent from anywhere, across sessions, with no prefix. Tap it repeatedly to scroll through them. See [Direct agent navigation](#direct-agent-navigation).
-- **Search and peek before you jump.** `prefix + a` opens an agent picker with a large live preview and the sidebar's actions. Browse with `j`/`k`, press `/` to fuzzy-search names, projects and descriptions across every session, and press Enter to focus.
+- **Search and peek before you jump.** `prefix + a` opens an agent picker with a large live preview and the sidebar's actions; `prefix + f` opens it ready to type a search. Browse with `j`/`k`, press `/` to fuzzy-search names, projects and descriptions across every session, and press Enter to focus.
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
 - **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`. Optional AI naming can name the remaining default-named agents; press `c` in the sidebar to set it up.
 - **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. A spawned agent records its parent when caller identity is known.
@@ -71,7 +71,7 @@ set -g @plugin 'zazencodes/tmux-agent-plane'
 
 Without TPM, clone the repo and add `run-shell /path/to/tmux-agent-plane/tmux-agent-plane.tmux` to `~/.tmux.conf`.
 
-The plugin starts the daemon once the first session exists, binds `prefix + S` to the sidebar and `prefix + a` to the agent list popup, and sets a `session-created[90]` hook to start the watcher and a `window-linked[90]` hook that gives each new window the open sidebar. A `window-layout-changed[90]` hook closes a sidebar as soon as its last other pane disappears. To use another sidebar key, set it before the plugin loads:
+The plugin starts the daemon once the first session exists, binds `prefix + S` to the sidebar `prefix + a` to the agent list popup and `prefix + f` to the same popup already searching (replacing tmux's window finder on that key), and sets a `session-created[90]` hook to start the watcher and a `window-linked[90]` hook that gives each new window the open sidebar. A `window-layout-changed[90]` hook closes a sidebar as soon as its last other pane disappears. To use another sidebar key, set it before the plugin loads:
 
 ```tmux
 set -g @agent-plane-sidebar-key Space   # replaces tmux's next-layout binding
@@ -147,6 +147,7 @@ These are tmux key names (`C` is Ctrl, `M` is Alt). The defaults leave tmux's pr
 | --- | --- |
 | Sidebar key (default `prefix + S`) | Open the sidebar in every window and move into it; close it everywhere when it is open |
 | `prefix + a` | Open the agent picker: the sidebar's list and actions, with a live screen preview |
+| `prefix + f` | Open the agent picker already searching, so you can start typing |
 | `Alt + ↑` / `Alt + ↓` | Focus previous/next agent directly, across sessions; no prefix or sidebar focus needed |
 | `↓` `↑` | Move selection. In the sidebar, moving previews the selected agent's window/session while keyboard input stays in the sidebar; the popup previews inside itself. Both also accept `j` / `k` |
 | `gg` / `G` | Move to the first / last agent in the list, previewing it like any other move |
@@ -185,7 +186,7 @@ The filter and query controls stay visible above the list. Filters and search co
 
 Press `prefix + a` from any pane. It opens on the list, grouped by session: each row names its session in a colour of its own, next to the window and pane. The agent you are looking at is selected, including from a sidebar beside it, so you browse from where you are; with no agent in view, the top row is. `j`/`k`, Up/Down or Ctrl-J/Ctrl-K browse, and the screen preview updates inside the popup. Periodic state updates preserve the selected pane. Enter focuses that exact pane in the client that opened the picker, across sessions; `q`, Esc or Ctrl-C closes and leaves your original pane and session selected. Browsing never switches sessions.
 
-Press `/` to search. The search box appears and letters become text: a case-insensitive fuzzy query across agent names, projects, task titles and blocked details, where each word can match any of them. Stronger matches appear first; Ctrl-J/Ctrl-K or Up/Down browse them. Backspace edits, Ctrl-W deletes a word and Ctrl-U clears. Press `/` again to freeze the search: its matches and selection stay, and your keys are commands again, so `n` or `x` act on the selected match. A third `/` resumes editing. Enter opens the selected match right away; Esc cancels the edit. A `/` cannot be part of a query. On the list, Esc clears a kept query first, then closes.
+Press `/` to search, or open the picker with `prefix + f` to start there. The search box appears and letters become text: a case-insensitive fuzzy query across agent names, projects, task titles and blocked details, where each word can match any of them. Stronger matches appear first; Ctrl-J/Ctrl-K or Up/Down browse them. Backspace edits, Ctrl-W deletes a word and Ctrl-U clears. Press `/` again to freeze the search: its matches and selection stay, and your keys are commands again, so `n` or `x` act on the selected match. A third `/` resumes editing. Enter opens the selected match right away; Esc cancels the edit. A `/` cannot be part of a query. On the list, Esc clears a kept query first, then closes.
 
 The sidebar's actions work on the selected agent, with the same prompts and checks: `n` new agent, `x` kill, `r` rename, `o` organize, `f` state filter, `s` sort, `c` configure and `?` shortcuts. `n` closes the picker and takes you to the new agent.
 

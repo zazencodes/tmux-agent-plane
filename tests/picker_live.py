@@ -176,7 +176,9 @@ try:
     keys = tmux('list-keys').splitlines()
     binding = next(line for line in keys if re.search(r'-T prefix\s+a\s', line))
     assert 'bg=terminal,fg=terminal' in binding and '--client' in binding, binding
-    assert not any('-T agent-plane' in line for line in keys)
+    assert '--search' not in binding
+    search_binding = next(line for line in keys if re.search(r'-T prefix\s+f\s', line))
+    assert 'bg=terminal,fg=terminal' in search_binding and '--search' in search_binding, search_binding
     client, other = Client('origin'), Client('other')
     CLIENTS += [client, other]
     wait('attached', lambda: len(tmux('list-clients').splitlines()) == 2)
@@ -266,6 +268,15 @@ try:
     wait('literal letters', lambda: '› qjk' in client.text())
     client.key(b'\x1b')
     wait('edit cancelled', lambda: '› ' not in client.text() and 'j/k browse' in client.text())
+    client.key(b'\x1b')
+    wait('closed before search-first', lambda: 'j/k browse' not in client.text())
+    # prefix + f: already searching, so the first letters are text.
+    client.key(b'\x01f')
+    wait('opens searching', lambda: 'search names / projects / descriptions' in client.text())
+    client.key(b'cdrrv')
+    wait('search-first text', lambda: '› cdrrv' in client.text() and client.selected() == 'cedar-review')
+    client.key(b'\x1b')
+    wait('search-first cancelled', lambda: '› ' not in client.text() and 'j/k browse' in client.text())
     # Sidebar actions, on the selection, with the sidebar's own prompts.
     client.key(b'?')
     wait('help', lambda: 'Keyboard shortcuts' in client.text())
@@ -455,7 +466,7 @@ try:
     for row in rows.values():
         path = ROOT / (row['pane'] + '.input')
         assert not path.exists() or path.read_bytes().replace(b'\x1b[I', b'').replace(b'\x1b[O', b'') == b''
-    print('PASS: prefix a; command mode by default; opens on the agent in view, from its pane or a sidebar, else the top row; j/k, Ctrl-J/K and arrows; / search only; empty/no-match Enter; fuzzy name/title/detail and spanning queries; refresh selection; Esc/Ctrl-C/q; group column; help, filter, sort, organize, rename, kill and new from the popup; Tab typing to the pinned agent with exact bytes, cursor and exit; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
+    print('PASS: prefix a and prefix f; command mode by default; opens on the agent in view, from its pane or a sidebar, else the top row; j/k, Ctrl-J/K and arrows; / search only; empty/no-match Enter; fuzzy name/title/detail and spanning queries; refresh selection; Esc/Ctrl-C/q; group column; help, filter, sort, organize, rename, kill and new from the popup; Tab typing to the pinned agent with exact bytes, cursor and exit; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
     print('Evidence:', ROOT, flush=True)
 finally:
     for name in SPAWNED:
