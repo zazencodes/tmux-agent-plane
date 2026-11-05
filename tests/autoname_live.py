@@ -260,7 +260,7 @@ try:
         assert 'c configure' not in client.text()
         client.snapshot('shortcuts-full-' + closing.hex())
         client.key(closing)
-        wait('help closes safely', lambda: 'v off' in client.text() and 'c configure' in client.text())
+        wait('help closes safely', lambda: 'f all' in client.text() and 'c configure' in client.text())
         assert client.selected() == selected_before
         assert '? [Y/n]' not in client.text()
         assert len(index()['agents']) == 3
@@ -296,7 +296,7 @@ try:
         seen_help += client.text()
         client.snapshot('shortcuts-short-' + str(page))
         client.key(b'q')
-        wait('short help close', lambda: 'v off' in client.text())
+        wait('short help close', lambda: 'f all' in client.text())
     assert 'Move selection' in seen_help and 'Configure: turn AI names off' in seen_help
     assert 'Configure' in seen_help
     tmux('resize-window', '-t', window, '-y', original_height)
@@ -307,7 +307,7 @@ try:
     client.key(b'c')
     wait('configure menu', lambda: '5 Antigravity (agy)' in client.text())
     client.key(b'\x1b')
-    wait('configure closes', lambda: 'v off' in client.text())
+    wait('configure closes', lambda: 'f all' in client.text())
     # The supported agy preset resolves to our private fake binary, never the real CLI.
     client.key(b'c5')
     wait('disclosure before enable', lambda: '⏎ enable' in client.text() and 'What is sent' in client.text() and 'Model: gemini-3.8-flash' in client.text() and 'Thinking: low' in client.text())

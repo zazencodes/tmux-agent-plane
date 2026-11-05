@@ -123,7 +123,7 @@ try:
     plane('toggle-sidebar', harness)
     client = Client('harness')
     wait('sidebar', lambda: 'n new' in client.text(), client)
-    client.keys(b'/hovered\r')
+    client.keys(b'/hovered/')
     wait('selected', lambda: 'hovered' in client.text(), client)
     before = windows('api')
 

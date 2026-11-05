@@ -210,19 +210,22 @@ try:
     wait('sidebar controls', lambda: 'o organize all' in client.text())
     sidebar = infra('list-panes', '-t', harness, '-F', '#{pane_id} #{@agent-plane-sidebar}')
     sidebar = next(row.split()[0] for row in sidebar.splitlines() if row.endswith(' 1'))
-    client.keys(b'/organizer-fixture\r')
+    client.keys(b'/organizer-fixture/')
     wait('selected fixture', lambda: 'organizer-fixture' in client.text() and 'type to search' not in client.text())
+    # Freezing previews the selection: wait for the sidebar to land in the agent's window.
+    wait('preview landed', lambda: infra('list-clients', '-F', '#{window_id}').strip() == agent('organizer-fixture')['window'])
+    time.sleep(.3)
     baseline_input, baseline_calls = inputs(), input_calls()
     for key in (b'\x1b', b'n', b'a', b'q', b'x', b'c', b'j', b'o', b'O', b'A', b'?'):
         client.keys(b'o')
         wait('confirmation', lambda: 'organize all agents? [Y/n]' in client.text())
         assert 'via agy' in client.text()
-        assert 'v off' in client.text(), 'agent list must stay visible'
+        assert 'f all' in client.text(), 'agent list must stay visible'
         client.snapshot('confirmation')
         client.keys(key)
         wait('cancelled', lambda: 'organize all agents? [Y/n]' not in client.text())
         assert inputs() == baseline_input and input_calls() == baseline_calls, key
-        assert infra('display-message', '-p', '-t', harness, '#{pane_id}') == sidebar
+        assert infra('list-clients', '-F', '#{pane_id}').strip() == sidebar, 'the keyboard stays in the sidebar'
     proof('o shows a compact yes/no footer with the configured background agent; the agent list stays visible and cancel sends nothing')
 
     client.keys(b'/o')
@@ -303,6 +306,10 @@ try:
     client.snapshot('organized')
     proof('Enter invokes the exact configured command/model once; busy and hidden blocked agents are included, native moves preserve identity, zero pane input')
 
+    # The previewed agent moved away and its window's sidebar closed with it: go back into one.
+    window = infra('list-clients', '-F', '#{window_id}').strip()
+    panes = infra('list-panes', '-t', window, '-F', '#{pane_id} #{@agent-plane-sidebar}')
+    infra('select-pane', '-t', next(row.split()[0] for row in panes.splitlines() if row.endswith(' 1')))
     mode('delay')
     confirm(b' ')
     wait('delayed model started', lambda: len(calls()) == 2 and status()['running'])
