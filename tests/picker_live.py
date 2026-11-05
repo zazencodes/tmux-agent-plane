@@ -344,7 +344,13 @@ try:
     windows = lambda: tmux('list-windows', '-t', '=' + rows['quartz-build']['session'], '-F', '#{window_id}').split()
     before = windows()
     client.key(b'\x01a')
-    wait('reopen for new', lambda: client.selected() == 'quartz-build')
+    # Opened from an agent's pane: that agent is selected, ahead of the blocked quartz-build.
+    wait('opens on the current agent', lambda: client.selected() == 'cedar-review')
+    for _ in rows:
+        if client.selected() == 'quartz-build':
+            break
+        client.key(b'j')
+        time.sleep(.2)
     client.key(b'n')
     wait('new prompt', lambda: 'new agent in ' + rows['quartz-build']['session'] in client.text())
     client.key(b'\x1b')
@@ -431,7 +437,7 @@ try:
     for row in rows.values():
         path = ROOT / (row['pane'] + '.input')
         assert not path.exists() or path.read_bytes().replace(b'\x1b[I', b'').replace(b'\x1b[O', b'') == b''
-    print('PASS: lowercase binding; command mode by default; j/k, Ctrl-J/K and arrows; / search only; empty/no-match Enter; fuzzy name/title/detail and spanning queries; refresh selection; Esc/Ctrl-C/q; group column; help, filter, sort, organize, rename, kill and new from the popup; Tab typing to the pinned agent with exact bytes, cursor and exit; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
+    print('PASS: lowercase binding; command mode by default; opens on the current agent; j/k, Ctrl-J/K and arrows; / search only; empty/no-match Enter; fuzzy name/title/detail and spanning queries; refresh selection; Esc/Ctrl-C/q; group column; help, filter, sort, organize, rename, kill and new from the popup; Tab typing to the pinned agent with exact bytes, cursor and exit; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
     print('Evidence:', ROOT, flush=True)
 finally:
     for name in SPAWNED:

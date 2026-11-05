@@ -969,14 +969,14 @@ impl Sidebar {
     }
 }
 
-fn clients() -> Result<Vec<Client>> {
+pub(crate) fn clients() -> Result<Vec<Client>> {
     tmux::run(&["list-clients", "-F", CLIENT_FORMAT])?
         .lines()
         .map(parse_client)
         .collect()
 }
 
-fn input_client<'a>(clients: &'a [Client], origin: Origin<'_>) -> Result<&'a Client> {
+pub(crate) fn input_client<'a>(clients: &'a [Client], origin: Origin<'_>) -> Result<&'a Client> {
     match origin {
         Origin::Sidebar(pane) => {
             let mut candidates = clients.iter().filter(|client| client.pane == pane);

@@ -1,7 +1,7 @@
 //! The agent list: every agent with its state, and a live preview of the selected one.
 
 use crate::index::{self, Agent, State};
-use crate::sidebar::{Origin, Sidebar, confirmation_footer, status_footer};
+use crate::sidebar::{Origin, Sidebar, clients, confirmation_footer, input_client, status_footer};
 use crate::tmux;
 use ansi_to_tui::IntoText;
 use anyhow::{Context, Result, bail};
@@ -162,6 +162,15 @@ impl App {
             outgoing: Vec::new(),
             cursor: None,
         }
+    }
+
+    /// Start on the pane the client is in. A pane that is no agent never reaches the list, so
+    /// the list's usual first row is selected.
+    fn open_on_active_pane(&mut self) -> Result<()> {
+        let clients = clients()?;
+        let client = input_client(&clients, Origin::Popup(&self.client))?;
+        self.sidebar.navigation.pane = Some(client.pane.clone());
+        Ok(())
     }
 
     fn refresh(&mut self) {
@@ -340,6 +349,7 @@ pub fn run(client: &str) -> Result<()> {
 
 fn event_loop(terminal: &mut DefaultTerminal, client: &str) -> Result<Option<Agent>> {
     let mut app = App::new(client);
+    app.open_on_active_pane()?;
     app.refresh();
     let mut refreshed = Instant::now();
     loop {
