@@ -12,7 +12,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, Ke
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 use std::collections::BTreeSet;
 use std::ops::ControlFlow;
@@ -160,10 +160,68 @@ fn agent_in_view(index: &Index, client: &Client) -> Option<String> {
         .map(|a| a.pane.clone())
 }
 
+/// One pane of the screen behind the picker, as it looked when the picker opened.
+struct BackdropPane {
+    area: Rect,
+    screen: Text<'static>,
+}
+
+/// The panes the client is looking at, dimmed, where they sit on its screen. tmux cannot dim what
+/// is behind a popup, so the popup covers the screen and draws it. A zoomed window shows one pane.
+fn backdrop(client: &Client) -> Result<Vec<BackdropPane>> {
+    let panes = tmux::run(&[
+        "list-panes",
+        "-t",
+        &client.pane,
+        "-f",
+        "#{||:#{!:#{window_zoomed_flag}},#{pane_active}}",
+        "-F",
+        "#{pane_id} #{pane_left} #{pane_top} #{pane_width} #{pane_height} #{status} #{status-position}",
+    ])?;
+    panes.lines().map(parse_backdrop_pane).collect()
+}
+
+fn parse_backdrop_pane(line: &str) -> Result<BackdropPane> {
+    let fields: Vec<_> = line.split(' ').collect();
+    let [pane, left, top, width, height, status, position] = fields.as_slice() else {
+        bail!("unexpected list-panes line: {line:?}");
+    };
+    let status_above = match (*status, *position) {
+        ("off", _) | (_, "bottom") => 0,
+        ("on", "top") => 1,
+        (lines, "top") => lines.parse()?,
+        _ => bail!("unexpected status line: {line:?}"),
+    };
+    let mut screen = tmux::capture(pane, true, None)?.into_text()?;
+    dim(&mut screen);
+    Ok(BackdropPane {
+        area: Rect::new(
+            left.parse()?,
+            top.parse::<u16>()? + status_above,
+            width.parse()?,
+            height.parse()?,
+        ),
+        screen,
+    })
+}
+
+/// On each span: a span's own reset would clear a dim set on its line.
+fn dim(text: &mut Text<'_>) {
+    for span in text.lines.iter_mut().flat_map(|line| &mut line.spans) {
+        span.style = span.style.add_modifier(Modifier::DIM);
+    }
+}
+
+/// The picker's panel: most of the screen, centred, with the dimmed screen around it.
+fn panel_area(screen: Rect) -> Rect {
+    screen.centered(Constraint::Percentage(90), Constraint::Percentage(85))
+}
+
 /// The sidebar's list and actions, in a popup with a large preview.
 struct App {
     sidebar: Sidebar,
     client: String,
+    backdrop: Vec<BackdropPane>,
     preview: Text<'static>,
     /// The agent your keys go to, pinned when Tab was pressed.
     talking: Option<String>,
@@ -180,6 +238,7 @@ impl App {
         Self {
             sidebar,
             client: client.to_string(),
+            backdrop: Vec::new(),
             preview: Text::default(),
             talking: None,
             outgoing: Vec::new(),
@@ -187,10 +246,12 @@ impl App {
         }
     }
 
-    /// Start on the agent in view. The first refresh shows any failure to read the index.
+    /// Start on the agent in view, over the screen as it is. The first refresh shows any failure
+    /// to read the index.
     fn open_on_agent_in_view(&mut self) -> Result<()> {
         let clients = clients()?;
         let client = input_client(&clients, Origin::Popup(&self.client))?;
+        self.backdrop = backdrop(client)?;
         self.sidebar.navigation.pane = index::read()
             .ok()
             .and_then(|index| agent_in_view(&index, client));
@@ -439,16 +500,29 @@ fn place(agent: &Agent) -> &str {
 }
 
 fn draw(f: &mut Frame, app: &mut App) {
+    for pane in &app.backdrop {
+        let area = pane.area.intersection(f.area());
+        f.render_widget(Paragraph::new(pane.screen.clone()), area);
+    }
+    let area = panel_area(f.area());
+    f.render_widget(Clear, area);
+    let frame = panel(Line::from(" agents "));
+    let inner = frame.inner(area);
+    f.render_widget(frame, area);
+    draw_panel(f, inner, app);
+}
+
+fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
     if app.sidebar.help.open {
-        app.sidebar.help.draw(f);
+        app.sidebar.help.draw(f, area);
         return;
     }
     if app.sidebar.auto_name.open {
-        app.sidebar.auto_name.draw(f);
+        app.sidebar.auto_name.draw(f, area);
         return;
     }
     let sidebar = &mut app.sidebar;
-    let width = f.area().width as usize;
+    let width = area.width as usize;
     let confirmation = confirmation_footer(sidebar, width);
     let footer_height = confirmation.as_ref().map_or(1, |lines| lines.len() as u16);
     let searching = sidebar.navigation.search.is_some();
@@ -458,14 +532,14 @@ fn draw(f: &mut Frame, app: &mut App) {
     } else {
         0
     };
-    let list_height = (sidebar.agents.len() as u16 + 2).clamp(3, (f.area().height / 3).max(3));
+    let list_height = (sidebar.agents.len() as u16 + 2).clamp(3, (area.height / 3).max(3));
     let [search_area, list_area, preview_area, help_area] = Layout::vertical([
         Constraint::Length(search_height),
         Constraint::Length(list_height),
         Constraint::Min(3),
         Constraint::Length(footer_height),
     ])
-    .areas(f.area());
+    .areas(area);
 
     if search_height > 0 {
         let query = format!("› {}", sidebar.navigation.query);
@@ -793,6 +867,30 @@ mod tests {
         app.sidebar.navigation.order = vec!["%10".into(), "%11".into()];
         app.sidebar.rebuild();
         app
+    }
+
+    #[test]
+    fn the_screen_behind_the_panel_is_dimmed_and_stays_out_of_it() {
+        let mut screen = "\x1b[31mred\x1b[0m plain".into_text().unwrap();
+        dim(&mut screen);
+        let mut app = App::new("client");
+        app.backdrop = vec![BackdropPane {
+            area: Rect::new(0, 0, 200, 1),
+            screen,
+        }];
+        let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(0, 0)].symbol(), "r");
+        assert!(buffer[(0, 0)].modifier.contains(Modifier::DIM));
+        assert!(buffer[(5, 0)].modifier.contains(Modifier::DIM));
+
+        app.backdrop[0].area = Rect::new(0, 5, 200, 1);
+        let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(0, 5)].symbol(), "r");
+        assert_ne!(buffer[(3, 5)].symbol(), "d", "the panel covers the screen");
     }
 
     #[test]

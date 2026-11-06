@@ -1293,11 +1293,11 @@ fn truncate(s: &str, width: usize) -> String {
 
 fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     if sidebar.help.open {
-        sidebar.help.draw(f);
+        sidebar.help.draw(f, f.area());
         return;
     }
     if sidebar.auto_name.open {
-        sidebar.auto_name.draw(f);
+        sidebar.auto_name.draw(f, f.area());
         return;
     }
     let confirmation = confirmation_footer(sidebar, f.area().width as usize);

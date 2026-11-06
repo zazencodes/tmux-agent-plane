@@ -22,6 +22,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- The screen behind the agent picker is dimmed while it is open
 - The sidebar and the agent picker no longer repeat agent counts in their headers; the status bar is the one place for them
 - Moving the sidebar selection always previews the selected agent's window, with the keyboard staying in the sidebar; the `v` toggle is gone
 - `x` in the sidebar moves to the next row first, then kills, so the keyboard stays in the sidebar and an agent alone in your current session can be killed

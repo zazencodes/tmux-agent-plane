@@ -2,7 +2,7 @@
 use crate::ui::{SUBTEXT, TEXT};
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
-use ratatui::layout::{Constraint, Layout};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 
@@ -70,8 +70,8 @@ impl Help {
         self.start..end
     }
 
-    pub fn draw(&mut self, frame: &mut Frame) {
-        let height = frame.area().height;
+    pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
+        let height = area.height;
         let page = self.page(height);
         let [title, body, footer] = Layout::vertical([
             Constraint::Length(u16::from(height >= 4)),
@@ -82,7 +82,7 @@ impl Help {
                 u16::from(height >= 2)
             }),
         ])
-        .areas(frame.area());
+        .areas(area);
         frame.render_widget(
             Paragraph::new(format!(
                 "Keyboard shortcuts {}–{}/{}",

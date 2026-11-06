@@ -171,6 +171,7 @@ try:
     tmux('set-option', '-g', 'default-command', '/bin/sh')
     tmux('set-option', '-g', 'prefix', 'C-a')
     tmux('set-option', '-g', 'popup-style', 'bg=#1e1e2e,fg=#cdd6f4')
+    tmux('set-option', '-g', 'status-position', 'top')
     tmux('set-option', '-as', 'terminal-features', ',xterm-256color:RGB')
     subprocess.run(['bash', str(SOURCE / 'tmux-agent-plane.tmux')], env=ENV, check=True)
     keys = tmux('list-keys').splitlines()
@@ -184,8 +185,15 @@ try:
     wait('attached', lambda: len(tmux('list-clients').splitlines()) == 2)
     origin, untouched = client.context(), other.context()
     wait('index', lambda: (ROOT / 's/tmux-agent-plane/agents.json').exists())
+    tmux('send-keys', '-t', origin[1], "clear; printf 'BEHIND-''PICKER'", 'Enter')
+    wait('marker on screen', lambda: client.screen.display[1].startswith('BEHIND-PICKER'))
     client.key(b'\x01a')
     wait('empty picker', lambda: 'no agents running' in client.text())
+    # The screen stays in place behind the panel, dimmed, below the status line.
+    assert client.screen.display[1].startswith('BEHIND-PICKER'), client.screen.display[:3]
+    assert b'\x1b[2m' in (ROOT / 'origin.raw').read_bytes(), 'backdrop must be dim'
+    frame = next(y for y, line in enumerate(client.screen.display) if ' agents ' in line)
+    assert frame > 1 and client.screen.display[frame].lstrip().startswith('╭'), client.screen.display[:frame + 1]
     client.key(b'\r')
     time.sleep(.15)
     assert 'j/k browse' in client.text()
@@ -204,7 +212,7 @@ try:
     # The list opens in command mode: no search box, and letters are commands.
     assert 'search names / projects / descriptions' not in client.text() and 'j/k browse' in client.text()
     # Blank canvas and panel background must use terminal default, despite popup-style.
-    assert client.screen.buffer[5][65].bg == 'default', client.screen.buffer[5][65]
+    assert client.screen.buffer[frame + 1][65].bg == 'default', client.screen.buffer[frame + 1][65]
     assert client.screen.buffer[20][65].bg == 'default', client.screen.buffer[20][65]
     # Sessions sit in their own coloured column, separate from window and pane.
     def group_cell(session):

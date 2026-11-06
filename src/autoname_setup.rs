@@ -5,7 +5,7 @@ use crate::ui::{LAVENDER, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, colour, hi
 use anyhow::Result;
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::{Constraint, Layout, Margin};
+use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
@@ -146,9 +146,9 @@ impl Setup {
         true
     }
 
-    pub fn draw(&mut self, frame: &mut Frame) {
+    pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
         let [panel_area, footer_area] =
-            Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(frame.area());
+            Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(area);
         let enabled = self.config.auto_name.enabled;
         let state = if enabled {
             Line::styled(" on ", colour(State::Done)).right_aligned()
@@ -322,7 +322,9 @@ mod tests {
             ..Setup::default()
         };
         let mut terminal = Terminal::new(TestBackend::new(38, 28)).unwrap();
-        terminal.draw(|frame| setup.draw(frame)).unwrap();
+        terminal
+            .draw(|frame| setup.draw(frame, frame.area()))
+            .unwrap();
         let buffer = terminal.backend().buffer();
         let text: String = (0..28)
             .map(|y| (0..38).map(|x| buffer[(x, y)].symbol()).collect::<String>() + "\n")
