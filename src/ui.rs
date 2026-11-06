@@ -454,6 +454,10 @@ fn event_loop(terminal: &mut DefaultTerminal, client: &str, search: bool) -> Res
                         terminal.draw(|f| draw(f, &mut app))?;
                         app.sidebar.send_order(&order);
                     }
+                    if app.sidebar.restarting {
+                        terminal.draw(|f| draw(f, &mut app))?;
+                        app.sidebar.restart_daemon(Origin::Popup(&app.client));
+                    }
                 }
                 if app.talking.is_none() || !event::poll(Duration::ZERO)? {
                     break;
@@ -652,13 +656,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
         None => panel(Line::from(" preview ")),
     };
     match (&app.sidebar.error, app.sidebar.selected()) {
-        (Some(e), _) => message(
-            f,
-            preview_area,
-            block,
-            colour(State::Blocked),
-            &["daemon not running", e],
-        ),
+        (Some(e), _) => daemon_down(f, preview_area, block, &app.sidebar, e),
         (None, None) => message(
             f,
             preview_area,
@@ -810,19 +808,51 @@ pub(crate) fn message(
     heading_colour: Color,
     text: &[&str; 2],
 ) {
+    let [heading, body] = text;
+    centred(
+        f,
+        area,
+        block,
+        vec![
+            Line::styled(
+                heading.to_string(),
+                Style::default().fg(heading_colour).bold(),
+            ),
+            Line::default(),
+            Line::styled(body.to_string(), OVERLAY),
+        ],
+    );
+}
+
+/// What the list and the picker's preview show while the daemon is down: Enter restarts it.
+pub(crate) fn daemon_down(f: &mut Frame, area: Rect, block: Block, sidebar: &Sidebar, error: &str) {
+    let heading = Style::default().fg(colour(State::Blocked)).bold();
+    let lines = if sidebar.restarting {
+        vec![Line::styled("restarting daemon…", heading)]
+    } else {
+        let (title, action, detail) = match &sidebar.restart_failure {
+            Some(failure) => (
+                "daemon restart failed",
+                "enter tries again",
+                failure.as_str(),
+            ),
+            None => ("daemon not running", "enter restarts", error),
+        };
+        vec![
+            Line::styled(title, heading),
+            Line::default(),
+            Line::styled(action, Style::default().fg(TEXT).bold()),
+            Line::default(),
+            Line::styled(detail.to_string(), OVERLAY),
+        ]
+    };
+    centred(f, area, block, lines);
+}
+
+fn centred(f: &mut Frame, area: Rect, block: Block, lines: Vec<Line>) {
     let inner = block.inner(area).inner(Margin::new(1, 0));
     f.render_widget(block, area);
-    let [heading, body] = text;
-    let paragraph = Paragraph::new(vec![
-        Line::styled(
-            heading.to_string(),
-            Style::default().fg(heading_colour).bold(),
-        ),
-        Line::default(),
-        Line::styled(body.to_string(), OVERLAY),
-    ])
-    .centered()
-    .wrap(Wrap { trim: true });
+    let paragraph = Paragraph::new(lines).centered().wrap(Wrap { trim: true });
     // A third of the way down reads as centred, and leaves room for a long message to wrap.
     let [_, middle] =
         Layout::vertical([Constraint::Length(inner.height / 3), Constraint::Fill(1)]).areas(inner);

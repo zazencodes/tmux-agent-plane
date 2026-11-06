@@ -7,8 +7,8 @@ use crate::lifecycle;
 use crate::navigation::{CLIENT_FORMAT, Client, guard_destination, parse_client};
 use crate::tmux;
 use crate::ui::{
-    LAVENDER, NO_AGENTS, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, group_colour,
-    hints, icon, message, name_style, panel, rank, state_style, task,
+    LAVENDER, NO_AGENTS, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, daemon_down,
+    group_colour, hints, icon, message, name_style, panel, rank, state_style, task,
 };
 use anyhow::{Context, Result, bail};
 use nucleo_matcher::Matcher;
@@ -402,6 +402,10 @@ pub(crate) struct Sidebar {
     organize_status: Option<crate::organize::Status>,
     pub(crate) list: ListState,
     pub(crate) error: Option<String>,
+    /// Enter asked for a daemon restart, which runs once the screen says so.
+    pub(crate) restarting: bool,
+    /// Why the last restart failed, until the daemon is back.
+    pub(crate) restart_failure: Option<String>,
     pub(crate) editing: Option<Rename>,
     pub(crate) notice: Option<String>,
     killing: Option<KillConfirmation>,
@@ -523,6 +527,7 @@ impl Sidebar {
         }
         self.organize_status = index.organize;
         self.error = None;
+        self.restart_failure = None;
         // Any tick stamped after the acknowledgement has adopted the order `s` sent.
         if self.sorted_at.is_none_or(|at| index.updated_at > at) {
             self.sorted_at = None;
@@ -926,9 +931,26 @@ impl Sidebar {
                 && self.auto_name.key(key))
             || self.new_agent_key(key, origin)
             || self.organize_key(key, origin)
-            || self.kill_key(key, origin);
+            || self.kill_key(key, origin)
+            || self.restart_key(key);
         self.pending_g &= !consumed;
         consumed
+    }
+
+    /// With the daemon down the list has no rows, so Enter has nothing else to open.
+    fn restart_key(&mut self, key: KeyEvent) -> bool {
+        let restart = key.code == KeyCode::Enter && self.error.is_some() && self.editing.is_none();
+        self.restarting |= restart;
+        restart
+    }
+
+    /// Waits for the new daemon's first index, or for the reason it could not start.
+    pub(crate) fn restart_daemon(&mut self, origin: Origin<'_>) {
+        self.restarting = false;
+        match lifecycle::run(lifecycle::Action::Restart) {
+            Ok(()) => self.refresh(origin),
+            Err(error) => self.restart_failure = Some(format!("{error:#}")),
+        }
     }
 
     /// Hand the order `s` chose to the daemon, which publishes it to every list.
@@ -1254,6 +1276,10 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             screen.show(&mut sidebar)?;
             sidebar.send_order(&order);
         }
+        if sidebar.restarting {
+            screen.show(&mut sidebar)?;
+            sidebar.restart_daemon(origin);
+        }
         if focus || (preview && sidebar.navigation.search.is_none()) {
             match switch_command(&sidebar, &own, focus) {
                 Ok(Some(command)) => {
@@ -1333,12 +1359,12 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         mode_area,
     );
     if let Some(e) = &sidebar.error {
-        message(
+        daemon_down(
             f,
             agents_area,
             ratatui::widgets::Block::default(),
-            colour(State::Blocked),
-            &["daemon not running", e],
+            sidebar,
+            e,
         );
     } else if sidebar.agents.is_empty() {
         let text = if sidebar.all_agents.is_empty() {
@@ -2712,6 +2738,63 @@ mod tests {
         assert!(rows[10].contains("working"));
         assert!(rows[11].contains("ends session remote? [Y/n]"));
         assert!(!rows.iter().any(|row| row.contains("rename error")));
+    }
+
+    fn rendered(sidebar: &mut Sidebar) -> String {
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut terminal = Terminal::new(TestBackend::new(38, 20)).unwrap();
+        terminal.draw(|frame| draw(frame, sidebar)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..20)
+            .map(|y| (0..38).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn enter_asks_for_a_restart_only_while_the_daemon_is_down() {
+        let enter = KeyEvent::from(KeyCode::Enter);
+        let origin = Origin::Sidebar("%9");
+        let mut healthy = Sidebar::default();
+        assert!(!healthy.action_key(enter, origin));
+        assert!(!healthy.restarting);
+
+        let mut down = Sidebar {
+            error: Some("not running".into()),
+            ..Sidebar::default()
+        };
+        assert!(rendered(&mut down).contains("enter restarts"));
+        assert!(down.action_key(enter, origin));
+        assert!(down.restarting);
+        let screen = rendered(&mut down);
+        assert!(screen.contains("restarting daemon"));
+        assert!(!screen.contains("not running"));
+
+        let mut renaming = Sidebar {
+            error: Some("not running".into()),
+            editing: Some(Rename {
+                pane: "%1".into(),
+                name: "claude".into(),
+            }),
+            ..Sidebar::default()
+        };
+        assert!(!renaming.action_key(enter, origin));
+        assert!(!renaming.restarting);
+    }
+
+    #[test]
+    fn a_failed_restart_shows_why_and_can_be_retried() {
+        let mut sidebar = Sidebar {
+            error: Some("not running".into()),
+            restart_failure: Some("disk full".into()),
+            ..Sidebar::default()
+        };
+        let screen = rendered(&mut sidebar);
+        assert!(screen.contains("restart failed"));
+        assert!(screen.contains("enter tries again"));
+        assert!(screen.contains("disk full"));
+        assert!(sidebar.action_key(KeyEvent::from(KeyCode::Enter), Origin::Sidebar("%9")));
+        assert!(sidebar.restarting);
     }
 
     #[test]

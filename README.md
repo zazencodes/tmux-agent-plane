@@ -156,7 +156,7 @@ These are tmux key names (`C` is Ctrl, `M` is Alt). The defaults leave tmux's pr
 | `Ctrl-J` / `Ctrl-K` | Move selection, including while editing a search |
 | `/` | Search, in the sidebar and the popup alike: fuzzy across agent name, project (tmux session), task and blocked detail, ignoring case and allowing gaps. Each word can match any field, in any order, and the best match comes first. `Enter` opens the selected match and ends the search, `/` again freezes the search so keys are commands on its matches, `Esc` cancels the edit, `Ctrl-W` deletes a word, `Ctrl-U` clears; arrows and `Ctrl-J`/`Ctrl-K` move selection while editing |
 | `Esc` | Clear sidebar search outside editing; close the popup |
-| `Enter` | Jump to the agent. The sidebar stays open; the popup closes |
+| `Enter` | Jump to the agent. The sidebar stays open; the popup closes. When the list says the daemon is not running, `Enter` restarts it and shows the reason if it cannot start |
 | `x` | Ask to kill the selected agent’s pane. The footer pins its name/state; `Enter` or lowercase `y` confirms; `?` temporarily shows help; other keys cancel without replay. Refuses to end your attached session; warns if a remote session would end |
 | `r` | Rename the agent (sidebar), starting from its current name. `Ctrl-W` deletes a word, `Ctrl-U` clears, `Enter` saves, `Esc` cancels |
 | `c` | Configure, in the sidebar. AI naming: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `d` disables naming, `Esc` goes back or closes |

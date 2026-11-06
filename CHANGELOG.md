@@ -7,6 +7,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
+- When the sidebar or agent picker says the daemon is not running, press `Enter` to restart it; if it cannot start, the reason stays on screen
 - `prefix + f` opens the agent picker already searching, ready to type; this replaces tmux's window finder on that key
 - Sidebar session headings use the same per-session colours as the agent picker
 - `gg` and `G` jump to the first and last agent in the sidebar and the agent picker
