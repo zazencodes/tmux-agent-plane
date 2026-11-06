@@ -7,6 +7,7 @@
 
 uv run tests/sidebar_navigation_live.py target/debug/tmux-agent-plane
 uv run tests/sidebar_navigation_live.py target/debug/tmux-agent-plane --search-only
+uv run tests/sidebar_navigation_live.py target/debug/tmux-agent-plane --bold-only
 PTY decoding asserts UI only. Agent state comes exclusively from native fixtures/index.
 Search editing pauses preview; / freezes and previews; Enter opens.
 Evidence persists in /tmp/tap-nav-*. Agent jobs use the branch CLI.
@@ -339,6 +340,71 @@ def assert_cycle_keys(client):
             'explicit_client': True, 'shared_target_refused': True, 'departed_row': True,
             'works_with_sidebar_open': True, 'custom_keys_reload': True,
             'user_rebinding_preserved': True}
+
+
+def bold_names(client):
+    """The agents the sidebar shows in bold."""
+    client.drain()
+    found = []
+    for row, line in enumerate(client.screen.display):
+        if "─" in line[:38]:  # A session heading is always bold.
+            continue
+        for name in FIXTURES:
+            column = line[:38].find(name)
+            if column >= 0 and client.screen.buffer[row][column].bold:
+                found.append(name)
+    return found
+
+
+def assert_bold_on_arrival(client):
+    """Bold is right as soon as you land on an agent, well inside the daemon's tick."""
+    limit = 0.25
+
+    def here():
+        return client.context()[1]
+
+    def bold_soon(label, name):
+        start = time.monotonic()
+        wait(label, lambda: here() == agent(name)["pane"], timeout=5)
+        arrived = time.monotonic()
+        while bold_names(client) != [name]:
+            assert time.monotonic() - arrived < limit, (label, bold_names(client), ROOT)
+            time.sleep(0.005)
+        return round((time.monotonic() - arrived) * 1000, 1), round((arrived - start) * 1000, 1)
+
+    if not all(w["sidebar"] for w in index()["windows"]):
+        plane("toggle-sidebar", agent("nav-work")["window"])
+    wait("sidebars open", lambda: all(w["sidebar"] for w in index()["windows"]))
+    plane("focus", "nav-work")
+    timings = {}
+    for _ in range(3):
+        settle(2.0)  # Hidden sidebars have read the index, as they have in normal use.
+        panes = {a["pane"]: a["name"] for a in index()["agents"]}
+        snapshot = index()
+        ordered = sorted([a for pane in snapshot["order"] for a in snapshot["agents"] if a["pane"] == pane],
+                         key=lambda a: a["session"])
+        position = [a["pane"] for a in ordered].index(here())
+        name = panes[ordered[(position + 1) % len(ordered)]["pane"]]
+        client.key(b"\x1bj")
+        timings["alt-j " + name] = bold_soon("alt-j " + name, name)
+    # Enter from the sidebar: the sidebar comes along and knows where it landed.
+    settle(2.0)
+    home = agent("nav-work")
+    own = sidebar_pane(home["window"])
+    tmux("switch-client", "-c", client.context()[0], "-t", f"={home['session']}:{home['window']}.{own}")
+    wait("in the sidebar", lambda: here() == own)
+    settle(2.0)
+    assert bold_names(client) == [], bold_names(client)  # The keyboard is in the sidebar.
+    before = client.selected()
+    client.key(b"j")
+    wait("preview moved", lambda: client.selected() != before)
+    settle(0.3)
+    assert bold_names(client) == [], bold_names(client)  # A preview keeps the keyboard here.
+    name = client.selected()
+    client.key(b"\r")
+    timings["enter " + name] = bold_soon("enter " + name, name)
+    print("bold after arrival, ms (bold, arrival):", timings, flush=True)
+    return {"bold_on_arrival": timings}
 
 
 def assert_fuzzy_search(client):
@@ -945,6 +1011,9 @@ try:
     wait("states", lambda: agent("nav-done")["state"] == "done" and agent("nav-away")["state"] == "blocked")
     if "--cycle-only" in sys.argv[2:]:
         RESULTS = {"passed": True, **assert_cycle_keys(client)}
+        sys.exit(0)
+    if "--bold-only" in sys.argv[2:]:
+        RESULTS = {"passed": True, **assert_bold_on_arrival(client)}
         sys.exit(0)
     plane("toggle-sidebar", agent("nav-work")["window"])
     wait("sidebar controls", lambda: "f all" in client.text())

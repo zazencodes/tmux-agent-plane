@@ -38,6 +38,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- The agent you land on goes bold in the sidebar straight away, and the one you left stops being bold, with no half-second lag
 - The agent picker shows a blocked agent's reason in red, like the sidebar
 - An empty sidebar no longer implies only Claude Code and Codex are tracked
 - A sidebar no longer freezes on an old list, showing closed agents and missing new ones, after `prefix + [` or a mouse drag put it in tmux copy mode: sidebars now leave copy mode at once

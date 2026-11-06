@@ -415,6 +415,9 @@ pub(crate) struct Sidebar {
     sorted_at: Option<u64>,
     /// A client is viewing this sidebar with the keyboard in it: its selection is theirs.
     steering: bool,
+    /// The agent active in this sidebar's window, shown in bold. Known while the window is hidden,
+    /// so it is right the moment a client arrives.
+    in_use: Option<String>,
     /// When a key last reached this sidebar, which proves the keyboard is here.
     pressed_at: u64,
     /// The last key was the first `g` of `gg`.
@@ -450,6 +453,7 @@ impl Sidebar {
         let in_use = window
             .map(|w| w.active_pane.as_str())
             .filter(|active| *active != own && self.all_agents.iter().any(|a| a.pane == *active));
+        self.in_use = in_use.map(str::to_string);
         let steering = window.is_some_and(|w| w.viewed && w.active_pane == own);
         let target = if in_use.is_some() {
             in_use
@@ -469,6 +473,15 @@ impl Sidebar {
     pub(crate) fn pressed(&mut self, now: u64) {
         self.pressed_at = now;
         self.steering = true;
+    }
+
+    /// This sidebar is about to move the client: Enter lands in the agent, a preview keeps the
+    /// keyboard here.
+    fn switching(&mut self, focus: bool) {
+        self.in_use = self
+            .selected()
+            .filter(|_| focus)
+            .map(|agent| agent.pane.clone());
     }
 
     /// Show the new order at once, ahead of the daemon that publishes it to every sidebar.
@@ -1244,6 +1257,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
         if focus || (preview && sidebar.navigation.search.is_none()) {
             match switch_command(&sidebar, &own, focus) {
                 Ok(Some(command)) => {
+                    sidebar.switching(focus);
                     // Draw last, so the selection moves on screen together with the window.
                     screen.show(&mut sidebar)?;
                     let command: Vec<_> = command.iter().map(String::as_str).collect();
@@ -1346,6 +1360,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
             &sidebar.all_agents,
             selected,
             sidebar.editing.as_ref().map(|edit| &edit.name),
+            sidebar.in_use.as_deref(),
             inner,
         );
         f.render_stateful_widget(List::new(items), agents_area, &mut sidebar.list);
@@ -1536,6 +1551,7 @@ fn items<'a>(
     all: &[Agent],
     selected: Option<usize>,
     editing: Option<&String>,
+    in_use: Option<&str>,
     width: usize,
 ) -> Vec<ListItem<'a>> {
     let mut session = None;
@@ -1581,7 +1597,7 @@ fn items<'a>(
                 Some(_) => Style::default()
                     .fg(colour(State::Done))
                     .add_modifier(Modifier::UNDERLINED),
-                None => name_style(a),
+                None => name_style(a, in_use == Some(a.pane.as_str())),
             };
             let first = Line::from(vec![
                 bar.clone(),
@@ -2220,6 +2236,24 @@ mod tests {
             viewed,
             sidebar: Some("%9".into()),
         }
+    }
+
+    #[test]
+    fn bold_is_the_agent_active_in_this_window_even_while_hidden() {
+        let mut sidebar = showing(vec![agent("%1", State::Idle), agent("%2", State::Idle)]);
+        sidebar.follow(Some(&window("%2", false)), None, "%9");
+        assert_eq!(sidebar.in_use.as_deref(), Some("%2"));
+        // The keyboard in the sidebar or a plain shell: no agent is in use.
+        sidebar.follow(Some(&window("%9", true)), Some("%2"), "%9");
+        assert_eq!(sidebar.in_use, None);
+        sidebar.follow(Some(&window("%7", true)), Some("%2"), "%9");
+        assert_eq!(sidebar.in_use, None);
+        // Enter lands in the selected agent at once; a preview keeps the keyboard here.
+        sidebar.select(Some(0));
+        sidebar.switching(true);
+        assert_eq!(sidebar.in_use.as_deref(), Some("%1"));
+        sidebar.switching(false);
+        assert_eq!(sidebar.in_use, None);
     }
 
     #[test]

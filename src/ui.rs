@@ -520,7 +520,10 @@ fn draw(f: &mut Frame, app: &mut App) {
                         .fg(colour(State::Done))
                         .add_modifier(Modifier::UNDERLINED),
                 ),
-                None => Span::styled(format!("{:<name_width$}  ", a.name), name_style(a)),
+                None => Span::styled(
+                    format!("{:<name_width$}  ", a.name),
+                    name_style(a, a.visible),
+                ),
             };
             let (task, task_style) = task(a);
             let mut line = Line::from(vec![
@@ -689,14 +692,14 @@ pub(crate) fn state_style(state: State) -> Style {
     }
 }
 
-/// An agent's name: bold while it is on screen, faded when idle.
-pub(crate) fn name_style(agent: &Agent) -> Style {
+/// An agent's name: bold while it is the one in use, faded when idle.
+pub(crate) fn name_style(agent: &Agent, in_use: bool) -> Style {
     let style = Style::default().fg(if agent.state == State::Idle {
         SUBTEXT
     } else {
         TEXT
     });
-    if agent.visible { style.bold() } else { style }
+    if in_use { style.bold() } else { style }
 }
 
 /// What an agent is doing: a blocked agent's reason, in the colour that asks for attention, or
