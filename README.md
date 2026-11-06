@@ -71,7 +71,7 @@ set -g @plugin 'zazencodes/tmux-agent-plane'
 
 Without TPM, clone the repo and add `run-shell /path/to/tmux-agent-plane/tmux-agent-plane.tmux` to `~/.tmux.conf`.
 
-The plugin starts the daemon once the first session exists, binds `prefix + S` to the sidebar `prefix + a` to the agent list popup and `prefix + f` to the same popup already searching (replacing tmux's window finder on that key), and sets a `session-created[90]` hook to start the watcher and a `window-linked[90]` hook that gives each new window the open sidebar. A `window-layout-changed[90]` hook closes a sidebar as soon as its last other pane disappears. To use another sidebar key, set it before the plugin loads:
+The plugin starts the daemon once the first session exists, binds `prefix + S` to the sidebar `prefix + a` to the agent list popup and `prefix + f` to the same popup already searching (replacing tmux's window finder on that key), and sets a `session-created[90]` hook to start the watcher and a `window-linked[90]` hook that gives each new window the open sidebar. A `window-layout-changed[90]` hook closes a sidebar as soon as its last other pane disappears. A `pane-mode-changed[90]` hook takes a sidebar straight back out of copy mode, which would otherwise freeze its list. To use another sidebar key, set it before the plugin loads:
 
 ```tmux
 set -g @agent-plane-sidebar-key Space   # replaces tmux's next-layout binding

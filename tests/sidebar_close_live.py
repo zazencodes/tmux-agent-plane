@@ -70,6 +70,21 @@ def closes(label, win, action):
     print(f'PASS: {label}: {elapsed}ms', flush=True)
 
 
+def mode(p):
+    return tmux('display-message', '-p', '-t', p, '#{pane_mode}')
+
+
+def leaves_copy_mode(label, p, *entry):
+    start = time.monotonic()
+    tmux('copy-mode', '-t', p, *entry)
+    while mode(p):
+        assert time.monotonic() - start < .3, (label, 'sidebar stayed in copy mode 300ms', ROOT)
+        time.sleep(.002)
+    elapsed = round((time.monotonic() - start) * 1000, 1)
+    RESULTS.append(dict(case=label, elapsed_ms=elapsed))
+    print(f'PASS: {label}: {elapsed}ms', flush=True)
+
+
 try:
     tmux('-f', '/dev/null', 'new-session', '-d', '-s', 'scratch', '-x', '100', '-y', '28', 'sleep 100')
     anchor = windows()[0]
@@ -77,6 +92,21 @@ try:
         subprocess.run(['bash', str(SOURCE / 'tmux-agent-plane.tmux')], env=ENV, check=True)
     hooks = tmux('show-hooks', '-gw')
     assert hooks.count('window-layout-changed[90]') == 1, 'reload must replace its own hook'
+    assert hooks.count('pane-mode-changed[90]') == 1, 'reload must replace its own hook'
+    # Copy mode would freeze a sidebar's frame. Hidden windows prove the event's pane is pinned.
+    w = window()
+    shell = pane(w)
+    s = sidebar(w)
+    leaves_copy_mode('prefix [ in a sidebar', s)
+    leaves_copy_mode('prefix PageUp in a sidebar', s, '-u')
+    # Other panes keep copy mode, and a sidebar keeps the modes that do not outlive their use.
+    tmux('copy-mode', '-t', shell)
+    tmux('choose-tree', '-t', s)
+    time.sleep(.2)
+    assert mode(shell) == 'copy-mode', 'an ordinary pane must keep copy mode'
+    assert mode(s) == 'tree-mode', 'a sidebar must keep tree mode'
+    RESULTS.append(dict(case='ordinary pane copy mode and sidebar tree mode survive'))
+    tmux('kill-window', '-t', w)
     # Hidden window and removed active pane: default hook context can be another window.
     w = window()
     shell = pane(w)

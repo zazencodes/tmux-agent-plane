@@ -37,6 +37,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- A sidebar no longer freezes on an old list, showing closed agents and missing new ones, after `prefix + [` or a mouse drag put it in tmux copy mode: sidebars now leave copy mode at once
 - Keeping hidden windows sized no longer fails with "command too long" when many windows need resizing, and a persistent fault no longer flips between error and "recovered" popups
 - Organize no longer fails with "Codex process missing or ambiguous", and the sidebar and picker can kill a Codex agent, while that agent is running helper processes
 - Give an AI name that breaks the naming rule one corrected retry, and show the rejected answer in the error if the retry fails too

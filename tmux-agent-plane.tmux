@@ -50,6 +50,10 @@ tmux set-hook -g 'window-linked[90]' "run-shell -b \"tmux-agent-plane follow-sid
 # run-shell -C runs tmux commands directly; ## defers the condition until that target is set.
 tmux set-hook -g 'window-layout-changed[90]' \
   'run-shell -C "if-shell -F -t #{hook_window} '\''##{&&:##{==:##{window_panes},1},##{==:##{@agent-plane-sidebar},1}}'\'' '\''kill-pane -t #{hook_window}'\''"'
+# Copy mode would freeze a sidebar on an old frame while it keeps redrawing underneath, and a
+# sidebar has no scrollback to read. Other modes, such as prefix + w, end when used, so they stay.
+tmux set-hook -g 'pane-mode-changed[90]' \
+  'run-shell -C "if-shell -F -t #{hook_pane} '\''##{&&:##{==:##{pane_mode},copy-mode},##{==:##{@agent-plane-sidebar},1}}'\'' '\''send-keys -t #{hook_pane} -X cancel'\''"'
 # prefix + a: searchable agents with a large preview. prefix + f: the same, already searching.
 # Inherit the terminal's colours even when a tmux theme sets a separate popup background.
 # Expand the opening client here: display-popup does not expand its shell command.
