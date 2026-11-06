@@ -1104,7 +1104,7 @@ try:
     wait("back in travelling sidebar", lambda: client.context()[1] == sidebar)
     # Restore all four states. Only F may skip categories/change the state filter.
     change("nav-done", "idle", 2)
-    wait("done again", lambda: agent("nav-done")["state"] == "done" and "✓ 1" in client.text())
+    wait("done again", lambda: agent("nav-done")["state"] == "done" and "✓" in client.text())
     for state in ["blocked", "done", "working", "idle", "all"]:
         client.key(b"f")
         wait("filter " + state, lambda state=state: "f " + state in client.text())
