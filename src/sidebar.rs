@@ -7,8 +7,8 @@ use crate::lifecycle;
 use crate::navigation::{CLIENT_FORMAT, Client, guard_destination, parse_client};
 use crate::tmux;
 use crate::ui::{
-    LAVENDER, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, counts, group_colour, hints,
-    icon, message, name_style, panel, rank, state_style,
+    LAVENDER, NO_AGENTS, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, group_colour,
+    hints, icon, message, name_style, panel, rank, state_style, task,
 };
 use anyhow::{Context, Result, bail};
 use nucleo_matcher::Matcher;
@@ -1291,7 +1291,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let [list_area, help_area] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(footer_height)]).areas(f.area());
     let inner = list_area.width.saturating_sub(2) as usize;
-    let block = panel(Line::from(" agents ")).title_top(counts(&sidebar.all_agents));
+    let block = panel(Line::from(" agents "));
     let content = block.inner(list_area);
     f.render_widget(block, list_area);
     let [mode_area, agents_area] =
@@ -1328,10 +1328,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         );
     } else if sidebar.agents.is_empty() {
         let text = if sidebar.all_agents.is_empty() {
-            [
-                "no agents running",
-                "start claude or codex in any tmux pane",
-            ]
+            NO_AGENTS
         } else {
             ["no matching agents", "f changes state · esc clears search"]
         };
@@ -1598,10 +1595,7 @@ fn items<'a>(
                 .location
                 .strip_prefix(&format!("{}:", a.session))
                 .unwrap_or(&a.location);
-            let (task, task_style) = match (a.state, &a.detail) {
-                (State::Blocked, Some(detail)) => (detail, Style::default().fg(colour(a.state))),
-                _ => (&a.title, Style::default().fg(SUBTEXT)),
-            };
+            let (task, task_style) = task(a);
             let task_width = width.saturating_sub(place.chars().count() + 6);
             let second = Line::from(vec![
                 bar,

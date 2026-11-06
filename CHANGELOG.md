@@ -22,6 +22,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- The sidebar and the agent picker no longer repeat agent counts in their headers; the status bar is the one place for them
 - Moving the sidebar selection always previews the selected agent's window, with the keyboard staying in the sidebar; the `v` toggle is gone
 - `x` in the sidebar moves to the next row first, then kills, so the keyboard stays in the sidebar and an agent alone in your current session can be killed
 - `Enter` during a search opens the selected match right away, in the agent picker and the sidebar; `/` freezes the search when you want to keep it
@@ -37,6 +38,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- The agent picker shows a blocked agent's reason in red, like the sidebar
+- An empty sidebar no longer implies only Claude Code and Codex are tracked
 - A sidebar no longer freezes on an old list, showing closed agents and missing new ones, after `prefix + [` or a mouse drag put it in tmux copy mode: sidebars now leave copy mode at once
 - Keeping hidden windows sized no longer fails with "command too long" when many windows need resizing, and a persistent fault no longer flips between error and "recovered" popups
 - Organize no longer fails with "Codex process missing or ambiguous", and the sidebar and picker can kill a Codex agent, while that agent is running helper processes

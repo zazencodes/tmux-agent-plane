@@ -522,6 +522,7 @@ fn draw(f: &mut Frame, app: &mut App) {
                 ),
                 None => Span::styled(format!("{:<name_width$}  ", a.name), name_style(a)),
             };
+            let (task, task_style) = task(a);
             let mut line = Line::from(vec![
                 Span::styled(if is_selected { "▌" } else { " " }, colour(a.state)),
                 Span::styled(format!("{} ", icon(a.state)), colour(a.state)),
@@ -535,14 +536,7 @@ fn draw(f: &mut Frame, app: &mut App) {
                     group_colour(&sidebar.all_agents, &a.session),
                 ),
                 Span::styled(format!("{:<place_width$}  ", place(a)), OVERLAY),
-                Span::styled(
-                    if a.state == State::Blocked {
-                        a.detail.as_deref().unwrap_or(&a.title).to_string()
-                    } else {
-                        a.title.clone()
-                    },
-                    SUBTEXT,
-                ),
+                Span::styled(task.to_string(), task_style),
             ]);
             if is_selected {
                 line = fill(line, row_width).style(Style::default().bg(Color::DarkGray));
@@ -554,7 +548,7 @@ fn draw(f: &mut Frame, app: &mut App) {
         Some(state) => format!(" agents · {} ", state.as_str()),
         None => " agents ".to_string(),
     };
-    let list = List::new(items).block(panel(Line::from(title)).title_top(counts(&sidebar.agents)));
+    let list = List::new(items).block(panel(Line::from(title)));
     f.render_stateful_widget(list, list_area, &mut sidebar.list);
 
     let block = match app.sidebar.selected() {
@@ -594,7 +588,7 @@ fn draw(f: &mut Frame, app: &mut App) {
             block,
             TEXT,
             &if app.sidebar.all_agents.is_empty() {
-                ["no agents running", "start an agent in any tmux pane"]
+                NO_AGENTS
             } else {
                 ["no matching agents", "f changes state · / edits search"]
             },
@@ -667,6 +661,9 @@ fn draw(f: &mut Frame, app: &mut App) {
     f.render_widget(Paragraph::new(footer), help_area);
 }
 
+/// The message for an empty list, in the sidebar and the picker.
+pub(crate) const NO_AGENTS: [&str; 2] = ["no agents running", "start an agent in any tmux pane"];
+
 // Catppuccin mocha.
 pub(crate) const SUBTEXT: Color = Color::Rgb(0xa6, 0xad, 0xc8);
 pub(crate) const TEXT: Color = Color::Rgb(0xcd, 0xd6, 0xf4);
@@ -702,19 +699,13 @@ pub(crate) fn name_style(agent: &Agent) -> Style {
     if agent.visible { style.bold() } else { style }
 }
 
-/// Agent counts by state, right-aligned for a title bar; states with none are left out.
-pub(crate) fn counts(agents: &[Agent]) -> Line<'static> {
-    let mut spans = Vec::new();
-    for state in [State::Blocked, State::Done, State::Working, State::Idle] {
-        let n = agents.iter().filter(|a| a.state == state).count();
-        if n > 0 {
-            spans.push(Span::styled(format!(" {} {n}", icon(state)), colour(state)));
-        }
+/// What an agent is doing: a blocked agent's reason, in the colour that asks for attention, or
+/// else its task.
+pub(crate) fn task(agent: &Agent) -> (&str, Style) {
+    match (agent.state, &agent.detail) {
+        (State::Blocked, Some(detail)) => (detail, Style::default().fg(colour(State::Blocked))),
+        _ => (&agent.title, Style::default().fg(SUBTEXT)),
     }
-    if !spans.is_empty() {
-        spans.push(Span::raw(" "));
-    }
-    Line::from(spans).right_aligned()
 }
 
 /// Key hints for a footer: keys bright, actions dim.
@@ -799,6 +790,20 @@ mod tests {
         app.sidebar.navigation.order = vec!["%10".into(), "%11".into()];
         app.sidebar.rebuild();
         app
+    }
+
+    #[test]
+    fn a_blocked_agents_reason_is_red_and_any_other_task_is_quiet() {
+        let mut blocked = agent("a", "%1", "the task");
+        blocked.state = State::Blocked;
+        assert_eq!(task(&blocked), ("the task", Style::default().fg(SUBTEXT)));
+        blocked.detail = Some("the reason".into());
+        assert_eq!(
+            task(&blocked),
+            ("the reason", Style::default().fg(colour(State::Blocked)))
+        );
+        blocked.state = State::Idle;
+        assert_eq!(task(&blocked), ("the task", Style::default().fg(SUBTEXT)));
     }
 
     #[test]
