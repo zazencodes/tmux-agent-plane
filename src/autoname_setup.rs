@@ -1,7 +1,7 @@
 //! Sidebar-local setup; no model process runs during configuration.
 use crate::autoname_config::{self as config, Config, Output};
 use crate::index::State;
-use crate::ui::{LAVENDER, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, colour, hints, panel};
+use crate::ui::{LAVENDER, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, colour, fill, hints, panel};
 use anyhow::Result;
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -19,7 +19,12 @@ pub struct Setup {
     custom: Option<String>,
     error: Option<String>,
     config_error: Option<String>,
+    /// Presets whose CLI was not on `PATH` when the menu opened.
+    missing: Vec<char>,
 }
+
+/// A wider screen, such as the picker's, shows the setup as a centred card of this width.
+const CARD_WIDTH: u16 = 60;
 
 impl Setup {
     /// The configuration file is read here, on the key press: nothing else needs it.
@@ -31,6 +36,13 @@ impl Setup {
             }
             Err(error) => self.config_error = Some(format!("{error:#}")),
         }
+        self.missing = CHOICES
+            .iter()
+            .map(|(choice, _)| *choice)
+            .filter(|choice| {
+                config::preset(*choice).is_some_and(|c| config::executable(&c).is_err())
+            })
+            .collect();
         self.open = true;
         self.command = None;
         self.custom = None;
@@ -147,18 +159,8 @@ impl Setup {
     }
 
     pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
-        let [panel_area, footer_area] =
-            Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(area);
         let enabled = self.config.auto_name.enabled;
-        let state = if enabled {
-            Line::styled(" on ", colour(State::Done)).right_aligned()
-        } else {
-            Line::styled(" off ", OVERLAY).right_aligned()
-        };
-        let block = panel(Line::from(" configure ")).title_top(state);
-        let inner = block.inner(panel_area).inner(Margin::new(1, 0));
-        frame.render_widget(block, panel_area);
-        let width = inner.width as usize;
+        let width = usize::from(area.width.min(CARD_WIDTH).saturating_sub(4));
         let (mut lines, keys): (Vec<Line>, Vec<(&str, &str)>) = if let Some(input) = &self.custom {
             (
                 custom_lines(input, width),
@@ -171,16 +173,27 @@ impl Setup {
             )
         } else {
             let keys = if enabled {
-                vec![("d", "turn off"), ("esc", "close")]
+                vec![("1-7", "choose"), ("d", "turn off"), ("esc", "close")]
             } else {
-                vec![("esc", "close")]
+                vec![("1-7", "choose"), ("esc", "close")]
             };
             (self.menu_lines(width), keys)
         };
         if let Some(error) = self.config_error.as_ref().or(self.error.as_ref()) {
             lines.push(Line::default());
-            lines.push(Line::styled(error.clone(), colour(State::Blocked)));
+            lines.push(Line::styled(format!("⚠ {error}"), colour(State::Blocked)));
         }
+        let [panel_area, footer_area] =
+            Layout::vertical([Constraint::Min(3), Constraint::Length(1)])
+                .areas(card(area, &lines, width));
+        let state = if enabled {
+            Line::styled(" ● on ", colour(State::Done)).right_aligned()
+        } else {
+            Line::styled(" ○ off ", OVERLAY).right_aligned()
+        };
+        let block = panel(Line::from(" configure ")).title_top(state);
+        let inner = block.inner(panel_area).inner(Margin::new(1, 0));
+        frame.render_widget(block, panel_area);
         frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
         frame.render_widget(Paragraph::new(hints(&keys)), footer_area);
     }
@@ -193,22 +206,71 @@ impl Setup {
         let any_preset = CHOICES.iter().any(|(choice, _)| is_current(*choice));
         let mut lines = vec![heading("AI agent names", width)];
         lines.push(muted(
-            "Name default-named agents with an AI CLI on your computer.",
+            "Name agents after their task, using an AI CLI on this computer.",
         ));
         lines.push(Line::default());
         for (choice, label) in CHOICES {
             let current = is_current(choice) || (choice == '7' && auto_name.enabled && !any_preset);
-            lines.push(Line::from(vec![
-                Span::styled(format!("{choice} "), SUBTEXT),
-                Span::styled(label, TEXT),
-                Span::styled(if current { " ✓" } else { "" }, colour(State::Done)),
-            ]));
+            let missing = self.missing.contains(&choice);
+            lines.push(choice_line(choice, label, current, missing, width));
         }
         lines.push(Line::default());
         lines.push(muted(
-            "Nothing runs until you review and enable. Presets use a low-cost model at its lowest thinking.",
+            "You review each choice before anything runs. Presets use a low-cost model.",
         ));
         lines
+    }
+}
+
+/// `5 Antigravity (agy)` with what is true of it at the right edge.
+fn choice_line(
+    choice: char,
+    label: &str,
+    current: bool,
+    missing: bool,
+    width: usize,
+) -> Line<'static> {
+    let label_style = if current {
+        Style::default().fg(TEXT).bold()
+    } else if missing {
+        Style::default().fg(OVERLAY)
+    } else {
+        Style::default().fg(TEXT)
+    };
+    let left = vec![
+        Span::styled(format!("{choice} "), SUBTEXT),
+        Span::styled(label.to_string(), label_style),
+    ];
+    let status = if current {
+        Span::styled("✓ active", colour(State::Done))
+    } else if missing {
+        Span::styled("not installed", OVERLAY)
+    } else {
+        return Line::from(left);
+    };
+    let used = left.iter().map(Span::width).sum::<usize>() + status.width();
+    let mut spans = left;
+    spans.push(Span::raw(" ".repeat(width.saturating_sub(used).max(1))));
+    spans.push(status);
+    Line::from(spans)
+}
+
+/// The whole area in a narrow pane; otherwise a centred card just tall enough for `lines`.
+fn card(area: Rect, lines: &[Line], width: usize) -> Rect {
+    if area.width <= CARD_WIDTH {
+        return area;
+    }
+    let rows: usize = lines
+        .iter()
+        .map(|line| line.width().div_ceil(width).max(1))
+        .sum();
+    // Borders and hints, and a row for each of the few long lines that wrap at a word.
+    let height = u16::try_from(rows + 5).unwrap_or(u16::MAX).min(area.height);
+    Rect {
+        x: area.x + (area.width - CARD_WIDTH) / 2,
+        y: area.y + (area.height - height) / 2,
+        width: CARD_WIDTH,
+        height,
     }
 }
 
@@ -240,7 +302,7 @@ fn review_lines(command: &[String], width: usize) -> Vec<Line<'static>> {
     for row in config::model_summary(command).lines() {
         lines.push(match row.split_once(": ") {
             Some((label, value)) => Line::from(vec![
-                Span::styled(format!("{label}: "), OVERLAY),
+                Span::styled(format!("{label:<9} "), OVERLAY),
                 Span::styled(value.to_string(), TEXT),
             ]),
             None => muted(row),
@@ -248,18 +310,17 @@ fn review_lines(command: &[String], width: usize) -> Vec<Line<'static>> {
     }
     lines.push(Line::default());
     lines.push(heading("What is sent", width));
-    lines.push(Line::styled(
-        "Title, cwd and blocked detail.".to_string(),
-        TEXT,
-    ));
-    lines.push(muted(
-        "Its AI provider may receive that data. No screens or file contents.",
-    ));
+    for item in ["Task title", "Working directory", "Blocked detail"] {
+        lines.push(Line::from(vec![
+            Span::styled("· ", OVERLAY),
+            Span::styled(item, TEXT),
+        ]));
+    }
+    lines.push(muted("Its AI provider may receive these."));
+    lines.push(muted("Never screens or file contents."));
     lines.push(Line::default());
     lines.push(heading("Naming", width));
-    lines.push(muted(
-        "One attempt per agent pane lifetime. Manual and --name names stay yours.",
-    ));
+    lines.push(muted("One attempt per agent pane. Names you set are kept."));
     lines.push(Line::default());
     lines.push(heading("Command", width));
     lines.push(muted(&serde_json::to_string(command).unwrap()));
@@ -270,15 +331,21 @@ fn custom_lines(input: &str, width: usize) -> Vec<Line<'static>> {
     // Show the tail of long input so typing stays reviewable at 38 columns.
     let tail: String = input.chars().rev().take(120).collect();
     let tail: String = tail.chars().rev().collect();
+    let field = Line::from(vec![
+        Span::styled("› ", LAVENDER),
+        Span::styled(format!("{tail}▏"), TEXT),
+    ])
+    .style(Style::default().bg(SURFACE0));
     vec![
         heading("Custom command", width),
         muted("A JSON array: executable, then arguments. One argument must be \"{prompt}\"."),
-        muted("It runs with no tools and 60s to print a plain name to stdout."),
+        muted("It runs with no tools and has 60s to print a plain name."),
         Line::default(),
-        muted("Example:"),
+        heading("Example", width),
         muted("[\"/path/to/namer\",\"{prompt}\"]"),
         Line::default(),
-        Line::styled(format!("{tail}▏"), Style::default().fg(TEXT).bg(SURFACE0)),
+        heading("Your command", width),
+        fill(field, width),
     ]
 }
 
@@ -310,6 +377,75 @@ mod tests {
         assert!(!setup.open);
         assert!(!setup.key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)));
     }
+    /// One screen of a setup, as text.
+    fn rendered(setup: &mut Setup, width: u16, height: u16) -> String {
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| setup.draw(frame, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+                    + "\n"
+            })
+            .collect()
+    }
+
+    #[test]
+    fn menu_marks_the_active_command_and_missing_clis() {
+        let mut setup = Setup {
+            open: true,
+            missing: vec!['2'],
+            ..Setup::default()
+        };
+        setup.config.auto_name.enabled = true;
+        setup.config.auto_name.command = config::preset('1').unwrap();
+        let text = rendered(&mut setup, 38, 28);
+        assert!(text.contains("● on"));
+        assert!(
+            text.lines()
+                .any(|l| l.contains("1 Claude Code") && l.contains("✓ active"))
+        );
+        assert!(
+            text.lines()
+                .any(|l| l.contains("2 Codex") && l.contains("not installed"))
+        );
+        assert!(text.contains("1-7 choose"));
+        assert!(text.contains("d turn off"));
+    }
+
+    #[test]
+    fn a_wide_screen_shows_a_centred_card_with_nothing_cut_off() {
+        for (command, custom) in [
+            (None, None),
+            (config::preset('1'), None),
+            (None, Some(String::new())),
+        ] {
+            let mut setup = Setup {
+                open: true,
+                command,
+                custom,
+                ..Setup::default()
+            };
+            let text = rendered(&mut setup, 120, 40);
+            let rows: Vec<&str> = text.lines().collect();
+            let top = rows
+                .iter()
+                .position(|row| row.contains("╭ configure"))
+                .unwrap();
+            assert!(top > 0, "vertically centred");
+            assert_eq!(rows[top].chars().position(|c| c == '╭'), Some(30));
+            let bottom = rows.iter().position(|row| row.contains('╰')).unwrap();
+            assert!(rows[bottom + 1].contains("esc"), "hints sit under the card");
+            // The last line of content shows, with room to spare for word wrap.
+            assert!(rows[bottom - 1].chars().all(|c| c == ' ' || c == '│'));
+        }
+    }
+
     #[test]
     fn setup_fits_a_38_column_sidebar() {
         use ratatui::{Terminal, backend::TestBackend};
@@ -327,8 +463,8 @@ mod tests {
             .map(|y| (0..38).map(|x| buffer[(x, y)].symbol()).collect::<String>() + "\n")
             .collect();
         assert!(text.contains("⏎ enable"));
-        assert!(text.contains("Model: gemini-3.8-flash"));
-        assert!(text.contains("Thinking: low"));
+        assert!(text.contains("Model     gemini-3.8-flash"));
+        assert!(text.contains("Thinking  low"));
         assert!(text.contains("What is sent"));
         assert!(text.contains("Its AI provider may receive"));
         assert!(text.contains("╭ configure"));

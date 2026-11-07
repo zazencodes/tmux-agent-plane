@@ -310,7 +310,7 @@ try:
     wait('configure closes', lambda: 'd all' in client.text())
     # The supported agy preset resolves to our private fake binary, never the real CLI.
     client.key(b'o5')
-    wait('disclosure before enable', lambda: '⏎ enable' in client.text() and 'What is sent' in client.text() and 'Model: gemini-3.8-flash' in client.text() and 'Thinking: low' in client.text())
+    wait('disclosure before enable', lambda: '⏎ enable' in client.text() and 'What is sent' in client.text() and 'Model     gemini-3.8-flash' in client.text() and 'Thinking  low' in client.text())
     client.snapshot('agy-consent-38-columns')
     assert not calls()
     client.key(b'\r')

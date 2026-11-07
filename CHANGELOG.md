@@ -7,28 +7,27 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
-- Sidebar and picker keys follow tmux: `c` creates a new agent, as `prefix + c` creates a window, and works during a kept search. Configure moves from `c` to `o`, and `n`/`N` now only step through search matches
+- Configure moves from `c` to `o`, because `c` now creates a new agent, as `prefix + c` creates a window
+- The configure screen is easier to read: it shows at a glance which command is active and which CLIs are not installed, spells out what is sent to an AI provider, and appears as a centred card in the picker
 
 ### Removed
 
 - The `s` re-sort key and attention sorting: rows stay in a stable order, with new agents added at the end of their session
-- The sidebar's and picker's `o` organize action: agents you start by hand already join a session named after their folder, and an agent can still organize sessions through the CLI when you ask
 
 ### Added
 
-- `/` in the sidebar and agent picker now searches as in Vim: type part of an agent's name or task, ignoring case, and the selection moves there with every row still listed and every match highlighted. `Enter` keeps the search, `n`/`N` go through the matches, and `Esc` or `Ctrl-C` clears it. `n` starts a new agent again once the search is cleared
+- `/` in the sidebar and agent picker now searches as in Vim: type part of an agent's name or task, ignoring case, and the selection moves there with every row still listed and every match highlighted. `Enter` keeps the search, `n`/`N` go through the matches, and `Esc` or `Ctrl-C` clears it.
 - Alt+H moves into the sidebar, opening it if needed, and stays there when you are already in it; Alt+L or Shift+Right leaves it for the selected agent. Configure with `@agent-plane-sidebar-in-key` and `@agent-plane-sidebar-out-key`, or bind other keys to the new `enter-sidebar` command
 - Agents you start by hand join a session named after their folder within a second, creating it if needed, and your screen moves with them; a later `move` sticks, and spawned agents stay where they were asked to go
 - When the sidebar or agent picker says the daemon is not running, press `Enter` to restart it; if it cannot start, the reason stays on screen
 - `prefix + f` opens the agent picker already filtering, ready to type; this replaces tmux's window finder on that key
 - Sidebar session headings use the same per-session colours as the agent picker
 - `gg` and `G` jump to the first and last agent in the sidebar and the agent picker
-- The agent picker has the sidebar's actions: `n` new, `x` kill, `r` rename, `o` organize, `f` filter, `s` sort, `c` configure and `?` shortcuts
+- The agent picker has the sidebar's actions: `c` new, `x` kill, `r` rename, `f` filter, `o` configure and `?` shortcuts
 - Press `Tab` in the agent picker to type to the selected agent in its live preview, and `Tab` again to return to the menu
 - The agent picker lists rows by session and shows each session name in its own colour
 - Browse with Ctrl-J/Ctrl-K in the agent picker, and while editing a search in the sidebar
-- Start a new agent from the sidebar: press `n`, pick the kind, and it opens in a new window of the selected agent's project and directory, with you in it
-- Organize project sessions from the sidebar: press `o`, then Enter or Space to group all agents across every session using the configured background AI command; opening or canceling runs nothing
+- Start a new agent from the sidebar: press `c`, pick the kind, and it opens in a new window of the selected agent's project and directory, with you in it
 - Focus the previous or next agent directly with Alt+K/J (Option+K/J on macOS), across sessions and without entering the sidebar; configure the keys with `@agent-plane-previous-key` and `@agent-plane-next-key`
 - Treat tmux sessions as projects: inspect/create named sessions, spawn directly into an explicit project, and move running agents between projects without restarting them or sending input; the agent skill now includes a project organization workflow
 - A Neovim Telescope picker for tracked agent sessions: fuzzy-search names, task titles and blocked details, browse with arrows, and press Enter to focus the selected pane
@@ -43,10 +42,7 @@ before 1.0, a breaking change bumps the minor version.
 - `Enter` during a search opens the selected match right away, in the agent picker and the sidebar; `/` freezes the search when you want to keep it
 - The agent picker opens on the agent you are looking at, including from a sidebar beside it, so you browse from where you are; with no agent in view it opens on the top row
 - Moving between agents no longer makes them reflow on arrival: the daemon keeps hidden windows at your terminal's size, including after the terminal resizes, and new windows start at that size with their sidebar already in place. This sets tmux's global `default-size`
-- Confirm global organization in a compact yes/no footer like kill: `o`, then Enter, Space or `y` to accept; `n` / Esc cancels while the agent list stays visible
 
-- Clarify sidebar organization covers all tracked agents across every tmux session, including hidden sidebar rows
-- Open sidebar organization with lowercase `o`
 - Open the tmux agent picker with lowercase `prefix + a`; it opens on the list, where `j`/`k` browse and letters are commands; press `/` to fuzzy-search names and descriptions and `/` again to freeze the matches and use commands on them, Enter to focus the exact pane in the originating client, or `q`/Esc/Ctrl-C to close
 - Let the agent picker inherit the terminal background, with selection using the terminal palette
 - The sidebar and the agent picker share one search: fuzzy across agent name, project (tmux session), task and blocked detail, in any word order and ignoring case, with the best match first. Location and directory are no longer searched, and `/` during a search freezes its matches in both
@@ -54,17 +50,15 @@ before 1.0, a breaking change bumps the minor version.
 ### Fixed
 
 - The sidebar and agent picker no longer stay scrolled with agents hidden off the top once the whole list fits, such as after the pane grows or agents close
-- Organize no longer fails with a session name error when a project folder has a dot in its name, such as `my.app`; the background agent is told the naming rules, and a name it still gets wrong is quoted in the error
 - The agent you land on goes bold in the sidebar straight away, and the one you left stops being bold, with no half-second lag
 - The agent picker shows a blocked agent's reason in red, like the sidebar
 - An empty sidebar no longer implies only Claude Code and Codex are tracked
 - A sidebar no longer freezes on an old list, showing closed agents and missing new ones, after `prefix + [` or a mouse drag put it in tmux copy mode: sidebars now leave copy mode at once
 - Keeping hidden windows sized no longer fails with "command too long" when many windows need resizing, and a persistent fault no longer flips between error and "recovered" popups
-- Organize no longer fails with "Codex process missing or ambiguous", and the sidebar and picker can kill a Codex agent, while that agent is running helper processes
+- The sidebar and picker can kill a Codex agent while that agent is running helper processes
 - Give an AI name that breaks the naming rule one corrected retry, and show the rejected answer in the error if the retry fails too
 - Clear the `auto-name:worker` warning once a later agent is named, and stop repeating an old naming error after every daemon restart
-- Run global organization through the same configured background command/model as AI naming, with progress in the sidebar and guarded native session moves; never send organization tasks into open agent panes
-- Show the default-yes confirmation as `[Y/n]` for organization and kill; Enter accepts, and Space also accepts organization
+- Show the default-yes kill confirmation as `[Y/n]`; Enter accepts
 - Close a window's sidebar immediately when its last other pane disappears, removing the full-screen sidebar pause before the window closes
 
 ## 0.4.3 - 2026-11-04
