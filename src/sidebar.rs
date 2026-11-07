@@ -215,6 +215,12 @@ pub(crate) struct SearchEdit {
     pane: Option<String>,
 }
 
+/// Esc, or Ctrl-C.
+fn cancels_search(key: KeyEvent) -> bool {
+    key.code == KeyCode::Esc
+        || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
+}
+
 /// Whether `/` finds this row: the text shown on it.
 fn jump_matches(agent: &Agent, pattern: &str) -> bool {
     !search_matches(&agent.name, pattern).is_empty()
@@ -700,7 +706,7 @@ impl Sidebar {
     fn jump_key(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
-            KeyCode::Esc => {
+            _ if cancels_search(key) => {
                 let before = self.navigation.jump.take().unwrap();
                 self.navigation.pattern = before.query;
                 self.navigation.pane = before.pane;
@@ -1100,7 +1106,9 @@ impl Sidebar {
             KeyCode::Char('f') => self.start_search(),
             KeyCode::Char('/') => self.start_jump(),
             // One thing at a time: the search, then the filter.
-            KeyCode::Esc if !self.navigation.pattern.is_empty() => self.navigation.pattern.clear(),
+            _ if cancels_search(key) && !self.navigation.pattern.is_empty() => {
+                self.navigation.pattern.clear()
+            }
             KeyCode::Esc => {
                 self.navigation.query.clear();
                 self.rebuild();
@@ -2723,6 +2731,28 @@ mod tests {
         assert_eq!(lit(&mut sidebar), "CedaCEDAceda");
         press(&mut sidebar, KeyCode::Esc);
         assert_eq!(lit(&mut sidebar), "");
+    }
+
+    #[test]
+    fn ctrl_c_cancels_a_search_as_esc_does() {
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        let mut sidebar = searchable();
+        type_jump(&mut sidebar, "two");
+        press(&mut sidebar, KeyCode::Enter);
+        sidebar.select(Some(0));
+        type_jump(&mut sidebar, "cedar");
+        sidebar.key(ctrl_c);
+        assert!(sidebar.navigation.jump.is_none());
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        assert_eq!(sidebar.navigation.pattern, "two");
+        press(&mut sidebar, KeyCode::Char('n'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%4");
+        // Kept: Ctrl-C clears it, where the selection is. Nothing else listens to it.
+        sidebar.key(ctrl_c);
+        assert!(sidebar.navigation.pattern.is_empty());
+        assert_eq!(sidebar.selected().unwrap().pane, "%4");
+        sidebar.key(ctrl_c);
+        assert!(!sidebar.auto_name.open);
     }
 
     #[test]

@@ -351,7 +351,12 @@ impl App {
             }
             return ControlFlow::Continue(());
         }
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        // Within a search Ctrl-C cancels it, as Esc does; the picker closes on the next one.
+        if key.code == KeyCode::Char('c')
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && self.sidebar.navigation.jump.is_none()
+            && self.sidebar.navigation.pattern.is_empty()
+        {
             return ControlFlow::Break(None);
         }
         self.sidebar.pressed(index::now_ms());
@@ -1452,6 +1457,21 @@ mod tests {
             .count();
         assert!(matching > 0);
         assert_eq!(lit, "cedar".repeat(matching));
+    }
+
+    #[test]
+    fn ctrl_c_cancels_a_search_before_it_closes_the_picker() {
+        let mut app = app();
+        let _ = press(&mut app, KeyCode::Char('/'));
+        let _ = press(&mut app, KeyCode::Char('c'));
+        assert!(ctrl(&mut app, 'c').is_continue());
+        assert!(app.sidebar.navigation.jump.is_none());
+        let _ = press(&mut app, KeyCode::Char('/'));
+        let _ = press(&mut app, KeyCode::Char('c'));
+        assert!(press(&mut app, KeyCode::Enter).is_continue());
+        assert!(ctrl(&mut app, 'c').is_continue());
+        assert!(app.sidebar.navigation.pattern.is_empty());
+        assert!(matches!(ctrl(&mut app, 'c'), ControlFlow::Break(None)));
     }
 
     #[test]

@@ -254,8 +254,13 @@ def assert_vim_search(client):
     client.key(b"N")
     wait("N moves back", lambda: client.selected() == first)
     previewed(client, first)
-    # Esc ends it, and n is the new-agent key again.
-    client.key(b"\x1b")
+    # Ctrl-C cancels typing like Esc; here that restores the kept search.
+    client.key(b"/zzz")
+    wait("second search typed", lambda: "/ zzz▏" in client.text())
+    client.key(b"\x03")
+    wait("Ctrl-C cancels the edit", lambda: "▏" not in client.text() and "/ nav-" in client.text())
+    # Ctrl-C ends a kept search too, and n is the new-agent key again.
+    client.key(b"\x03")
     wait("search cleared", lambda: "/ search" in client.text())
     client.key(b"n")
     wait("n opens the new agent picker", lambda: "new agent in" in client.text())
