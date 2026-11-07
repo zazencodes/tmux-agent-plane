@@ -5,15 +5,6 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
-### Changed
-
-- Configure moves from `c` to `o`, because `c` now creates a new agent, as `prefix + c` creates a window
-- The configure screen is easier to read: it shows at a glance which command is active and which CLIs are not installed, spells out what is sent to an AI provider, and appears as a centred card in the picker
-
-### Removed
-
-- The `s` re-sort key and attention sorting: rows stay in a stable order, with new agents added at the end of their session
-
 ### Added
 
 - `/` in the sidebar and agent picker now searches as in Vim: type part of an agent's name or task, ignoring case, and the selection moves there with every row still listed and every match highlighted. `Enter` keeps the search, `n`/`N` go through the matches, and `Esc` or `Ctrl-C` clears it.
@@ -34,6 +25,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Configure moves from `c` to `o`, because `c` now creates a new agent, as `prefix + c` creates a window
+- The configure screen is easier to read: it shows at a glance which command is active and which CLIs are not installed, spells out what is sent to an AI provider, and appears as a centred card in the picker
 - `f` now filters rows by text, the fuzzy match `/` used to do, and `f` resumes a frozen filter; the state filter moved to `d`, and `Esc` or `Ctrl-C` clears both filters back to the whole list
 - The screen behind the agent picker is dimmed while it is open
 - The sidebar and the agent picker no longer repeat agent counts in their headers; the status bar is the one place for them
@@ -42,7 +35,6 @@ before 1.0, a breaking change bumps the minor version.
 - `Enter` during a search opens the selected match right away, in the agent picker and the sidebar; `/` freezes the search when you want to keep it
 - The agent picker opens on the agent you are looking at, including from a sidebar beside it, so you browse from where you are; with no agent in view it opens on the top row
 - Moving between agents no longer makes them reflow on arrival: the daemon keeps hidden windows at your terminal's size, including after the terminal resizes, and new windows start at that size with their sidebar already in place. This sets tmux's global `default-size`
-
 - Open the tmux agent picker with lowercase `prefix + a`; it opens on the list, where `j`/`k` browse and letters are commands; press `/` to fuzzy-search names and descriptions and `/` again to freeze the matches and use commands on them, Enter to focus the exact pane in the originating client, or `q`/Esc/Ctrl-C to close
 - Let the agent picker inherit the terminal background, with selection using the terminal palette
 - The sidebar and the agent picker share one search: fuzzy across agent name, project (tmux session), task and blocked detail, in any word order and ignoring case, with the best match first. Location and directory are no longer searched, and `/` during a search freezes its matches in both
@@ -60,6 +52,10 @@ before 1.0, a breaking change bumps the minor version.
 - Clear the `auto-name:worker` warning once a later agent is named, and stop repeating an old naming error after every daemon restart
 - Show the default-yes kill confirmation as `[Y/n]`; Enter accepts
 - Close a window's sidebar immediately when its last other pane disappears, removing the full-screen sidebar pause before the window closes
+
+### Removed
+
+- The `s` re-sort key and attention sorting: rows stay in a stable order, with new agents added at the end of their session
 
 ## 0.4.3 - 2026-11-04
 
