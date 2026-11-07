@@ -40,6 +40,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Organize no longer fails with a session name error when a project folder has a dot in its name, such as `my.app`; the background agent is told the naming rules, and a name it still gets wrong is quoted in the error
 - The agent you land on goes bold in the sidebar straight away, and the one you left stops being bold, with no half-second lag
 - The agent picker shows a blocked agent's reason in red, like the sidebar
 - An empty sidebar no longer implies only Claude Code and Codex are tracked
