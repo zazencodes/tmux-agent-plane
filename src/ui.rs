@@ -351,11 +351,10 @@ impl App {
             }
             return ControlFlow::Continue(());
         }
-        // Within a search Ctrl-C cancels it, as Esc does; the picker closes on the next one.
+        // Ctrl-C clears what Esc clears; the picker closes once nothing is left.
         if key.code == KeyCode::Char('c')
             && key.modifiers.contains(KeyModifiers::CONTROL)
-            && self.sidebar.navigation.jump.is_none()
-            && self.sidebar.navigation.pattern.is_empty()
+            && self.sidebar.unfiltered()
         {
             return ControlFlow::Break(None);
         }
@@ -388,12 +387,7 @@ impl App {
         if self.sidebar.editing.is_none() && !self.sidebar.typing_query() {
             match key.code {
                 KeyCode::Char('q') => return ControlFlow::Break(None),
-                KeyCode::Esc
-                    if self.sidebar.navigation.query.is_empty()
-                        && self.sidebar.navigation.pattern.is_empty() =>
-                {
-                    return ControlFlow::Break(None);
-                }
+                KeyCode::Esc if self.sidebar.unfiltered() => return ControlFlow::Break(None),
                 _ => {}
             }
         }
@@ -1481,8 +1475,26 @@ mod tests {
             press(&mut app, KeyCode::Char('q')),
             ControlFlow::Break(None)
         ));
-        let _ = press(&mut app, KeyCode::Char('f'));
         assert!(matches!(ctrl(&mut app, 'c'), ControlFlow::Break(None)));
+    }
+
+    #[test]
+    fn a_state_filter_is_cleared_before_the_picker_closes() {
+        for ctrl_c in [false, true] {
+            let close = |app: &mut App| {
+                if ctrl_c {
+                    ctrl(app, 'c')
+                } else {
+                    press(app, KeyCode::Esc)
+                }
+            };
+            let mut app = app();
+            let _ = press(&mut app, KeyCode::Char('d'));
+            assert!(app.sidebar.navigation.filter.is_some());
+            assert!(close(&mut app).is_continue());
+            assert!(app.sidebar.navigation.filter.is_none());
+            assert!(matches!(close(&mut app), ControlFlow::Break(None)));
+        }
     }
 
     #[test]

@@ -23,7 +23,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("f", "Filter rows; / freezes it"),
     ("d", "Cycle state filter"),
     ("esc", "Clear / cancel / close"),
-    ("^c", "Cancel or clear a search"),
+    ("^c", "In lists, same as esc"),
     ("r", "Rename selected agent"),
     ("x", "Confirm kill of agent"),
     ("c", "Configure"),

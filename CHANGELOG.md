@@ -26,7 +26,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
-- `f` now filters rows by text, the fuzzy match `/` used to do, and `f` resumes a frozen filter; the state filter moved to `d`
+- `f` now filters rows by text, the fuzzy match `/` used to do, and `f` resumes a frozen filter; the state filter moved to `d`, and `Esc` or `Ctrl-C` clears both filters back to the whole list
 - The screen behind the agent picker is dimmed while it is open
 - The sidebar and the agent picker no longer repeat agent counts in their headers; the status bar is the one place for them
 - Moving the sidebar selection always previews the selected agent's window, with the keyboard staying in the sidebar; the `v` toggle is gone

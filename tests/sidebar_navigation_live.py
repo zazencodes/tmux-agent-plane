@@ -1253,7 +1253,11 @@ try:
     client.key(b"\x1b")
     wait("cancel query", lambda: "f NVWRK NPMTRVW" in client.text() and "freeze" not in client.footer())
     client.key(b"\x1b")
-    wait("query cleared", lambda: "f filter" in client.text())
+    wait("query and state cleared", lambda: "f filter" in client.text() and "d all" in client.text())
+    client.key(b"d\x03")
+    wait("Ctrl-C clears the state filter", lambda: "d all" in client.text())
+    client.key(b"d")
+    wait("blocked again", lambda: "d blocked" in client.text())
     client.key(b"d")  # blocked -> done
     wait("done filter", lambda: "d done" in client.text())
     client.key(b"d")

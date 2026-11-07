@@ -216,7 +216,7 @@ pub(crate) struct SearchEdit {
 }
 
 /// Esc, or Ctrl-C.
-fn cancels_search(key: KeyEvent) -> bool {
+fn cancels(key: KeyEvent) -> bool {
     key.code == KeyCode::Esc
         || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
 }
@@ -658,7 +658,7 @@ impl Sidebar {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let before = self.navigation.query.clone();
         match key.code {
-            KeyCode::Esc => {
+            _ if cancels(key) => {
                 let before = self.navigation.search.take().unwrap();
                 self.navigation.query = before.query;
                 self.navigation.pane = before.pane;
@@ -706,7 +706,7 @@ impl Sidebar {
     fn jump_key(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
-            _ if cancels_search(key) => {
+            _ if cancels(key) => {
                 let before = self.navigation.jump.take().unwrap();
                 self.navigation.pattern = before.query;
                 self.navigation.pane = before.pane;
@@ -756,6 +756,14 @@ impl Sidebar {
             query: std::mem::take(&mut self.navigation.pattern),
             pane: self.navigation.pane.clone(),
         });
+    }
+
+    /// The whole list, with no search or filter for Esc or Ctrl-C to clear.
+    pub(crate) fn unfiltered(&self) -> bool {
+        !self.typing_query()
+            && self.navigation.pattern.is_empty()
+            && self.navigation.query.is_empty()
+            && self.navigation.filter.is_none()
     }
 
     /// Letters are query text, for the filter or the search.
@@ -1105,12 +1113,13 @@ impl Sidebar {
             KeyCode::Char('s') => self.resort(),
             KeyCode::Char('f') => self.start_search(),
             KeyCode::Char('/') => self.start_jump(),
-            // One thing at a time: the search, then the filter.
-            _ if cancels_search(key) && !self.navigation.pattern.is_empty() => {
+            // The search first, then every filter, back to the whole list.
+            _ if cancels(key) && !self.navigation.pattern.is_empty() => {
                 self.navigation.pattern.clear()
             }
-            KeyCode::Esc => {
+            _ if cancels(key) => {
                 self.navigation.query.clear();
+                self.navigation.filter = None;
                 self.rebuild();
             }
             _ => {}
@@ -2753,6 +2762,35 @@ mod tests {
         assert_eq!(sidebar.selected().unwrap().pane, "%4");
         sidebar.key(ctrl_c);
         assert!(!sidebar.auto_name.open);
+    }
+
+    #[test]
+    fn esc_and_ctrl_c_clear_the_search_then_every_filter() {
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        for cancel in [KeyEvent::from(KeyCode::Esc), ctrl_c] {
+            let mut sidebar = searchable();
+            sidebar.all_agents[3].state = State::Blocked;
+            press(&mut sidebar, KeyCode::Char('d'));
+            assert_eq!(sidebar.navigation.filter, Some(State::Blocked));
+            sidebar.navigation.query = "cedar".into();
+            sidebar.navigation.pattern = "two".into();
+            sidebar.rebuild();
+            assert_eq!(order(&sidebar), ["%4"]);
+            sidebar.key(cancel);
+            assert!(sidebar.navigation.pattern.is_empty());
+            assert_eq!(order(&sidebar), ["%4"]);
+            sidebar.key(cancel);
+            assert!(sidebar.unfiltered());
+            assert_eq!(order(&sidebar).len(), 4);
+            assert_eq!(sidebar.selected().unwrap().pane, "%4");
+            // Typing a filter: cancelling restores what it was before.
+            sidebar.navigation.query = "two".into();
+            press(&mut sidebar, KeyCode::Char('f'));
+            press(&mut sidebar, KeyCode::Char('x'));
+            sidebar.key(cancel);
+            assert!(sidebar.navigation.search.is_none());
+            assert_eq!(sidebar.navigation.query, "two");
+        }
     }
 
     #[test]
