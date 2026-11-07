@@ -8,8 +8,8 @@ use crate::navigation::{CLIENT_FORMAT, Client, guard_destination, parse_client};
 use crate::tmux;
 use crate::ui::{
     LAVENDER, NO_AGENTS, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, daemon_down,
-    group_colour, hints, icon, marked, message, name_style, panel, rank, search_matches,
-    state_style, task, truncate,
+    fill_viewport, group_colour, hints, icon, marked, message, name_style, panel, rank,
+    search_matches, state_style, task, truncate,
 };
 use anyhow::{Context, Result, bail};
 use nucleo_matcher::Matcher;
@@ -1530,6 +1530,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
             &sidebar.navigation.pattern,
             inner,
         );
+        fill_viewport(&mut sidebar.list, &items, agents_area.height);
         f.render_stateful_widget(List::new(items), agents_area, &mut sidebar.list);
     }
 
@@ -3120,6 +3121,28 @@ mod tests {
             .map(|y| (0..38).map(|x| buffer[(x, y)].symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn a_list_that_fits_again_scrolls_back_to_the_top() {
+        use ratatui::{Terminal, backend::TestBackend};
+        fn screen(sidebar: &mut Sidebar, height: u16) -> String {
+            let mut terminal = Terminal::new(TestBackend::new(38, height)).unwrap();
+            terminal.draw(|frame| draw(frame, sidebar)).unwrap();
+            terminal.backend().to_string()
+        }
+        let mut sidebar = showing(
+            (0..10)
+                .map(|i| agent(&format!("%{i}"), State::Idle))
+                .collect(),
+        );
+        sidebar.select(Some(9));
+        assert!(!screen(&mut sidebar, 20).contains("agent-%0"));
+
+        let tall = screen(&mut sidebar, 40);
+        for i in 0..10 {
+            assert!(tall.contains(&format!("agent-%{i}")), "{tall}");
+        }
     }
 
     #[test]

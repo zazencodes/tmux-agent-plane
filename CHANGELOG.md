@@ -44,6 +44,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- The sidebar and agent picker no longer stay scrolled with agents hidden off the top once the whole list fits, such as after the pane grows or agents close
 - Organize no longer fails with a session name error when a project folder has a dot in its name, such as `my.app`; the background agent is told the naming rules, and a name it still gets wrong is quoted in the error
 - The agent you land on goes bold in the sidebar straight away, and the one you left stops being bold, with no half-second lag
 - The agent picker shows a blocked agent's reason in red, like the sidebar

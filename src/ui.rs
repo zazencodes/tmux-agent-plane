@@ -12,7 +12,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, Ke
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 use std::collections::BTreeSet;
 use std::ops::{ControlFlow, Range};
@@ -650,7 +650,9 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
         title += if typing { "▏" } else { "" };
     }
     title.push(' ');
-    let list = List::new(items).block(panel(Line::from(title)));
+    let block = panel(Line::from(title));
+    fill_viewport(&mut sidebar.list, &items, block.inner(list_area).height);
+    let list = List::new(items).block(block);
     f.render_stateful_widget(list, list_area, &mut sidebar.list);
 
     let block = match app.sidebar.selected() {
@@ -779,6 +781,22 @@ pub(crate) fn panel(title: Line<'_>) -> Block<'_> {
         .border_type(BorderType::Rounded)
         .border_style(SURFACE2)
         .title(title.style(Style::default().fg(TEXT).bold()))
+}
+
+/// Scrolls back any rows hidden above while the viewport has blank rows below.
+/// The list widget only ever scrolls as far as the selection needs, so without
+/// this a list that has since gained room stays scrolled for good.
+pub(crate) fn fill_viewport(list: &mut ListState, items: &[ListItem], height: u16) {
+    let mut room = height as usize;
+    let mut floor = items.len();
+    for item in items.iter().rev() {
+        if item.height() > room {
+            break;
+        }
+        room -= item.height();
+        floor -= 1;
+    }
+    *list.offset_mut() = list.offset().min(floor);
 }
 
 pub(crate) fn truncate(s: &str, width: usize) -> String {
@@ -1264,6 +1282,24 @@ mod tests {
         let _ = press(&mut app, KeyCode::Char('w'));
         assert_eq!(app.sidebar.navigation.query, "cedarw");
         assert_eq!(selected(&app), "cedar-worker");
+    }
+
+    #[test]
+    fn a_list_that_fits_again_scrolls_back_to_the_top() {
+        let mut app = app();
+        app.sidebar.all_agents = (0..20)
+            .map(|i| agent(&format!("row-{i:02}"), &format!("%{i}"), "Task"))
+            .collect();
+        app.sidebar.navigation.order = (0..20).map(|i| format!("%{i}")).collect();
+        app.sidebar.rebuild();
+        let _ = press(&mut app, KeyCode::Char('G'));
+        let mut short = Terminal::new(TestBackend::new(120, 20)).unwrap();
+        short.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(!screen(&short).contains("row-00"));
+
+        let mut tall = Terminal::new(TestBackend::new(120, 80)).unwrap();
+        tall.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(screen(&tall).contains("row-00"));
     }
 
     #[test]
