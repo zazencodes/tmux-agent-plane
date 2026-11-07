@@ -692,7 +692,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
             &if app.sidebar.all_agents.is_empty() {
                 NO_AGENTS
             } else {
-                ["no matching agents", "t changes state · f edits filter"]
+                ["no matching agents", "d changes state · f edits filter"]
             },
         ),
         (None, Some(_)) => {
@@ -751,7 +751,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                         ("r", "rename"),
                         ("o", "organize"),
                         ("f", "filter"),
-                        ("t", "state"),
+                        ("d", "state"),
                         ("s", "sort"),
                         ("c", "configure"),
                         ("q", "close"),
@@ -1505,7 +1505,7 @@ mod tests {
         let mut app = app();
         app.sidebar.all_agents[1].state = State::Blocked;
         app.sidebar.rebuild();
-        let _ = press(&mut app, KeyCode::Char('t'));
+        let _ = press(&mut app, KeyCode::Char('d'));
         assert_eq!(app.sidebar.navigation.filter, Some(State::Blocked));
         assert_eq!(app.sidebar.agents.len(), 1);
         let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();

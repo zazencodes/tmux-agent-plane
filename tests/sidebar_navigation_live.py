@@ -482,17 +482,17 @@ def assert_fuzzy_search(client):
     # Freezing previews its selection; the filter then composes with the kept query.
     query(client, "NAV-AWAY RVFXPRM")
     previewed(client, "nav-away")
-    client.key(b"t")
-    wait("fuzzy blocked filter", lambda: "t blocked" in client.text())
+    client.key(b"d")
+    wait("fuzzy blocked filter", lambda: "d blocked" in client.text())
     query(client, "NVWRK NPMTRVW")
     wait("fuzzy empty filter", lambda: "no matching agents" in client.text() and
-         "t blocked" in client.text())
-    client.key(b"t")
-    wait("fuzzy skips empty states", lambda: "t working" in client.text() and
+         "d blocked" in client.text())
+    client.key(b"d")
+    wait("fuzzy skips empty states", lambda: "d working" in client.text() and
          shown_names(client) == ["nav-work"])
     previewed(client, "nav-work")
-    client.key(b"t")
-    wait("fuzzy filter all", lambda: "t all" in client.text())
+    client.key(b"d")
+    wait("fuzzy filter all", lambda: "d all" in client.text())
     client.key(b"\x1b")
     wait("fuzzy Escape clears search", lambda: "f filter" in client.text() and
          shown_names(client) == baseline)
@@ -762,7 +762,7 @@ def extra_checks(client):
     base_window = tmux('display-message', '-p', '-t', '=scratch:0', '#{window_id}')
     base_sidebar = sidebar_pane(base_window)
     tmux('switch-client', '-c', client.context()[0], '-t', base_sidebar)
-    wait('stable base sidebar', lambda: client.context()[1] == base_sidebar and 't all' in client.text())
+    wait('stable base sidebar', lambda: client.context()[1] == base_sidebar and 'd all' in client.text())
     query(client, '')
     client.key(b's')
     wait('initial attention ranking', lambda: shown_names(client) == ranked_names())
@@ -817,17 +817,17 @@ def extra_checks(client):
     wait('search acceptance keeps order', lambda: shown_names(client) == expected)
     previewed(client, selection)
     wait('preview keeps order', lambda: shown_names(client) == expected)
-    client.key(b't')
+    client.key(b'd')
     blocked = [name for name in expected if agent(name)['state'] == 'blocked']
-    wait('V search and blocked filter compose', lambda: 't blocked' in client.text() and
+    wait('V search and blocked filter compose', lambda: 'd blocked' in client.text() and
          shown_names(client) == blocked and 'f nav-' in client.text())
     previewed(client, selection)
-    client.key(b't')
+    client.key(b'd')
     previewed(client, 'nav-work')
-    wait('filtered preview carries query and working order', lambda: 't working' in client.text() and
+    wait('filtered preview carries query and working order', lambda: 'd working' in client.text() and
          'f nav-' in client.text() and shown_names(client) == ['nav-work'])
-    client.key(b't')  # Idle is empty; deliberate F skips it and returns to All.
-    wait('filtered preview returns to all rows', lambda: 't all' in client.text() and
+    client.key(b'd')  # Idle is empty; deliberate F skips it and returns to All.
+    wait('filtered preview returns to all rows', lambda: 'd all' in client.text() and
          shown_names(client) == expected)
     client.snapshot('sort-preview-order')
     assert client.context()[1] == base_sidebar, 'the previewing sidebar travels with the client'
@@ -835,7 +835,7 @@ def extra_checks(client):
     base_sidebar = sidebar_pane(base_window)
     assert base_sidebar != client.context()[1]
     tmux('switch-client', '-c', client.context()[0], '-t', base_sidebar)
-    wait('base sidebar', lambda: client.context()[1] == base_sidebar and 't all' in client.text())
+    wait('base sidebar', lambda: client.context()[1] == base_sidebar and 'd all' in client.text())
     # Existing filter/navigation proof covers F/search composition in detail.
     query(client, '')
     settle(0.7)
@@ -844,13 +844,13 @@ def extra_checks(client):
     context = client.context()
     # Every command class cancels and consumes its key. No movement, mode/filter/query,
     # rename or close action may be replayed after the confirmation disappears.
-    for cancel in [b'n', b'\x1b', b'j', b'\x1b[B', b'G', b't', b'f', b's', b'r', b'q', b'x', b'Y', b'/', b'\x19']:
+    for cancel in [b'n', b'\x1b', b'j', b'\x1b[B', b'G', b'd', b'f', b's', b'r', b'q', b'x', b'Y', b'/', b'\x19']:
         client.key(b'x')
         wait('kill prompt', lambda: '? [Y/n]' in client.text())
         client.key(cancel)
         wait('cancel consumes key', lambda: '? [Y/n]' not in client.text())
         assert client.selected() == selection and client.context() == context
-        assert shown_names(client) == baseline and 't all' in client.text()
+        assert shown_names(client) == baseline and 'd all' in client.text()
         assert 'f nav-' not in client.text() and 'save' not in client.footer()
     client.snapshot('kill-cancel-no-replay')
     # Native state and identity are validated independently of daemon refresh.
@@ -1070,7 +1070,7 @@ try:
         RESULTS = {"passed": True, **assert_bold_on_arrival(client)}
         sys.exit(0)
     plane("toggle-sidebar", agent("nav-work")["window"])
-    wait("sidebar controls", lambda: "t all" in client.text())
+    wait("sidebar controls", lambda: "d all" in client.text())
     selected(client, "nav-work")  # the agent it was opened from
     vim_results = assert_vim_search(client)
     selected(client, "nav-work")
@@ -1196,7 +1196,7 @@ try:
     wait("deliberate agent input", lambda: input_bytes("nav-done") == b"x")
     # Return to sidebar infrastructure, without sending an agent key.
     tmux("switch-client", "-c", client.context()[0], "-t", sidebar_pane(agent("nav-done")["window"]))
-    wait("back in sidebar", lambda: "t all" in client.text() and client.context()[1] == sidebar_pane(agent("nav-done")["window"]))
+    wait("back in sidebar", lambda: "d all" in client.text() and client.context()[1] == sidebar_pane(agent("nav-done")["window"]))
     client.key(b"\x1b")
     wait("frozen search cleared", lambda: "f filter" in client.text())
     # gg and G move like any other key: the selection is previewed.
@@ -1231,22 +1231,22 @@ try:
     change("nav-done", "idle", 2)
     wait("done again", lambda: agent("nav-done")["state"] == "done" and "✓" in client.text())
     for state in ["blocked", "done", "working", "idle", "all"]:
-        client.key(b"t")
-        wait("filter " + state, lambda state=state: "t " + state in client.text())
+        client.key(b"d")
+        wait("filter " + state, lambda state=state: "d " + state in client.text())
         client.snapshot("filter-" + state)
     # This filter proof needs one match, including when the random cwd matches the name.
     query(client, "NVWRK NPMTRVW")
-    client.key(b"t")
-    wait("query skips empty categories", lambda: "t working" in client.text())
+    client.key(b"d")
+    wait("query skips empty categories", lambda: "d working" in client.text())
     change("nav-work", "blocked", 0)
-    wait("filter stays empty", lambda: "t working" in client.text() and "no matching agents" in client.text())
+    wait("filter stays empty", lambda: "d working" in client.text() and "no matching agents" in client.text())
     original = client.context()
     settle(1.2)
-    assert "t working" in client.text() and client.context() == original
-    client.key(b"t")
-    wait("All reached", lambda: "t all" in client.text())
-    client.key(b"t")
-    wait("blocked query category", lambda: "t blocked" in client.text())
+    assert "d working" in client.text() and client.context() == original
+    client.key(b"d")
+    wait("All reached", lambda: "d all" in client.text())
+    client.key(b"d")
+    wait("blocked query category", lambda: "d blocked" in client.text())
     # Search editing: V/F/r/q are text, Escape restores accepted query, second Escape clears.
     client.key(b"fqVFr")
     wait("empty literal query", lambda: "no matching agents" in client.text() and "freeze" in client.footer())
@@ -1254,12 +1254,12 @@ try:
     wait("cancel query", lambda: "f NVWRK NPMTRVW" in client.text() and "freeze" not in client.footer())
     client.key(b"\x1b")
     wait("query cleared", lambda: "f filter" in client.text())
-    client.key(b"t")  # blocked -> done
-    wait("done filter", lambda: "t done" in client.text())
-    client.key(b"t")
-    wait("skip working now empty", lambda: "t idle" in client.text())
-    client.key(b"t")
-    wait("all filter", lambda: "t all" in client.text())
+    client.key(b"d")  # blocked -> done
+    wait("done filter", lambda: "d done" in client.text())
+    client.key(b"d")
+    wait("skip working now empty", lambda: "d idle" in client.text())
+    client.key(b"d")
+    wait("all filter", lambda: "d all" in client.text())
     # A live event yields to search controls, rename controls and rename errors.
     change("nav-done", "idle", 3)
     wait("fresh event", lambda: (index().get("recent_event") or {}).get("name") == "nav-done" and agent("nav-done")["completions"] == 3)
@@ -1282,7 +1282,7 @@ try:
     plane("follow-sidebar", observer_window)
     CLIENTS.append(Client("observer"))
     observer = CLIENTS[1]
-    wait("observer", lambda: "t all" in observer.text())
+    wait("observer", lambda: "d all" in observer.text())
     observer_context = observer.context()
     query(client, "nav-away", select="nav-away")
     previewed(client, "nav-away")
@@ -1335,7 +1335,7 @@ try:
     tmux("resize-pane", "-t", client.context()[1], "-x", "20")
     settle(0.5)
     client.snapshot("narrow-empty")
-    assert "t all" in client.text()
+    assert "d all" in client.text()
     wait("event expired", lambda: index().get("recent_event") is None and "jump" in client.footer())
     for name, pane in FIXTURES.items():
         value = typed(pane)

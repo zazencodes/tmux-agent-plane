@@ -195,7 +195,7 @@ pub fn run() -> Result<()> {
 
 #[derive(Default)]
 pub(crate) struct Navigation {
-    /// `t`: the state rows must be in.
+    /// `d`: the state rows must be in.
     pub(crate) filter: Option<State>,
     /// `f`: the text filter, which hides rows that do not match.
     pub(crate) query: String,
@@ -458,7 +458,7 @@ pub(crate) struct Sidebar {
 }
 
 impl Navigation {
-    /// Only a deliberate t skips categories. Refreshing must never change the filter.
+    /// Only a deliberate d skips categories. Refreshing must never change the filter.
     fn cycle_filter(&mut self, matches: &[Agent]) {
         let cycle = [
             None,
@@ -1097,7 +1097,7 @@ impl Sidebar {
             KeyCode::Char('G') => self.select(self.agents.len().checked_sub(1)),
             KeyCode::Char('n') => self.next_match(1),
             KeyCode::Char('N') => self.next_match(-1),
-            KeyCode::Char('t') => {
+            KeyCode::Char('d') => {
                 let matches = rank(&mut self.matcher, &self.navigation.query, &self.all_agents);
                 self.navigation.cycle_filter(&matches);
                 self.rebuild();
@@ -1482,7 +1482,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let [mode_area, agents_area] =
         Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(content);
     let mode = format!(
-        " t {}",
+        " d {}",
         sidebar.navigation.filter.map_or("all", State::as_str)
     );
     let room = inner.saturating_sub(mode.chars().count());
@@ -1501,7 +1501,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         let text = if sidebar.all_agents.is_empty() {
             NO_AGENTS
         } else {
-            ["no matching agents", "t changes state · esc clears filter"]
+            ["no matching agents", "d changes state · esc clears filter"]
         };
         message(
             f,
@@ -2181,14 +2181,14 @@ mod tests {
         assert!(sidebar.navigation.search.is_none());
         assert_eq!(order(&sidebar), ["%2", "%1"]);
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
-        press(&mut sidebar, KeyCode::Char('t'));
+        press(&mut sidebar, KeyCode::Char('d'));
         assert_eq!(sidebar.navigation.filter, Some(State::Blocked));
         assert_eq!(order(&sidebar), ["%2"]);
         sidebar.all_agents[1].state = State::Idle;
         sidebar.rebuild();
         assert!(sidebar.agents.is_empty());
         assert_eq!(sidebar.navigation.filter, Some(State::Blocked));
-        press(&mut sidebar, KeyCode::Char('t'));
+        press(&mut sidebar, KeyCode::Char('d'));
         assert_eq!(sidebar.navigation.filter, Some(State::Working));
         press(&mut sidebar, KeyCode::Char('f'));
         press(&mut sidebar, KeyCode::Char('z'));
@@ -2276,23 +2276,23 @@ mod tests {
             Some(State::Idle),
             None,
         ] {
-            press(&mut sidebar, KeyCode::Char('t'));
+            press(&mut sidebar, KeyCode::Char('d'));
             assert_eq!(sidebar.navigation.filter, expected);
         }
         sidebar.navigation.query = "AGENT-%2".into();
         sidebar.rebuild();
-        press(&mut sidebar, KeyCode::Char('t'));
+        press(&mut sidebar, KeyCode::Char('d'));
         assert_eq!(sidebar.navigation.filter, Some(State::Done));
         sidebar.all_agents[1].state = State::Idle;
         sidebar.rebuild();
         assert_eq!(sidebar.navigation.filter, Some(State::Done));
         assert!(sidebar.selected().is_none());
-        press(&mut sidebar, KeyCode::Char('t'));
+        press(&mut sidebar, KeyCode::Char('d'));
         assert_eq!(sidebar.navigation.filter, Some(State::Idle));
         assert_eq!(sidebar.selected().unwrap().pane, "%2");
         sidebar.navigation.query = "no such agent".into();
         sidebar.rebuild();
-        press(&mut sidebar, KeyCode::Char('t'));
+        press(&mut sidebar, KeyCode::Char('d'));
         assert_eq!(sidebar.navigation.filter, None);
         assert!(sidebar.agents.is_empty());
     }
@@ -2942,7 +2942,7 @@ mod tests {
             KeyCode::Char('j'),
             KeyCode::Down,
             KeyCode::Char('r'),
-            KeyCode::Char('t'),
+            KeyCode::Char('d'),
             KeyCode::Char('v'),
             KeyCode::Char('x'),
             KeyCode::Char('f'),

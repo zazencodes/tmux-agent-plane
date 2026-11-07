@@ -21,7 +21,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("/", "Search rows; enter keeps it"),
     ("n N", "Next/prev match; else n new"),
     ("f", "Filter rows; / freezes it"),
-    ("t", "Cycle state filter"),
+    ("d", "Cycle state filter"),
     ("esc", "Clear / cancel / close"),
     ("^c", "Cancel or clear a search"),
     ("r", "Rename selected agent"),

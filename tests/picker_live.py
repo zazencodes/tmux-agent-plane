@@ -290,13 +290,13 @@ try:
     wait('help', lambda: 'Keyboard shortcuts' in client.text())
     client.key(b'q')
     wait('help closed, picker open', lambda: 'j/k browse' in client.text())
-    client.key(b't')
+    client.key(b'd')
     wait('filter', lambda: 'agents · blocked' in client.text())
-    # t skips states with no agents, so press until the cycle reaches All.
+    # d skips states with no agents, so press until the cycle reaches All.
     for _ in range(5):
         if 'agents · ' not in client.text():
             break
-        client.key(b't')
+        client.key(b'd')
         time.sleep(.15)
     wait('filter off', lambda: 'agents · ' not in client.text())
     client.key(b's')
