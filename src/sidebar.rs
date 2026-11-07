@@ -186,16 +186,29 @@ pub fn run() -> Result<()> {
 
 #[derive(Default)]
 pub(crate) struct Navigation {
+    /// `t`: the state rows must be in.
     pub(crate) filter: Option<State>,
+    /// `f`: the text filter, which hides rows that do not match.
     pub(crate) query: String,
     pub(crate) pane: Option<String>,
+    /// The text filter while it is being typed.
     pub(crate) search: Option<SearchEdit>,
+    /// `/`: the Vim-style search, which moves the selection and hides nothing.
+    pub(crate) pattern: String,
+    /// The search while it is being typed.
+    pub(crate) jump: Option<SearchEdit>,
     pub(crate) order: Vec<String>,
 }
 
+/// What Esc restores: the text and selection from before the edit.
 pub(crate) struct SearchEdit {
     query: String,
     pane: Option<String>,
+}
+
+/// Whether `/` finds this row: the text shown on it, ignoring case. `pattern` is lowercase.
+fn jump_matches(agent: &Agent, pattern: &str) -> bool {
+    agent.name.to_lowercase().contains(pattern) || task(agent).0.to_lowercase().contains(pattern)
 }
 
 pub(crate) struct Rename {
@@ -429,7 +442,7 @@ pub(crate) struct Sidebar {
 }
 
 impl Navigation {
-    /// Only a deliberate f skips categories. Refreshing must never change the filter.
+    /// Only a deliberate t skips categories. Refreshing must never change the filter.
     fn cycle_filter(&mut self, matches: &[Agent]) {
         let cycle = [
             None,
@@ -672,6 +685,68 @@ impl Sidebar {
         }
     }
 
+    /// Vim's incremental search: every edit moves the selection to the first match after the row
+    /// the search started on, and Enter keeps it for `n` and `N`.
+    fn jump_key(&mut self, key: KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Esc => {
+                let before = self.navigation.jump.take().unwrap();
+                self.navigation.pattern = before.query;
+                self.navigation.pane = before.pane;
+                self.rebuild();
+                return;
+            }
+            KeyCode::Enter => {
+                self.navigation.jump = None;
+                let pattern = self.navigation.pattern.to_lowercase();
+                if !self.agents.iter().any(|a| jump_matches(a, &pattern)) {
+                    self.navigation.pattern.clear();
+                }
+                return;
+            }
+            KeyCode::Char('w') if ctrl => delete_word(&mut self.navigation.pattern),
+            KeyCode::Char('u') if ctrl => self.navigation.pattern.clear(),
+            KeyCode::Backspace => {
+                self.navigation.pattern.pop();
+            }
+            KeyCode::Char(c) if !ctrl => self.navigation.pattern.push(c),
+            _ => return,
+        }
+        self.navigation.pane = self.navigation.jump.as_ref().unwrap().pane.clone();
+        self.rebuild();
+        self.next_match(1);
+    }
+
+    /// Select the next row matching the search, wrapping; the current row is the last one tried.
+    fn next_match(&mut self, delta: isize) {
+        if self.navigation.pattern.is_empty() || self.agents.is_empty() {
+            return;
+        }
+        let pattern = self.navigation.pattern.to_lowercase();
+        let len = self.agents.len() as isize;
+        let from = self.list.selected().unwrap_or(0) as isize;
+        let found = (1..=len)
+            .map(|step| (from + delta * step).rem_euclid(len) as usize)
+            .find(|row| jump_matches(&self.agents[*row], &pattern));
+        match found {
+            Some(row) => self.select(Some(row)),
+            None => self.notice = Some("no match".into()),
+        }
+    }
+
+    fn start_jump(&mut self) {
+        self.navigation.jump = Some(SearchEdit {
+            query: std::mem::take(&mut self.navigation.pattern),
+            pane: self.navigation.pane.clone(),
+        });
+    }
+
+    /// Letters are query text, for the filter or the search.
+    pub(crate) fn typing_query(&self) -> bool {
+        self.navigation.search.is_some() || self.navigation.jump.is_some()
+    }
+
     pub(crate) fn start_search(&mut self) {
         self.navigation.search = Some(SearchEdit {
             query: self.navigation.query.clone(),
@@ -679,10 +754,12 @@ impl Sidebar {
         });
     }
 
-    /// Enter: the agent to open, if any. A search that opened something is finished. A frozen
-    /// search stays, since keeping it was deliberate.
+    /// Enter: the agent to open, if any. A search that opened something is finished, and so is a
+    /// filter being typed. A frozen filter stays, since keeping it was deliberate.
     pub(crate) fn open_selected(&mut self) -> Option<Agent> {
         let agent = self.selected()?.clone();
+        self.navigation.jump = None;
+        self.navigation.pattern.clear();
         if self.navigation.search.take().is_some() {
             self.navigation.query.clear();
             self.rebuild();
@@ -720,10 +797,7 @@ impl Sidebar {
             }
             return true;
         }
-        if key.code != KeyCode::Char('x')
-            || self.editing.is_some()
-            || self.navigation.search.is_some()
-        {
+        if key.code != KeyCode::Char('x') || self.editing.is_some() || self.typing_query() {
             return false;
         }
         self.notice = None;
@@ -835,7 +909,7 @@ impl Sidebar {
         if key.code != KeyCode::Char('o')
             || !key.modifiers.is_empty()
             || self.editing.is_some()
-            || self.navigation.search.is_some()
+            || self.typing_query()
             || self.killing.is_some()
         {
             return false;
@@ -898,7 +972,9 @@ impl Sidebar {
         if key.code != KeyCode::Char('n')
             || !key.modifiers.is_empty()
             || self.editing.is_some()
-            || self.navigation.search.is_some()
+            || self.typing_query()
+            // While a search is on, `n` is its next match.
+            || !self.navigation.pattern.is_empty()
             || self.killing.is_some()
             || self.organizing.is_some()
         {
@@ -927,7 +1003,7 @@ impl Sidebar {
                 && self.organizing.is_none()
                 && self.new_agent.is_none()
                 && self.editing.is_none()
-                && self.navigation.search.is_none()
+                && !self.typing_query()
                 && self.auto_name.key(key))
             || self.new_agent_key(key, origin)
             || self.organize_key(key, origin)
@@ -965,7 +1041,7 @@ impl Sidebar {
         self.help.key(
             key,
             self.editing.is_none()
-                && self.navigation.search.is_none()
+                && !self.typing_query()
                 && !self.auto_name.open
                 && self.organizing.is_none()
                 && self.new_agent.is_none(),
@@ -985,6 +1061,10 @@ impl Sidebar {
             self.search_key(key);
             return false;
         }
+        if self.navigation.jump.is_some() {
+            self.jump_key(key);
+            return false;
+        }
         let pending_g = std::mem::take(&mut self.pending_g);
         match key.code {
             KeyCode::Char('q') => return true,
@@ -999,13 +1079,18 @@ impl Sidebar {
             KeyCode::Char('g') if pending_g => self.select((!self.agents.is_empty()).then_some(0)),
             KeyCode::Char('g') => self.pending_g = true,
             KeyCode::Char('G') => self.select(self.agents.len().checked_sub(1)),
-            KeyCode::Char('f') => {
+            KeyCode::Char('n') => self.next_match(1),
+            KeyCode::Char('N') => self.next_match(-1),
+            KeyCode::Char('t') => {
                 let matches = rank(&mut self.matcher, &self.navigation.query, &self.all_agents);
                 self.navigation.cycle_filter(&matches);
                 self.rebuild();
             }
             KeyCode::Char('s') => self.resort(),
-            KeyCode::Char('/') => self.start_search(),
+            KeyCode::Char('f') => self.start_search(),
+            KeyCode::Char('/') => self.start_jump(),
+            // One thing at a time: the search, then the filter.
+            KeyCode::Esc if !self.navigation.pattern.is_empty() => self.navigation.pattern.clear(),
             KeyCode::Esc => {
                 self.navigation.query.clear();
                 self.rebuild();
@@ -1253,18 +1338,20 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
                     continue;
                 }
                 let searching = sidebar.navigation.search.is_some();
-                let command = sidebar.editing.is_none() && !searching;
+                let jumping = sidebar.navigation.jump.is_some();
+                let command = sidebar.editing.is_none() && !searching && !jumping;
                 let before = sidebar.navigation.pane.clone();
-                focus = key.code == KeyCode::Enter
-                    && sidebar.editing.is_none()
-                    && sidebar.open_selected().is_some();
+                // Enter while typing a search keeps it, so `n` can go on from there.
+                let opens = key.code == KeyCode::Enter && !jumping;
+                focus = opens && sidebar.editing.is_none() && sidebar.open_selected().is_some();
                 if sidebar.key(key) {
                     return Ok(());
                 }
-                // Moving the selection previews it. Search edits, including arrows, stay in this
-                // pane: only freezing the query previews its final selection, and cancelling
-                // never switches context.
+                // Moving the selection previews it. Filter and search edits stay in this pane:
+                // only freezing the filter or accepting the search previews the final selection,
+                // and cancelling never switches context.
                 preview |= (searching && key.code == KeyCode::Char('/'))
+                    || (jumping && key.code == KeyCode::Enter)
                     || (command && sidebar.navigation.pane != before);
             }
             if focus || !event::poll(Duration::ZERO)? {
@@ -1280,7 +1367,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             screen.show(&mut sidebar)?;
             sidebar.restart_daemon(origin);
         }
-        if focus || (preview && sidebar.navigation.search.is_none()) {
+        if focus || (preview && !sidebar.typing_query()) {
             match switch_command(&sidebar, &own, focus) {
                 Ok(Some(command)) => {
                     sidebar.switching(focus);
@@ -1296,6 +1383,50 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             }
         }
     }
+}
+
+/// The filter and the search on the top line, sharing the room the state filter leaves. An idle
+/// one shrinks to its key once the other has text.
+fn query_fields(navigation: &Navigation, room: usize) -> Vec<Span<'static>> {
+    let fields = [
+        (
+            "f",
+            "filter",
+            &navigation.query,
+            navigation.search.is_some(),
+        ),
+        (
+            "/",
+            "search",
+            &navigation.pattern,
+            navigation.jump.is_some(),
+        ),
+    ];
+    let active = fields
+        .iter()
+        .filter(|(_, _, text, editing)| *editing || !text.is_empty())
+        .count();
+    let share = if active == 2 {
+        room / 2
+    } else {
+        room.saturating_sub(3)
+    };
+    fields
+        .into_iter()
+        .map(|(key, idle, text, editing)| {
+            if editing {
+                let tail: String = text.chars().rev().take(share.saturating_sub(5)).collect();
+                let tail: String = tail.chars().rev().collect();
+                Span::styled(format!("  {key} {tail}▏"), TEXT)
+            } else if !text.is_empty() {
+                Span::styled(truncate(&format!("  {key} {text}"), share), SUBTEXT)
+            } else if active == 0 {
+                Span::styled(format!("  {key} {idle}"), SUBTEXT)
+            } else {
+                Span::styled(format!("  {key}"), SUBTEXT)
+            }
+        })
+        .collect()
 }
 
 /// Ctrl-W: drop trailing separators, then the word before them.
@@ -1337,27 +1468,13 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let [mode_area, agents_area] =
         Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(content);
     let mode = format!(
-        " f {}",
+        " t {}",
         sidebar.navigation.filter.map_or("all", State::as_str)
     );
-    let query = &sidebar.navigation.query;
-    let search = sidebar.navigation.search.is_some();
-    let room = inner.saturating_sub(mode.chars().count() + 4);
-    let query = if search {
-        let tail: String = query.chars().rev().take(room).collect();
-        format!("  / {}▏", tail.chars().rev().collect::<String>())
-    } else if query.is_empty() {
-        "  / search".into()
-    } else {
-        truncate(&format!("  / {query}"), room + 4)
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(mode, LAVENDER),
-            Span::styled(query, if search { TEXT } else { SUBTEXT }),
-        ])),
-        mode_area,
-    );
+    let room = inner.saturating_sub(mode.chars().count());
+    let mut top = vec![Span::styled(mode, LAVENDER)];
+    top.extend(query_fields(&sidebar.navigation, room));
+    f.render_widget(Paragraph::new(Line::from(top)), mode_area);
     if let Some(e) = &sidebar.error {
         daemon_down(
             f,
@@ -1370,7 +1487,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         let text = if sidebar.all_agents.is_empty() {
             NO_AGENTS
         } else {
-            ["no matching agents", "f changes state · esc clears search"]
+            ["no matching agents", "t changes state · esc clears filter"]
         };
         message(
             f,
@@ -1397,6 +1514,10 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
             Text::from(vec![
                 if sidebar.navigation.search.is_some() {
                     hints(&[("^j/^k", "browse"), ("^w ^u", "clear")])
+                } else if sidebar.navigation.jump.is_some() {
+                    hints(&[("type", "find a row"), ("^w ^u", "clear")])
+                } else if !sidebar.navigation.pattern.is_empty() {
+                    hints(&[("c", "configure"), ("o", "organize all")])
                 } else {
                     hints(&[("n", "new"), ("c", "configure"), ("o", "organize all")])
                 },
@@ -1549,6 +1670,12 @@ pub(crate) fn status_footer(sidebar: &Sidebar, width: usize, now: u64) -> Option
         (None, Some(_)) => hints(&[("⏎", "save"), ("esc", "cancel"), ("^w ^u", "clear")]),
         (None, None) if sidebar.navigation.search.is_some() => {
             hints(&[("⏎", "open"), ("/", "freeze"), ("esc", "cancel")])
+        }
+        (None, None) if sidebar.navigation.jump.is_some() => {
+            hints(&[("⏎", "keep"), ("esc", "cancel")])
+        }
+        (None, None) if !sidebar.navigation.pattern.is_empty() => {
+            hints(&[("n N", "next/prev"), ("⏎", "open"), ("esc", "clear")])
         }
         (None, None)
             if sidebar.organize_status.as_ref().is_some_and(|s| {
@@ -1826,7 +1953,7 @@ mod tests {
             assert_eq!(sidebar.selected().unwrap().pane, "%1");
             assert!(sidebar.killing.is_none());
         }
-        press(&mut sidebar, KeyCode::Char('/'));
+        press(&mut sidebar, KeyCode::Char('f'));
         press(&mut sidebar, KeyCode::Char('?'));
         assert_eq!(sidebar.navigation.query, "?");
         assert!(!sidebar.help.open);
@@ -2022,7 +2149,7 @@ mod tests {
         sidebar.navigation.order = ["%1", "%2", "%3"].map(String::from).to_vec();
         sidebar.rebuild();
         sidebar.select(Some(0));
-        press(&mut sidebar, KeyCode::Char('/'));
+        press(&mut sidebar, KeyCode::Char('f'));
         for c in "ABLD RVPMT".chars() {
             press(&mut sidebar, KeyCode::Char(c));
             assert!(sidebar.navigation.search.is_some());
@@ -2035,16 +2162,16 @@ mod tests {
         assert!(sidebar.navigation.search.is_none());
         assert_eq!(order(&sidebar), ["%2", "%1"]);
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
-        press(&mut sidebar, KeyCode::Char('f'));
+        press(&mut sidebar, KeyCode::Char('t'));
         assert_eq!(sidebar.navigation.filter, Some(State::Blocked));
         assert_eq!(order(&sidebar), ["%2"]);
         sidebar.all_agents[1].state = State::Idle;
         sidebar.rebuild();
         assert!(sidebar.agents.is_empty());
         assert_eq!(sidebar.navigation.filter, Some(State::Blocked));
-        press(&mut sidebar, KeyCode::Char('f'));
+        press(&mut sidebar, KeyCode::Char('t'));
         assert_eq!(sidebar.navigation.filter, Some(State::Working));
-        press(&mut sidebar, KeyCode::Char('/'));
+        press(&mut sidebar, KeyCode::Char('f'));
         press(&mut sidebar, KeyCode::Char('z'));
         assert!(sidebar.agents.is_empty());
         press(&mut sidebar, KeyCode::Backspace);
@@ -2103,7 +2230,7 @@ mod tests {
         press(&mut sidebar, KeyCode::Char('g'));
         assert_eq!(sidebar.navigation.pane.as_deref(), Some("%2"));
         // In a search, g is text.
-        press(&mut sidebar, KeyCode::Char('/'));
+        press(&mut sidebar, KeyCode::Char('f'));
         press(&mut sidebar, KeyCode::Char('g'));
         press(&mut sidebar, KeyCode::Char('g'));
         assert_eq!(sidebar.navigation.query, "gg");
@@ -2130,23 +2257,23 @@ mod tests {
             Some(State::Idle),
             None,
         ] {
-            press(&mut sidebar, KeyCode::Char('f'));
+            press(&mut sidebar, KeyCode::Char('t'));
             assert_eq!(sidebar.navigation.filter, expected);
         }
         sidebar.navigation.query = "AGENT-%2".into();
         sidebar.rebuild();
-        press(&mut sidebar, KeyCode::Char('f'));
+        press(&mut sidebar, KeyCode::Char('t'));
         assert_eq!(sidebar.navigation.filter, Some(State::Done));
         sidebar.all_agents[1].state = State::Idle;
         sidebar.rebuild();
         assert_eq!(sidebar.navigation.filter, Some(State::Done));
         assert!(sidebar.selected().is_none());
-        press(&mut sidebar, KeyCode::Char('f'));
+        press(&mut sidebar, KeyCode::Char('t'));
         assert_eq!(sidebar.navigation.filter, Some(State::Idle));
         assert_eq!(sidebar.selected().unwrap().pane, "%2");
         sidebar.navigation.query = "no such agent".into();
         sidebar.rebuild();
-        press(&mut sidebar, KeyCode::Char('f'));
+        press(&mut sidebar, KeyCode::Char('t'));
         assert_eq!(sidebar.navigation.filter, None);
         assert!(sidebar.agents.is_empty());
     }
@@ -2378,7 +2505,7 @@ mod tests {
         sidebar.rebuild();
         assert_eq!(order(&sidebar), ["%3", "%2", "%1", "%4"]);
         sidebar.select(Some(2));
-        press(&mut sidebar, KeyCode::Char('/'));
+        press(&mut sidebar, KeyCode::Char('f'));
         sidebar.rebuild();
         assert_eq!(order(&sidebar), ["%3", "%2", "%1", "%4"]);
         press(&mut sidebar, KeyCode::Char('/'));
@@ -2394,7 +2521,7 @@ mod tests {
     #[test]
     fn search_edit_cancel_keep_clear_and_literal_keys() {
         let mut sidebar = showing(vec![agent("%1", State::Idle), agent("%2", State::Working)]);
-        press(&mut sidebar, KeyCode::Char('/'));
+        press(&mut sidebar, KeyCode::Char('f'));
         for c in "PaYmEnT".chars() {
             press(&mut sidebar, KeyCode::Char(c));
         }
@@ -2402,7 +2529,7 @@ mod tests {
         press(&mut sidebar, KeyCode::Char('/'));
         assert!(sidebar.navigation.search.is_none());
         assert_eq!(sidebar.navigation.query, "PaYmEnT");
-        press(&mut sidebar, KeyCode::Char('/'));
+        press(&mut sidebar, KeyCode::Char('f'));
         for c in "qFr".chars() {
             press(&mut sidebar, KeyCode::Char(c));
         }
@@ -2425,7 +2552,7 @@ mod tests {
     #[test]
     fn enter_opens_from_a_search_and_ends_it_but_keeps_a_frozen_one() {
         let mut sidebar = showing(vec![agent("%1", State::Idle), agent("%2", State::Idle)]);
-        press(&mut sidebar, KeyCode::Char('/'));
+        press(&mut sidebar, KeyCode::Char('f'));
         for c in "%2".chars() {
             press(&mut sidebar, KeyCode::Char(c));
         }
@@ -2434,12 +2561,12 @@ mod tests {
         assert_eq!(order(&sidebar).len(), 2);
         assert_eq!(sidebar.selected().unwrap().pane, "%2");
         // A key that edits nothing leaves the selection alone.
-        press(&mut sidebar, KeyCode::Char('/'));
+        press(&mut sidebar, KeyCode::Char('f'));
         press(&mut sidebar, KeyCode::Backspace);
         assert_eq!(sidebar.selected().unwrap().pane, "%2");
         press(&mut sidebar, KeyCode::Esc);
         // No match: nothing to open, and the search stays open to edit.
-        press(&mut sidebar, KeyCode::Char('/'));
+        press(&mut sidebar, KeyCode::Char('f'));
         press(&mut sidebar, KeyCode::Char('☃'));
         assert!(sidebar.open_selected().is_none());
         press(&mut sidebar, KeyCode::Enter);
@@ -2450,6 +2577,134 @@ mod tests {
         press(&mut sidebar, KeyCode::Char('/'));
         assert_eq!(sidebar.open_selected().unwrap().pane, "%1");
         assert_eq!(sidebar.navigation.query, "1");
+    }
+
+    /// Rows %1 to %4, with %2 and %4 findable by name and %3 by its task.
+    fn searchable() -> Sidebar {
+        let mut agents = vec![
+            agent("%1", State::Idle),
+            agent("%2", State::Idle),
+            agent("%3", State::Idle),
+            agent("%4", State::Idle),
+        ];
+        agents[1].name = "Cedar-One".into();
+        agents[2].title = "review the CEDAR tree".into();
+        agents[3].name = "cedar-two".into();
+        let mut sidebar = showing(agents);
+        sidebar.select(Some(0));
+        sidebar
+    }
+
+    fn type_jump(sidebar: &mut Sidebar, text: &str) {
+        press(sidebar, KeyCode::Char('/'));
+        for c in text.chars() {
+            press(sidebar, KeyCode::Char(c));
+        }
+    }
+
+    #[test]
+    fn search_moves_the_selection_ignoring_case_and_hides_nothing() {
+        let mut sidebar = searchable();
+        type_jump(&mut sidebar, "cEd");
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
+        assert_eq!(sidebar.agents.len(), 4);
+        // Project names are not searched.
+        assert!(sidebar.agents.iter().all(|a| a.session == "work"));
+        press(&mut sidebar, KeyCode::Esc);
+        type_jump(&mut sidebar, "work");
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        assert_eq!(sidebar.notice.as_deref(), Some("no match"));
+    }
+
+    #[test]
+    fn n_and_capital_n_go_through_the_matches_and_wrap_once_the_search_is_kept() {
+        let mut sidebar = searchable();
+        type_jump(&mut sidebar, "cedar");
+        press(&mut sidebar, KeyCode::Enter);
+        assert!(sidebar.navigation.jump.is_none());
+        let origin = Origin::Sidebar("%9");
+        // The action handler leaves `n` alone while a search is on.
+        assert!(!sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('n')), origin));
+        for pane in ["%3", "%4", "%2"] {
+            press(&mut sidebar, KeyCode::Char('n'));
+            assert_eq!(sidebar.selected().unwrap().pane, pane);
+        }
+        press(&mut sidebar, KeyCode::Char('N'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%4");
+        press(&mut sidebar, KeyCode::Esc);
+        assert!(sidebar.navigation.pattern.is_empty());
+        assert_eq!(sidebar.selected().unwrap().pane, "%4");
+        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('n')), origin));
+    }
+
+    #[test]
+    fn cancelling_a_search_restores_the_row_and_the_search_before_it() {
+        let mut sidebar = searchable();
+        type_jump(&mut sidebar, "two");
+        press(&mut sidebar, KeyCode::Enter);
+        sidebar.select(Some(0));
+        type_jump(&mut sidebar, "cedar");
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
+        press(&mut sidebar, KeyCode::Esc);
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        assert_eq!(sidebar.navigation.pattern, "two");
+    }
+
+    #[test]
+    fn search_edits_restart_from_the_first_row_and_commands_are_text() {
+        let mut sidebar = searchable();
+        type_jump(&mut sidebar, "cedar-t");
+        assert_eq!(sidebar.selected().unwrap().pane, "%4");
+        press(&mut sidebar, KeyCode::Backspace);
+        press(&mut sidebar, KeyCode::Backspace);
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
+        let origin = Origin::Sidebar("%9");
+        for key in ['x', 'o', 'n', '?'] {
+            assert!(!sidebar.action_key(KeyEvent::from(KeyCode::Char(key)), origin));
+        }
+    }
+
+    #[test]
+    fn a_search_with_no_match_ends_on_enter_and_opening_a_match_ends_it() {
+        let mut sidebar = searchable();
+        type_jump(&mut sidebar, "zzz");
+        press(&mut sidebar, KeyCode::Enter);
+        assert!(sidebar.navigation.pattern.is_empty());
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        type_jump(&mut sidebar, "cedar");
+        press(&mut sidebar, KeyCode::Enter);
+        assert_eq!(sidebar.open_selected().unwrap().pane, "%2");
+        assert!(sidebar.navigation.pattern.is_empty());
+    }
+
+    #[test]
+    fn search_only_visits_rows_the_filter_keeps() {
+        let mut sidebar = searchable();
+        sidebar.all_agents[3].state = State::Blocked;
+        sidebar.navigation.filter = Some(State::Blocked);
+        sidebar.rebuild();
+        type_jump(&mut sidebar, "cedar");
+        assert_eq!(sidebar.selected().unwrap().pane, "%4");
+        press(&mut sidebar, KeyCode::Enter);
+        press(&mut sidebar, KeyCode::Char('n'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%4");
+    }
+
+    #[test]
+    fn top_line_shows_the_filter_and_search_within_the_width() {
+        let text = |navigation: &Navigation| -> String {
+            query_fields(navigation, 30)
+                .iter()
+                .map(|span| span.content.to_string())
+                .collect()
+        };
+        let mut navigation = Navigation::default();
+        assert_eq!(text(&navigation), "  f filter  / search");
+        navigation.pattern = "cedar".into();
+        assert_eq!(text(&navigation), "  f  / cedar");
+        navigation.query = "x".repeat(50);
+        navigation.pattern = "y".repeat(50);
+        assert!(text(&navigation).chars().count() <= 30);
     }
 
     #[test]
@@ -2609,10 +2864,10 @@ mod tests {
             KeyCode::Char('j'),
             KeyCode::Down,
             KeyCode::Char('r'),
-            KeyCode::Char('f'),
+            KeyCode::Char('t'),
             KeyCode::Char('v'),
             KeyCode::Char('x'),
-            KeyCode::Char('/'),
+            KeyCode::Char('f'),
         ] {
             let key = KeyEvent::new(code, KeyModifiers::NONE);
             assert!(!kill_accepts(key));

@@ -7,9 +7,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
+- `/` in the sidebar and agent picker now searches as in Vim: type part of an agent's name or task, ignoring case, and the selection moves there with every row still listed. `Enter` keeps the search, `n`/`N` go through the matches, and `Esc` clears it. `n` starts a new agent again once the search is cleared
 - Agents you start by hand join a session named after their folder within a second, creating it if needed, and your screen moves with them; a later `move` sticks, and spawned agents stay where they were asked to go
 - When the sidebar or agent picker says the daemon is not running, press `Enter` to restart it; if it cannot start, the reason stays on screen
-- `prefix + f` opens the agent picker already searching, ready to type; this replaces tmux's window finder on that key
+- `prefix + f` opens the agent picker already filtering, ready to type; this replaces tmux's window finder on that key
 - Sidebar session headings use the same per-session colours as the agent picker
 - `gg` and `G` jump to the first and last agent in the sidebar and the agent picker
 - The agent picker has the sidebar's actions: `n` new, `x` kill, `r` rename, `o` organize, `f` filter, `s` sort, `c` configure and `?` shortcuts
@@ -24,6 +25,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- `f` now filters rows by text, the fuzzy match `/` used to do, and `f` resumes a frozen filter; the state filter moved to `t`
 - The screen behind the agent picker is dimmed while it is open
 - The sidebar and the agent picker no longer repeat agent counts in their headers; the status bar is the one place for them
 - Moving the sidebar selection always previews the selected agent's window, with the keyboard staying in the sidebar; the `v` toggle is gone

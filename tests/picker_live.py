@@ -158,7 +158,7 @@ def open_picker():
 def query(client, value, selected):
     """Edit the search, entering search mode the first time."""
     if '› ' not in client.text():
-        client.key(b'/')
+        client.key(b'f')
         wait('search opens', lambda: '› ' in client.text())
     client.key(b'\x15' + value.encode())
     wait('query ' + value, lambda: client.selected() == selected and '› ' + value in client.text())
@@ -210,7 +210,7 @@ try:
     wait('picker', lambda: client.selected() == 'cedar-review')
     client.snapshot('all-agents')
     # The list opens in command mode: no search box, and letters are commands.
-    assert 'search names / projects / descriptions' not in client.text() and 'j/k browse' in client.text()
+    assert 'filter names / projects / descriptions' not in client.text() and 'j/k browse' in client.text()
     # Blank canvas and panel background must use terminal default, despite popup-style.
     assert client.screen.buffer[frame + 1][65].bg == 'default', client.screen.buffer[frame + 1][65]
     assert client.screen.buffer[20][65].bg == 'default', client.screen.buffer[20][65]
@@ -265,14 +265,14 @@ try:
     assert '› zzzzzz' in client.text() and client.context() == origin
     # Esc clears a kept search, then closes.
     client.key(b'\x1b')
-    wait('search cleared', lambda: 'search names / projects / descriptions' not in client.text() and client.selected() == 'cedar-review')
+    wait('search cleared', lambda: 'filter names / projects / descriptions' not in client.text() and client.selected() == 'cedar-review')
     client.key(b'\x1b')
     wait('cancelled', lambda: 'j/k browse' not in client.text())
     assert client.context() == origin
     # Esc in the search box cancels the edit and keeps the picker.
     client.key(b'\x01a')
     wait('reopen fresh', lambda: client.selected() == 'cedar-review' and '› ' not in client.text())
-    client.key(b'/qjk')
+    client.key(b'fqjk')
     wait('literal letters', lambda: '› qjk' in client.text())
     client.key(b'\x1b')
     wait('edit cancelled', lambda: '› ' not in client.text() and 'j/k browse' in client.text())
@@ -280,7 +280,7 @@ try:
     wait('closed before search-first', lambda: 'j/k browse' not in client.text())
     # prefix + f: already searching, so the first letters are text.
     client.key(b'\x01f')
-    wait('opens searching', lambda: 'search names / projects / descriptions' in client.text())
+    wait('opens searching', lambda: 'filter names / projects / descriptions' in client.text())
     client.key(b'cdrrv')
     wait('search-first text', lambda: '› cdrrv' in client.text() and client.selected() == 'cedar-review')
     client.key(b'\x1b')
@@ -290,13 +290,13 @@ try:
     wait('help', lambda: 'Keyboard shortcuts' in client.text())
     client.key(b'q')
     wait('help closed, picker open', lambda: 'j/k browse' in client.text())
-    client.key(b'f')
+    client.key(b't')
     wait('filter', lambda: 'agents · blocked' in client.text())
-    # f skips states with no agents, so press until the cycle reaches All.
+    # t skips states with no agents, so press until the cycle reaches All.
     for _ in range(5):
         if 'agents · ' not in client.text():
             break
-        client.key(b'f')
+        client.key(b't')
         time.sleep(.15)
     wait('filter off', lambda: 'agents · ' not in client.text())
     client.key(b's')
@@ -306,7 +306,7 @@ try:
     wait('organize refuses without configured AI', lambda: 'j/k browse' not in client.text())
     assert '[Y/n]' not in client.text(), client.text()
     client.key(b'\x03')
-    wait('ctrl-c cancel', lambda: 'search names / projects / descriptions' not in client.text() and '▌' not in client.text())
+    wait('ctrl-c cancel', lambda: 'filter names / projects / descriptions' not in client.text() and '▌' not in client.text())
     assert client.context() == origin
     client.key(b'\x01a')
     wait('reopen for rename', lambda: client.selected() == 'cedar-review')
@@ -321,7 +321,7 @@ try:
     SPAWNED.remove('quartz-helper')
     SPAWNED.append('quartz-helperq')
     # Kill: another key cancels with no kill, then y kills exactly that pane.
-    # / freezes the search, so the same letters are commands on its matches.
+    # / freezes the filter, so the same letters are commands on its matches.
     query(client, 'quartzhelperq', 'quartz-helperq')
     client.key(b'/')
     wait('frozen search', lambda: 'j/k browse' in client.text() and '› quartzhelperq' in client.text())
@@ -342,11 +342,11 @@ try:
     assert {a['name'] for a in agents()} == {'cedar-review', 'quartz-build'}
     client.key(b'\x1b')
     wait('search cleared after kill', lambda: '› ' not in client.text())
-    # A third / resumes editing a frozen search.
+    # f resumes editing a frozen filter.
     query(client, 'cedar', 'cedar-review')
     client.key(b'/')
     wait('frozen again', lambda: 'j/k browse' in client.text())
-    client.key(b'/r')
+    client.key(b'fr')
     wait('resumed', lambda: '› cedarr' in client.text() and 'j/k browse' not in client.text())
     client.key(b'\x1b')
     wait('resume cancelled, frozen query back', lambda: '› cedar' in client.text() and '› cedarr' not in client.text())

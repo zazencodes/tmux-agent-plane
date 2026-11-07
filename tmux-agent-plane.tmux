@@ -54,7 +54,7 @@ tmux set-hook -g 'window-layout-changed[90]' \
 # sidebar has no scrollback to read. Other modes, such as prefix + w, end when used, so they stay.
 tmux set-hook -g 'pane-mode-changed[90]' \
   'run-shell -C "if-shell -F -t #{hook_pane} '\''##{&&:##{==:##{pane_mode},copy-mode},##{==:##{@agent-plane-sidebar},1}}'\'' '\''send-keys -t #{hook_pane} -X cancel'\''"'
-# prefix + a: searchable agents with a large preview. prefix + f: the same, already searching.
+# prefix + a: agents with a large preview. prefix + f: the same, already filtering.
 # Full screen: the picker draws its panel over a dimmed copy of the screen.
 # Inherit the terminal's colours even when a tmux theme sets a separate popup background.
 # Expand the opening client here: display-popup does not expand its shell command.

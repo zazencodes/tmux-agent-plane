@@ -43,7 +43,7 @@ enum Cmd {
         /// tmux client that opened the popup (supplied by the plugin)
         #[arg(long)]
         client: String,
-        /// Open in search mode, ready to type
+        /// Open with the filter being typed
         #[arg(long)]
         search: bool,
     },

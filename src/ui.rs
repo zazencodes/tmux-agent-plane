@@ -370,16 +370,23 @@ impl App {
             }
             return ControlFlow::Continue(());
         }
-        if key.code == KeyCode::Enter && self.sidebar.editing.is_none() {
+        // Enter while typing a search keeps it, so `n` can go on from there.
+        if key.code == KeyCode::Enter
+            && self.sidebar.editing.is_none()
+            && self.sidebar.navigation.jump.is_none()
+        {
             return match self.sidebar.open_selected() {
                 Some(agent) => ControlFlow::Break(Some(agent)),
                 None => ControlFlow::Continue(()),
             };
         }
-        if self.sidebar.editing.is_none() && self.sidebar.navigation.search.is_none() {
+        if self.sidebar.editing.is_none() && !self.sidebar.typing_query() {
             match key.code {
                 KeyCode::Char('q') => return ControlFlow::Break(None),
-                KeyCode::Esc if self.sidebar.navigation.query.is_empty() => {
+                KeyCode::Esc
+                    if self.sidebar.navigation.query.is_empty()
+                        && self.sidebar.navigation.pattern.is_empty() =>
+                {
                     return ControlFlow::Break(None);
                 }
                 _ => {}
@@ -553,7 +560,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
             .scroll((0, scroll))
             .style(Style::default().fg(if searching { TEXT } else { SUBTEXT }))
             .block(
-                panel(Line::from(" search names / projects / descriptions ")).title_top(
+                panel(Line::from(" filter names / projects / descriptions ")).title_top(
                     Line::styled(
                         format!(" {} / {} ", sidebar.agents.len(), sidebar.all_agents.len()),
                         SUBTEXT,
@@ -625,10 +632,16 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
             ListItem::new(line)
         })
         .collect();
-    let title = match sidebar.navigation.filter {
-        Some(state) => format!(" agents · {} ", state.as_str()),
-        None => " agents ".to_string(),
-    };
+    let mut title = " agents".to_string();
+    if let Some(state) = sidebar.navigation.filter {
+        title += &format!(" · {}", state.as_str());
+    }
+    let typing = sidebar.navigation.jump.is_some();
+    if typing || !sidebar.navigation.pattern.is_empty() {
+        title += &format!(" · / {}", sidebar.navigation.pattern);
+        title += if typing { "▏" } else { "" };
+    }
+    title.push(' ');
     let list = List::new(items).block(panel(Line::from(title)));
     f.render_stateful_widget(list, list_area, &mut sidebar.list);
 
@@ -665,7 +678,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
             &if app.sidebar.all_agents.is_empty() {
                 NO_AGENTS
             } else {
-                ["no matching agents", "f changes state · / edits search"]
+                ["no matching agents", "t changes state · f edits filter"]
             },
         ),
         (None, Some(_)) => {
@@ -703,7 +716,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                 hints(&[("tab", "back to the menu"), ("keys", "go to the agent")])
             } else if sidebar.notice.is_none() && searching {
                 hints(&[
-                    ("type", "search"),
+                    ("type", "filter"),
                     ("^j/^k", "browse"),
                     ("⏎", "open"),
                     ("tab", "type to agent"),
@@ -724,6 +737,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                         ("r", "rename"),
                         ("o", "organize"),
                         ("f", "filter"),
+                        ("t", "state"),
                         ("s", "sort"),
                         ("c", "configure"),
                         ("q", "close"),
@@ -999,7 +1013,7 @@ mod tests {
     /// Replace the search with `query`, staying in search mode.
     fn type_query(app: &mut App, query: &str) {
         if app.sidebar.navigation.search.is_none() {
-            assert!(press(app, KeyCode::Char('/')).is_continue());
+            assert!(press(app, KeyCode::Char('f')).is_continue());
         }
         let _ = ctrl(app, 'u');
         for c in query.chars() {
@@ -1083,7 +1097,7 @@ mod tests {
     #[test]
     fn slash_starts_search_where_letters_are_text_and_ctrl_j_k_still_browse() {
         let mut app = app();
-        let _ = press(&mut app, KeyCode::Char('/'));
+        let _ = press(&mut app, KeyCode::Char('f'));
         for c in "qjx東京".chars() {
             let _ = press(&mut app, KeyCode::Char(c));
         }
@@ -1126,7 +1140,7 @@ mod tests {
         assert!(screen(&terminal).contains("new agent in work"));
         let _ = press(&mut app, KeyCode::Esc);
         assert_eq!(app.sidebar.navigation.query, "cedar");
-        let _ = press(&mut app, KeyCode::Char('/'));
+        let _ = press(&mut app, KeyCode::Char('f'));
         let _ = press(&mut app, KeyCode::Char('w'));
         assert_eq!(app.sidebar.navigation.query, "cedarw");
         assert_eq!(selected(&app), "cedar-worker");
@@ -1142,7 +1156,7 @@ mod tests {
             KeyCode::Char('x'),
             KeyCode::Char('q'),
             KeyCode::Char('j'),
-            KeyCode::Char('/'),
+            KeyCode::Char('f'),
             KeyCode::Esc,
             KeyCode::Enter,
         ] {
@@ -1273,13 +1287,35 @@ mod tests {
     }
 
     #[test]
+    fn slash_searches_without_hiding_and_enter_keeps_it_then_opens() {
+        let mut app = app();
+        let rows = app.sidebar.agents.len();
+        let _ = press(&mut app, KeyCode::Char('/'));
+        for c in "CEDAR".chars() {
+            assert!(press(&mut app, KeyCode::Char(c)).is_continue());
+        }
+        assert_eq!(selected(&app), "cedar-review");
+        assert_eq!(app.sidebar.agents.len(), rows);
+        assert!(press(&mut app, KeyCode::Enter).is_continue());
+        let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(screen(&terminal).contains("/ CEDAR"));
+        // Esc clears the search first, then closes.
+        assert!(press(&mut app, KeyCode::Esc).is_continue());
+        assert!(matches!(
+            press(&mut app, KeyCode::Esc),
+            ControlFlow::Break(None)
+        ));
+    }
+
+    #[test]
     fn q_and_ctrl_c_close_without_a_target() {
         let mut app = app();
         assert!(matches!(
             press(&mut app, KeyCode::Char('q')),
             ControlFlow::Break(None)
         ));
-        let _ = press(&mut app, KeyCode::Char('/'));
+        let _ = press(&mut app, KeyCode::Char('f'));
         assert!(matches!(ctrl(&mut app, 'c'), ControlFlow::Break(None)));
     }
 
@@ -1303,7 +1339,7 @@ mod tests {
         let mut app = app();
         app.sidebar.all_agents[1].state = State::Blocked;
         app.sidebar.rebuild();
-        let _ = press(&mut app, KeyCode::Char('f'));
+        let _ = press(&mut app, KeyCode::Char('t'));
         assert_eq!(app.sidebar.navigation.filter, Some(State::Blocked));
         assert_eq!(app.sidebar.agents.len(), 1);
         let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
@@ -1363,7 +1399,7 @@ mod tests {
         app.sidebar.start_search();
         let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert!(screen(&terminal).contains("search names / projects / descriptions"));
+        assert!(screen(&terminal).contains("filter names / projects / descriptions"));
         for c in "qrtz".chars() {
             assert!(press(&mut app, KeyCode::Char(c)).is_continue());
         }
@@ -1379,13 +1415,13 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
         let mut app = app();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert!(!screen(&terminal).contains("search names / projects / descriptions"));
-        let _ = press(&mut app, KeyCode::Char('/'));
+        assert!(!screen(&terminal).contains("filter names / projects / descriptions"));
+        let _ = press(&mut app, KeyCode::Char('f'));
         terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert!(screen(&terminal).contains("search names / projects / descriptions"));
+        assert!(screen(&terminal).contains("filter names / projects / descriptions"));
         let _ = press(&mut app, KeyCode::Esc);
         terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert!(!screen(&terminal).contains("search names / projects / descriptions"));
+        assert!(!screen(&terminal).contains("filter names / projects / descriptions"));
     }
 
     #[test]
@@ -1398,7 +1434,7 @@ mod tests {
                 terminal.draw(|f| draw(f, &mut app)).unwrap();
                 if width == 120 {
                     let shown = screen(&terminal);
-                    assert!(shown.contains("search names / projects / descriptions"));
+                    assert!(shown.contains("filter names / projects / descriptions"));
                     if query == "missing" {
                         assert!(shown.contains("no matching agents"));
                     }
