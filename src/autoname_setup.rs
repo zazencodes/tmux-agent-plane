@@ -40,7 +40,7 @@ impl Setup {
     /// True consumes the key, so setup Enter never jumps to an agent behind the screen.
     pub fn key(&mut self, key: KeyEvent) -> bool {
         if !self.open {
-            if key.modifiers.is_empty() && key.code == KeyCode::Char('c') {
+            if key.modifiers.is_empty() && key.code == KeyCode::Char('o') {
                 self.open_menu();
                 return true;
             }
@@ -286,15 +286,15 @@ fn custom_lines(input: &str, width: usize) -> Vec<Line<'static>> {
 mod tests {
     use super::*;
     #[test]
-    fn c_opens_configuration_whatever_the_state() {
+    fn o_opens_configuration_whatever_the_state() {
         for enabled in [false, true] {
             let mut setup = Setup::default();
             setup.config.auto_name.enabled = enabled;
-            assert!(setup.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)));
+            assert!(setup.key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE)));
             assert!(setup.open);
         }
         let mut setup = Setup::default();
-        assert!(!setup.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+        assert!(!setup.key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL)));
         assert!(!setup.key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)));
     }
 

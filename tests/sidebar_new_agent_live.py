@@ -122,12 +122,12 @@ try:
     harness = tmux('display-message', '-p', '-t', '=harness:', '#{window_id}')
     plane('toggle-sidebar', harness)
     client = Client('harness')
-    wait('sidebar', lambda: 'n new' in client.text(), client)
-    client.keys(b'/hovered/')
+    wait('sidebar', lambda: 'c new' in client.text(), client)
+    client.keys(b'/hovered\r')
     wait('selected', lambda: 'hovered' in client.text(), client)
     before = windows('api')
 
-    client.keys(b'n')
+    client.keys(b'c')
     wait('picker', lambda: 'new agent in api' in client.text() and 'grok' in client.text(), client)
     for kind in ('claude', 'codex', 'pi', 'opencode', 'grok'):
         assert kind in client.text(), kind
@@ -140,7 +140,7 @@ try:
     assert windows('api') == before
     print('PASS: picker offers the kinds, consumes other keys, cancel creates nothing', flush=True)
 
-    client.keys(b'njj\r')
+    client.keys(b'cjj\r')
     wait('new window', lambda: len(windows('api')) == len(before) + 1, client)
     window = next(w for w in windows('api') if w not in before)
     wait('client moved', lambda: tmux('list-clients', '-F', '#{session_name} #{window_id}') == f'api {window}', client)
@@ -160,9 +160,9 @@ try:
     tmux('select-pane', '-t', next(row.split()[0] for row in home.splitlines() if row.endswith(' 1')))
     second = Client('api')
     wait('second client', lambda: len(tmux('list-clients').splitlines()) == 2, client)
-    wait('rows', lambda: 'hovered' in client.text() and 'n new' in client.text(), client)
+    wait('rows', lambda: 'hovered' in client.text() and 'c new' in client.text(), client)
     count = len(windows('api'))
-    client.keys(b'n\r')
+    client.keys(b'c\r')
     wait('refusal', lambda: 'shared with another' in client.text(), client)
     assert len(windows('api')) == count
     print('PASS: a session used by another client is refused before anything starts', flush=True)

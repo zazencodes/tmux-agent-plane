@@ -246,7 +246,7 @@ try:
     wait('client attached', lambda: tmux('list-clients', '-F', '#{client_name}'))
     plane('focus', by_pane(default)['name'])
     plane('toggle-sidebar', by_pane(default)['window'])
-    wait('hint at width 38', lambda: 'c configure' in client.text())
+    wait('hint at width 38', lambda: 'o configure' in client.text())
     settle(2)
     assert not calls() and not automatic_commands()
     RESULTS['off_no_model_or_extra_naming_tmux_commands'] = True
@@ -257,10 +257,10 @@ try:
         client.key(b'?')
         wait('help opens', lambda: 'Keyboard shortcuts' in client.text())
         assert 'Configure' in client.text()
-        assert 'c configure' not in client.text()
+        assert 'o configure' not in client.text()
         client.snapshot('shortcuts-full-' + closing.hex())
         client.key(closing)
-        wait('help closes safely', lambda: 'f all' in client.text() and 'c configure' in client.text())
+        wait('help closes safely', lambda: 'd all' in client.text() and 'o configure' in client.text())
         assert client.selected() == selected_before
         assert '? [Y/n]' not in client.text()
         assert len(index()['agents']) == 3
@@ -296,7 +296,7 @@ try:
         seen_help += client.text()
         client.snapshot('shortcuts-short-' + str(page))
         client.key(b'q')
-        wait('short help close', lambda: 'f all' in client.text())
+        wait('short help close', lambda: 'd all' in client.text())
     assert 'Move selection' in seen_help and 'Configure: turn AI names off' in seen_help
     assert 'Configure' in seen_help
     tmux('resize-window', '-t', window, '-y', original_height)
@@ -304,12 +304,12 @@ try:
     RESULTS.update(help_real_keypress=True, help_closing_keys_consumed=True,
                    help_literal_during_edits=True, help_preserves_confirmation=True,
                    help_short_height_all_pages_reachable=True)
-    client.key(b'c')
+    client.key(b'o')
     wait('configure menu', lambda: '5 Antigravity (agy)' in client.text())
     client.key(b'\x1b')
-    wait('configure closes', lambda: 'f all' in client.text())
+    wait('configure closes', lambda: 'd all' in client.text())
     # The supported agy preset resolves to our private fake binary, never the real CLI.
-    client.key(b'c5')
+    client.key(b'o5')
     wait('disclosure before enable', lambda: '⏎ enable' in client.text() and 'What is sent' in client.text() and 'Model: gemini-3.8-flash' in client.text() and 'Thinking: low' in client.text())
     client.snapshot('agy-consent-38-columns')
     assert not calls()
@@ -324,12 +324,12 @@ try:
     RESULTS.update(setup_by_real_keypress=True, agy_preset_fixture_only=True, consent_before_execution=True,
                    default_renamed=True, explicit_names_preserved=True, detached_no_input=True)
     # The button stays once naming is on: there is always a way back to configuration.
-    wait('configure stays after enabling', lambda: 'c configure' in client.text())
+    wait('configure stays after enabling', lambda: 'o configure' in client.text())
     assert not (set(json.loads(CONFIG.read_text())) - {'auto_name'})
     assert 'hide_hint' not in json.loads(CONFIG.read_text())['auto_name']
     RESULTS['configure_always_available'] = True
     # Exercise custom configuration in the actual sidebar as well.
-    client.key(b'c7')
+    client.key(b'o7')
     wait('custom editor', lambda: 'Custom command' in client.text())
     command = [str(NAMER), '{prompt}']
     client.key(json.dumps(command).encode() + b'\r')
@@ -415,7 +415,7 @@ try:
     assert len(index()['agents']) == len(PANES)
     assert len(calls()) == 9
     # Setup reports missing commands without enabling them.
-    client.key(b'c7')
+    client.key(b'o7')
     wait('custom editor again', lambda: 'Custom command' in client.text())
     client.key(json.dumps([str(BIN / 'missing-ai'), '{prompt}']).encode() + b'\r')
     wait('missing command shown in setup', lambda: 'executable' in client.text())
@@ -425,9 +425,9 @@ try:
     client.key(b'\x1b')
     RESULTS['missing_command_visible_tracking_healthy'] = True
     # Explicit disabling is also persisted by the sidebar flow.
-    client.key(b'cd')
+    client.key(b'od')
     wait('disabled saved', lambda: not json.loads(CONFIG.read_text())['auto_name']['enabled'])
-    wait('configure stays after disabling', lambda: 'c configure' in client.text())
+    wait('configure stays after disabling', lambda: 'o configure' in client.text())
     RESULTS['explicit_disable'] = True
     before = len(calls())
     late = spawn()

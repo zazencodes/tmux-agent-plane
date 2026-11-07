@@ -261,11 +261,20 @@ def assert_vim_search(client):
     wait("second search typed", lambda: "/ zzz▏" in client.text())
     client.key(b"\x03")
     wait("Ctrl-C cancels the edit", lambda: "▏" not in client.text() and "/ nav-" in client.text())
-    # Ctrl-C ends a kept search too, and n is the new-agent key again.
+    # c starts a new agent during a kept search, and the search survives cancelling it.
+    client.key(b"c")
+    wait("c opens the new agent picker", lambda: "new agent in" in client.text())
+    client.key(b"\x1b")
+    wait("new agent cancelled, search kept", lambda: "new agent in" not in client.text() and "/ nav-" in client.text())
+    # Ctrl-C ends a kept search too, and n then does nothing.
     client.key(b"\x03")
     wait("search cleared", lambda: "/ search" in client.text())
+    held = client.selected()
     client.key(b"n")
-    wait("n opens the new agent picker", lambda: "new agent in" in client.text())
+    settle(0.3)
+    assert client.selected() == held and "new agent in" not in client.text()
+    client.key(b"c")
+    wait("c opens the new agent picker", lambda: "new agent in" in client.text())
     client.key(b"\x1b")
     wait("new agent cancelled", lambda: "new agent in" not in client.text())
     # Shift-Right opens the selection like Enter, also mid-search; Shift-Left stays or returns.

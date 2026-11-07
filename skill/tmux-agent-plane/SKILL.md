@@ -25,7 +25,7 @@ tmux-agent-plane rename self <name>
 
 A name is one short kebab-case word for the work, 2 to 3 words joined by `-`, at most 20 characters: `auth-refactor`, `billing-tests`, `release-notes`. Never rename an agent the user has already named.
 
-Optional AI auto-naming is off by default and configured by the user with `c` in the sidebar. It only names agents with a meaningful title and an unassigned default name. Explicit `--name`, `rename` and sidebar `r` assignments are always preserved.
+Optional AI auto-naming is off by default and configured by the user with `o` in the sidebar. It only names agents with a meaningful title and an unassigned default name. Explicit `--name`, `rename` and sidebar `r` assignments are always preserved.
 
 ## Caller identity
 

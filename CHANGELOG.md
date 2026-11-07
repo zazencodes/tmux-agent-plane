@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Changed
+
+- Sidebar and picker keys follow tmux: `c` creates a new agent, as `prefix + c` creates a window, and works during a kept search. Configure moves from `c` to `o`, and `n`/`N` now only step through search matches
+
 ### Removed
 
 - The `s` re-sort key and attention sorting: rows stay in a stable order, with new agents added at the end of their session

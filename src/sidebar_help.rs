@@ -18,14 +18,15 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("enter", "Open, even from filter / save"),
     ("enter", "Daemon down: restart it"),
     ("/", "Search rows; enter keeps it"),
-    ("n N", "Next/prev match; else n new"),
+    ("n N", "Next/prev search match"),
     ("f", "Filter rows; / freezes it"),
     ("d", "Cycle state filter"),
     ("esc", "Clear / cancel / close"),
     ("^c", "In lists, same as esc"),
     ("r", "Rename selected agent"),
     ("x", "Confirm kill of agent"),
-    ("c", "Configure"),
+    ("c", "New agent in this project"),
+    ("o", "Configure"),
     ("tab", "Picker: type to the agent"),
     ("?", "Keyboard shortcuts"),
     ("q", "Close sidebars or picker"),
@@ -162,7 +163,7 @@ mod tests {
                 "missing sidebar help for {label}"
             );
         }
-        for label in ["?", "c", "x", "enter", "ctrl-w", "ctrl-u"] {
+        for label in ["?", "c", "o", "x", "enter", "ctrl-w", "ctrl-u"] {
             assert!(labels.contains(&label));
         }
     }

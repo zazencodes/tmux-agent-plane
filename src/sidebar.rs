@@ -246,7 +246,7 @@ pub(crate) struct KillConfirmation {
     ends_sessions: Vec<String>,
 }
 
-/// The kinds `n` offers. Antigravity needs a task to start, and this picker starts agents empty.
+/// The kinds `c` offers. Antigravity needs a task to start, and this picker starts agents empty.
 const NEW_AGENT_KINDS: [Kind; 5] = [
     Kind::Claude,
     Kind::Codex,
@@ -255,7 +255,7 @@ const NEW_AGENT_KINDS: [Kind; 5] = [
     Kind::Grok,
 ];
 
-/// The project is pinned when `n` is pressed; rows moving underneath cannot retarget it.
+/// The project is pinned when `c` is pressed; rows moving underneath cannot retarget it.
 pub(crate) struct NewAgent {
     session: String,
     cwd: String,
@@ -416,7 +416,7 @@ pub(crate) struct Sidebar {
     matcher: Matcher,
     /// The picker starts on the top row; a sidebar starts on what wants attention.
     pub(crate) opens_on_top: bool,
-    /// `n` took the client to its new agent, so a popup has nothing left to show.
+    /// `c` took the client to its new agent, so a popup has nothing left to show.
     pub(crate) left: bool,
     recent_event: Option<RecentEvent>,
     pub(crate) list: ListState,
@@ -882,7 +882,7 @@ impl Sidebar {
         matches!(origin, Origin::Sidebar(_)) && self.next_row(&agent.pane).is_some()
     }
 
-    /// While the picker is open it consumes every key: Enter starts, Esc or `n` cancels.
+    /// While the picker is open it consumes every key: Enter starts, Esc or `c` cancels.
     fn new_agent_key(&mut self, key: KeyEvent, origin: Origin<'_>) -> bool {
         if let Some(picker) = &mut self.new_agent {
             match key.code {
@@ -900,17 +900,15 @@ impl Sidebar {
                         Err(error) => self.notice = Some(format!("{error:#}")),
                     }
                 }
-                KeyCode::Esc | KeyCode::Char('n') => self.new_agent = None,
+                KeyCode::Esc | KeyCode::Char('c') => self.new_agent = None,
                 _ => {}
             }
             return true;
         }
-        if key.code != KeyCode::Char('n')
+        if key.code != KeyCode::Char('c')
             || !key.modifiers.is_empty()
             || self.editing.is_some()
             || self.typing_query()
-            // While a search is on, `n` is its next match.
-            || !self.navigation.pattern.is_empty()
             || self.killing.is_some()
         {
             return false;
@@ -1435,10 +1433,8 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
                     hints(&[("^j/^k", "browse"), ("^w ^u", "clear")])
                 } else if sidebar.navigation.jump.is_some() {
                     hints(&[("type", "find a row"), ("^w ^u", "clear")])
-                } else if !sidebar.navigation.pattern.is_empty() {
-                    hints(&[("c", "configure")])
                 } else {
-                    hints(&[("n", "new"), ("c", "configure")])
+                    hints(&[("c", "new"), ("o", "configure")])
                 },
                 footer(sidebar, inner + 2, index::now_ms()),
             ])
@@ -1674,7 +1670,7 @@ mod tests {
     fn new_agent_picker_pins_the_project_and_consumes_its_keys() {
         let mut sidebar = showing(vec![agent("%1", State::Idle)]);
         let selected = sidebar.selected().unwrap().session.clone();
-        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('n')), Origin::Sidebar("%9")));
+        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('c')), Origin::Sidebar("%9")));
         assert_eq!(sidebar.new_agent.as_ref().unwrap().session, selected);
         for code in [KeyCode::Char('x'), KeyCode::Char('q'), KeyCode::Char('?')] {
             assert!(sidebar.new_agent_key(KeyEvent::from(code), Origin::Sidebar("%9")));
@@ -1702,7 +1698,7 @@ mod tests {
     #[test]
     fn new_agent_needs_a_selected_project() {
         let mut sidebar = showing(vec![]);
-        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('n')), Origin::Sidebar("%9")));
+        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('c')), Origin::Sidebar("%9")));
         assert!(sidebar.new_agent.is_none());
         assert!(sidebar.notice.is_some());
     }
@@ -1770,7 +1766,7 @@ mod tests {
                         .collect::<String>()
                 })
                 .collect();
-            assert!(!help.contains("c configure"));
+            assert!(!help.contains("o configure"));
             assert!(!help.contains("? [Y/n]"));
             sidebar.help_key(KeyEvent::from(KeyCode::Char('x')));
             assert!(sidebar.killing.is_some());
@@ -2361,8 +2357,8 @@ mod tests {
         press(&mut sidebar, KeyCode::Enter);
         assert!(sidebar.navigation.jump.is_none());
         let origin = Origin::Sidebar("%9");
-        // The action handler leaves `n` alone while a search is on.
-        assert!(!sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('n')), origin));
+        // `n` only ever goes through matches; it never reaches an action.
+        assert!(!sidebar.action_key(KeyEvent::from(KeyCode::Char('n')), origin));
         for pane in ["%3", "%4", "%2"] {
             press(&mut sidebar, KeyCode::Char('n'));
             assert_eq!(sidebar.selected().unwrap().pane, pane);
@@ -2372,7 +2368,10 @@ mod tests {
         press(&mut sidebar, KeyCode::Esc);
         assert!(sidebar.navigation.pattern.is_empty());
         assert_eq!(sidebar.selected().unwrap().pane, "%4");
-        assert!(sidebar.new_agent_key(KeyEvent::from(KeyCode::Char('n')), origin));
+        // With no search left, `n` does nothing and the selection stays.
+        press(&mut sidebar, KeyCode::Char('n'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%4");
+        assert!(sidebar.new_agent.is_none());
     }
 
     #[test]
@@ -2397,7 +2396,7 @@ mod tests {
         press(&mut sidebar, KeyCode::Backspace);
         assert_eq!(sidebar.selected().unwrap().pane, "%2");
         let origin = Origin::Sidebar("%9");
-        for key in ['x', 'o', 'n', '?'] {
+        for key in ['x', 'o', 'c', '?'] {
             assert!(!sidebar.action_key(KeyEvent::from(KeyCode::Char(key)), origin));
         }
     }

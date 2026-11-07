@@ -736,12 +736,12 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                         ("⏎", "focus"),
                         ("tab", "type to agent"),
                         ("?", "keys"),
-                        ("n", "new"),
+                        ("c", "new"),
                         ("x", "kill"),
                         ("r", "rename"),
                         ("f", "filter"),
                         ("d", "state"),
-                        ("c", "configure"),
+                        ("o", "configure"),
                         ("q", "close"),
                     ])
                 })
@@ -1263,7 +1263,7 @@ mod tests {
         let _ = press(&mut app, KeyCode::Char('k'));
         assert_eq!(selected(&app), "cedar-review");
         assert_eq!(app.sidebar.navigation.query, "cedar");
-        let _ = press(&mut app, KeyCode::Char('n'));
+        let _ = press(&mut app, KeyCode::Char('c'));
         let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         assert!(screen(&terminal).contains("new agent in work"));
@@ -1346,7 +1346,7 @@ mod tests {
         let _ = press(&mut app, KeyCode::Tab);
         assert!(app.talking.is_none());
         let _ = press(&mut app, KeyCode::Esc);
-        let _ = press(&mut app, KeyCode::Char('n'));
+        let _ = press(&mut app, KeyCode::Char('c'));
         let _ = press(&mut app, KeyCode::Tab);
         assert!(app.talking.is_none());
     }
@@ -1560,7 +1560,7 @@ mod tests {
     #[test]
     fn new_agent_prompt_uses_the_footer_and_consumes_keys() {
         let mut app = app();
-        let _ = press(&mut app, KeyCode::Char('n'));
+        let _ = press(&mut app, KeyCode::Char('c'));
         let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         assert!(screen(&terminal).contains("new agent in work"));
