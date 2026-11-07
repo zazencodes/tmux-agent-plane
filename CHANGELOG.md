@@ -7,7 +7,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
-- `/` in the sidebar and agent picker now searches as in Vim: type part of an agent's name or task, ignoring case, and the selection moves there with every row still listed. `Enter` keeps the search, `n`/`N` go through the matches, and `Esc` clears it. `n` starts a new agent again once the search is cleared
+- `/` in the sidebar and agent picker now searches as in Vim: type part of an agent's name or task, ignoring case, and the selection moves there with every row still listed and every match highlighted. `Enter` keeps the search, `n`/`N` go through the matches, and `Esc` clears it. `n` starts a new agent again once the search is cleared
 - Alt+H moves into the sidebar, opening it if needed, and stays there when you are already in it; Alt+L or Shift+Right leaves it for the selected agent. Configure with `@agent-plane-sidebar-in-key` and `@agent-plane-sidebar-out-key`, or bind other keys to the new `enter-sidebar` command
 - Agents you start by hand join a session named after their folder within a second, creating it if needed, and your screen moves with them; a later `move` sticks, and spawned agents stay where they were asked to go
 - When the sidebar or agent picker says the daemon is not running, press `Enter` to restart it; if it cannot start, the reason stays on screen

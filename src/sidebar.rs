@@ -8,7 +8,8 @@ use crate::navigation::{CLIENT_FORMAT, Client, guard_destination, parse_client};
 use crate::tmux;
 use crate::ui::{
     LAVENDER, NO_AGENTS, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, daemon_down,
-    group_colour, hints, icon, message, name_style, panel, rank, state_style, task,
+    group_colour, hints, icon, marked, message, name_style, panel, rank, search_matches,
+    state_style, task, truncate,
 };
 use anyhow::{Context, Result, bail};
 use nucleo_matcher::Matcher;
@@ -214,9 +215,10 @@ pub(crate) struct SearchEdit {
     pane: Option<String>,
 }
 
-/// Whether `/` finds this row: the text shown on it, ignoring case. `pattern` is lowercase.
+/// Whether `/` finds this row: the text shown on it.
 fn jump_matches(agent: &Agent, pattern: &str) -> bool {
-    agent.name.to_lowercase().contains(pattern) || task(agent).0.to_lowercase().contains(pattern)
+    !search_matches(&agent.name, pattern).is_empty()
+        || !search_matches(task(agent).0, pattern).is_empty()
 }
 
 pub(crate) struct Rename {
@@ -707,8 +709,8 @@ impl Sidebar {
             }
             KeyCode::Enter => {
                 self.navigation.jump = None;
-                let pattern = self.navigation.pattern.to_lowercase();
-                if !self.agents.iter().any(|a| jump_matches(a, &pattern)) {
+                let pattern = &self.navigation.pattern;
+                if !self.agents.iter().any(|a| jump_matches(a, pattern)) {
                     self.navigation.pattern.clear();
                 }
                 return;
@@ -731,12 +733,12 @@ impl Sidebar {
         if self.navigation.pattern.is_empty() || self.agents.is_empty() {
             return;
         }
-        let pattern = self.navigation.pattern.to_lowercase();
+        let pattern = &self.navigation.pattern;
         let len = self.agents.len() as isize;
         let from = self.list.selected().unwrap_or(0) as isize;
         let found = (1..=len)
             .map(|step| (from + delta * step).rem_euclid(len) as usize)
-            .find(|row| jump_matches(&self.agents[*row], &pattern));
+            .find(|row| jump_matches(&self.agents[*row], pattern));
         match found {
             Some(row) => self.select(Some(row)),
             None => self.notice = Some("no match".into()),
@@ -1452,15 +1454,6 @@ fn delete_word(name: &mut String) {
     }
 }
 
-fn truncate(s: &str, width: usize) -> String {
-    if s.chars().count() <= width {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(width.saturating_sub(1)).collect();
-    out.push('…');
-    out
-}
-
 fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     if sidebar.help.open {
         sidebar.help.draw(f, f.area());
@@ -1517,6 +1510,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
             selected,
             sidebar.editing.as_ref().map(|edit| &edit.name),
             sidebar.in_use.as_deref(),
+            &sidebar.navigation.pattern,
             inner,
         );
         f.render_stateful_widget(List::new(items), agents_area, &mut sidebar.list);
@@ -1718,6 +1712,7 @@ fn items<'a>(
     selected: Option<usize>,
     editing: Option<&String>,
     in_use: Option<&str>,
+    search: &str,
     width: usize,
 ) -> Vec<ListItem<'a>> {
     let mut session = None;
@@ -1755,21 +1750,26 @@ fn items<'a>(
                         .rev()
                         .take(name_width.saturating_sub(1))
                         .collect();
-                    shown.chars().rev().collect::<String>() + "▏"
+                    vec![Span::styled(
+                        shown.chars().rev().collect::<String>() + "▏",
+                        Style::default()
+                            .fg(colour(State::Done))
+                            .add_modifier(Modifier::UNDERLINED),
+                    )]
                 }
-                None => truncate(&a.name, name_width),
+                None => marked(
+                    &a.name,
+                    name_width,
+                    search,
+                    name_style(a, in_use == Some(a.pane.as_str())),
+                ),
             };
-            let name_style = match renaming {
-                Some(_) => Style::default()
-                    .fg(colour(State::Done))
-                    .add_modifier(Modifier::UNDERLINED),
-                None => name_style(a, in_use == Some(a.pane.as_str())),
-            };
-            let first = Line::from(vec![
+            let mut first = vec![
                 bar.clone(),
                 Span::styled(format!("{} ", icon(a.state)), colour(a.state)),
-                Span::styled(name, name_style),
-            ]);
+            ];
+            first.extend(name);
+            let first = Line::from(first);
             let first = right(first, Span::styled(status, state_style(a.state)), width);
 
             // The window and pane: the session is in the heading.
@@ -1779,11 +1779,9 @@ fn items<'a>(
                 .unwrap_or(&a.location);
             let (task, task_style) = task(a);
             let task_width = width.saturating_sub(place.chars().count() + 6);
-            let second = Line::from(vec![
-                bar,
-                Span::raw("  "),
-                Span::styled(truncate(task, task_width), task_style),
-            ]);
+            let mut second = vec![bar, Span::raw("  ")];
+            second.extend(marked(task, task_width, search, task_style));
+            let second = Line::from(second);
             let second = right(second, Span::styled(format!("{place} "), OVERLAY), width);
 
             for line in [first, second] {
@@ -2701,6 +2699,30 @@ mod tests {
         press(&mut sidebar, KeyCode::Enter);
         press(&mut sidebar, KeyCode::Char('n'));
         assert_eq!(sidebar.selected().unwrap().pane, "%4");
+    }
+
+    #[test]
+    fn every_search_match_lights_up_as_it_is_typed_and_stops_when_cleared() {
+        let lit = |sidebar: &mut Sidebar| -> String {
+            let mut terminal = Terminal::new(TestBackend::new(38, 28)).unwrap();
+            terminal.draw(|frame| draw(frame, sidebar)).unwrap();
+            let buffer = terminal.backend().buffer();
+            (0..28)
+                .flat_map(|y| (0..38).map(move |x| (x, y)))
+                .filter(|(x, y)| buffer[(*x, *y)].bg == crate::ui::SEARCH_MATCH.bg.unwrap())
+                .map(|(x, y)| buffer[(x, y)].symbol())
+                .collect()
+        };
+        let mut sidebar = searchable();
+        assert_eq!(lit(&mut sidebar), "");
+        type_jump(&mut sidebar, "CEDA");
+        // Two names and one task, on rows above and below the selection.
+        assert_eq!(lit(&mut sidebar), "CedaCEDAceda");
+        press(&mut sidebar, KeyCode::Enter);
+        press(&mut sidebar, KeyCode::Char('n'));
+        assert_eq!(lit(&mut sidebar), "CedaCEDAceda");
+        press(&mut sidebar, KeyCode::Esc);
+        assert_eq!(lit(&mut sidebar), "");
     }
 
     #[test]

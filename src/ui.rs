@@ -15,7 +15,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 use std::collections::BTreeSet;
-use std::ops::ControlFlow;
+use std::ops::{ControlFlow, Range};
 use std::time::{Duration, Instant};
 
 const REFRESH: Duration = Duration::from_millis(500);
@@ -598,23 +598,31 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
         .enumerate()
         .map(|(i, a)| {
             let is_selected = selected == Some(i);
-            let name = match renaming.as_ref().filter(|_| is_selected) {
-                Some(typed) => Span::styled(
+            let search = &sidebar.navigation.pattern;
+            let (task, task_style) = task(a);
+            let mut spans = vec![
+                Span::styled(if is_selected { "▌" } else { " " }, colour(a.state)),
+                Span::styled(format!("{} ", icon(a.state)), colour(a.state)),
+            ];
+            match renaming.as_ref().filter(|_| is_selected) {
+                Some(typed) => spans.push(Span::styled(
                     format!("{typed:<name_width$}  "),
                     Style::default()
                         .fg(colour(State::Done))
                         .add_modifier(Modifier::UNDERLINED),
-                ),
-                None => Span::styled(
-                    format!("{:<name_width$}  ", a.name),
-                    name_style(a, a.visible),
-                ),
-            };
-            let (task, task_style) = task(a);
-            let mut line = Line::from(vec![
-                Span::styled(if is_selected { "▌" } else { " " }, colour(a.state)),
-                Span::styled(format!("{} ", icon(a.state)), colour(a.state)),
-                name,
+                )),
+                None => {
+                    spans.extend(marked(
+                        &a.name,
+                        usize::MAX,
+                        search,
+                        name_style(a, a.visible),
+                    ));
+                    let pad = name_width.saturating_sub(a.name.chars().count()) + 2;
+                    spans.push(Span::raw(" ".repeat(pad)));
+                }
+            }
+            spans.extend([
                 Span::styled(
                     format!("{:<7} {:>4}  ", a.state.as_str(), age(a.state_since)),
                     state_style(a.state),
@@ -624,8 +632,9 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                     group_colour(&sidebar.all_agents, &a.session),
                 ),
                 Span::styled(format!("{:<place_width$}  ", place(a)), OVERLAY),
-                Span::styled(task.to_string(), task_style),
             ]);
+            spans.extend(marked(task, usize::MAX, search, task_style));
+            let mut line = Line::from(spans);
             if is_selected {
                 line = fill(line, row_width).style(Style::default().bg(Color::DarkGray));
             }
@@ -760,6 +769,10 @@ pub(crate) const OVERLAY: Color = Color::Rgb(0x6c, 0x70, 0x86);
 pub(crate) const SURFACE2: Color = Color::Rgb(0x58, 0x5b, 0x70);
 pub(crate) const SURFACE0: Color = Color::Rgb(0x31, 0x32, 0x44);
 pub(crate) const LAVENDER: Color = Color::Rgb(0xb4, 0xbe, 0xfe);
+/// Dark text on yellow, as Vim highlights a search.
+pub(crate) const SEARCH_MATCH: Style = Style::new()
+    .fg(Color::Rgb(0x1e, 0x1e, 0x2e))
+    .bg(Color::Rgb(0xf9, 0xe2, 0xaf));
 
 /// A rounded, quiet frame with a bold title.
 pub(crate) fn panel(title: Line<'_>) -> Block<'_> {
@@ -767,6 +780,70 @@ pub(crate) fn panel(title: Line<'_>) -> Block<'_> {
         .border_type(BorderType::Rounded)
         .border_style(SURFACE2)
         .title(title.style(Style::default().fg(TEXT).bold()))
+}
+
+pub(crate) fn truncate(s: &str, width: usize) -> String {
+    if s.chars().count() <= width {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(width.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+/// Where the `/` search finds `pattern` in `text`, ignoring case, as character ranges.
+pub(crate) fn search_matches(text: &str, pattern: &str) -> Vec<Range<usize>> {
+    let fold = |s: &str| -> Vec<char> {
+        s.chars()
+            .map(|c| c.to_lowercase().next().unwrap_or(c))
+            .collect()
+    };
+    let (text, pattern) = (fold(text), fold(pattern));
+    let mut found = Vec::new();
+    let mut at = 0;
+    while !pattern.is_empty() && at + pattern.len() <= text.len() {
+        if text[at..at + pattern.len()] == pattern[..] {
+            found.push(at..at + pattern.len());
+            at += pattern.len();
+        } else {
+            at += 1;
+        }
+    }
+    found
+}
+
+/// `text` cut to `width`, with every match of the `/` search highlighted. A match the cut hides
+/// lights up the `…`, so each matching row shows it.
+pub(crate) fn marked(text: &str, width: usize, pattern: &str, style: Style) -> Vec<Span<'static>> {
+    let shown: Vec<char> = truncate(text, width).chars().collect();
+    let visible = if text.chars().count() <= width {
+        shown.len()
+    } else {
+        shown.len().saturating_sub(1)
+    };
+    let piece = |range: Range<usize>| shown[range].iter().collect::<String>();
+    let mut spans = Vec::new();
+    let mut at = 0;
+    for found in search_matches(text, pattern) {
+        let start = found.start.min(visible);
+        if start < at {
+            break;
+        }
+        let end = if found.end > visible {
+            shown.len()
+        } else {
+            found.end
+        };
+        if start > at {
+            spans.push(Span::styled(piece(at..start), style));
+        }
+        spans.push(Span::styled(piece(start..end), SEARCH_MATCH));
+        at = end;
+    }
+    if at < shown.len() {
+        spans.push(Span::styled(piece(at..shown.len()), style));
+    }
+    spans
 }
 
 /// The state style for an agent's status: blocked and done are bold, they want you.
@@ -876,6 +953,50 @@ fn centred(f: &mut Frame, area: Rect, block: Block, lines: Vec<Line>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_matches_ignore_case_and_do_not_overlap() {
+        assert_eq!(search_matches("Cedar cEDAR", "ceda"), [0..4, 6..10]);
+        assert_eq!(search_matches("aaaa", "aa"), [0..2, 2..4]);
+        assert!(search_matches("cedar", "").is_empty());
+        assert!(search_matches("ced", "cedar").is_empty());
+    }
+
+    #[test]
+    fn marked_highlights_every_match_and_a_cut_one_on_its_ellipsis() {
+        let text = |spans: &[Span]| -> Vec<(String, bool)> {
+            spans
+                .iter()
+                .map(|s| (s.content.to_string(), s.style == SEARCH_MATCH))
+                .collect()
+        };
+        let plain = Style::default();
+        let lit = |s: &str, on| (s.to_string(), on);
+        assert_eq!(
+            text(&marked("a Cedar b cedar", 99, "cedar", plain)),
+            [
+                lit("a ", false),
+                lit("Cedar", true),
+                lit(" b ", false),
+                lit("cedar", true)
+            ]
+        );
+        assert_eq!(text(&marked("abc", 99, "zz", plain)), [lit("abc", false)]);
+        // Cut through the match, and wholly behind the cut.
+        assert_eq!(
+            text(&marked("abcdefgh", 4, "cde", plain)),
+            [lit("ab", false), lit("c…", true)]
+        );
+        assert_eq!(
+            text(&marked("abcdefgh", 4, "gh", plain)),
+            [lit("abc", false), lit("…", true)]
+        );
+        // Several behind the cut still light it once.
+        assert_eq!(
+            text(&marked("abcdxxyx", 4, "x", plain)),
+            [lit("abc", false), lit("…", true)]
+        );
+    }
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -1306,6 +1427,31 @@ mod tests {
             press(&mut app, KeyCode::Esc),
             ControlFlow::Break(None)
         ));
+    }
+
+    #[test]
+    fn every_search_match_lights_up_as_it_is_typed() {
+        let mut app = app();
+        let _ = press(&mut app, KeyCode::Char('/'));
+        for c in "CEDAR".chars() {
+            let _ = press(&mut app, KeyCode::Char(c));
+        }
+        let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let lit = (0..buffer.area.height)
+            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+            .filter(|(x, y)| buffer[(*x, *y)].bg == SEARCH_MATCH.bg.unwrap())
+            .map(|(x, y)| buffer[(x, y)].symbol())
+            .collect::<String>();
+        let matching = app
+            .sidebar
+            .agents
+            .iter()
+            .filter(|a| a.name.contains("cedar"))
+            .count();
+        assert!(matching > 0);
+        assert_eq!(lit, "cedar".repeat(matching));
     }
 
     #[test]
