@@ -454,12 +454,6 @@ fn event_loop(terminal: &mut DefaultTerminal, client: &str, search: bool) -> Res
                     if let ControlFlow::Break(jump) = app.key(key) {
                         return Ok(jump);
                     }
-                    if let Some(order) = app.sidebar.unsent_order.take() {
-                        // On screen first: the daemon's control thread answers within its poll
-                        // interval.
-                        terminal.draw(|f| draw(f, &mut app))?;
-                        app.sidebar.send_order(&order);
-                    }
                     if app.sidebar.restarting {
                         terminal.draw(|f| draw(f, &mut app))?;
                         app.sidebar.restart_daemon(Origin::Popup(&app.client));
@@ -748,7 +742,6 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                         ("o", "organize"),
                         ("f", "filter"),
                         ("d", "state"),
-                        ("s", "sort"),
                         ("c", "configure"),
                         ("q", "close"),
                     ])

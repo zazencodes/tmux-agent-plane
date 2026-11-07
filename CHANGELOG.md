@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Removed
+
+- The `s` re-sort key and attention sorting: rows stay in a stable order, with new agents added at the end of their session
+
 ### Added
 
 - `/` in the sidebar and agent picker now searches as in Vim: type part of an agent's name or task, ignoring case, and the selection moves there with every row still listed and every match highlighted. `Enter` keeps the search, `n`/`N` go through the matches, and `Esc` or `Ctrl-C` clears it. `n` starts a new agent again once the search is cleared

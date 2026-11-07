@@ -153,27 +153,6 @@ pub struct WindowView {
     pub sidebar: Option<String>,
 }
 
-/// Pane ids by attention, per session: blocked, done, working, idle, longest in state first.
-pub fn rank(agents: &[Agent]) -> Vec<String> {
-    let attention = |state| match state {
-        State::Blocked => 0,
-        State::Done => 1,
-        State::Working => 2,
-        State::Idle => 3,
-    };
-    let mut agents: Vec<_> = agents.iter().collect();
-    agents.sort_by_key(|a| {
-        (
-            &a.session,
-            attention(a.state),
-            a.state_since,
-            &a.location,
-            &a.pane,
-        )
-    });
-    agents.into_iter().map(|a| a.pane.clone()).collect()
-}
-
 pub const EVENT_LIFETIME_MS: u64 = 5_000;
 
 /// Only states that warrant a transition notification may appear in the footer.

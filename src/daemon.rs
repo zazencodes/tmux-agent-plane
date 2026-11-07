@@ -13,7 +13,6 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::os::fd::AsRawFd;
 use std::process::Command;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -23,17 +22,10 @@ const TICK: Duration = Duration::from_secs(1);
 const STATUS_OPTION: &str = "@agent_plane_status";
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
-/// The row order a sidebar's `s` asked for, adopted by the next tick.
-static REQUESTED_ORDER: Mutex<Option<Vec<String>>> = Mutex::new(None);
 
 /// Called by the lifecycle worker's signal/control handlers.
 pub fn request_shutdown() {
     SHUTDOWN.store(true, Ordering::Relaxed);
-}
-
-/// Called by the lifecycle control handler. A tick that starts after this returns adopts `order`.
-pub fn request_order(order: Vec<String>) {
-    *REQUESTED_ORDER.lock().expect("order lock") = Some(order);
 }
 
 /// Persist and surface a fatal daemon/lifecycle error without desktop notification recursion.
@@ -114,9 +106,8 @@ fn run_inner() -> Result<()> {
             return Ok(());
         }
         // Stamp the index before reading anything, so `updated_at` never postdates what it says:
-        // a sidebar compares it with the moment of a key press or an acknowledged sort.
+        // a sidebar compares it with the moment of a key press.
         let now = index::now_ms();
-        let requested_order = REQUESTED_ORDER.lock().expect("order lock").take();
         let (panes, geometry) = tmux::snapshot().context("listing tmux panes")?;
         let before = prev.clone();
         let batch = fold(&mut prev, detect::detect(&panes)?, &panes, now);
@@ -128,7 +119,7 @@ fn run_inner() -> Result<()> {
             auto_name_issues = crate::autoname::tick(&mut auto_name, &agents, &panes, now);
         }
         issues.extend(auto_name_issues.clone());
-        order = next_order(order, requested_order, &agents, &panes);
+        order = next_order(order, &agents, &panes);
         last_agent = last_used(last_agent, &before, &agents, &panes);
         recent_event = recent_event.filter(|event| event.is_live(now));
         for agent in &agents {
@@ -196,18 +187,9 @@ fn windows(panes: &[tmux::Pane]) -> Vec<WindowView> {
 }
 
 /// Rows never move: arrivals append. A live pane keeps its place while its agent is away, so an
-/// agent withdrawn by a brief scan fault returns to the same row. Only `s` rewrites the list.
-fn next_order(
-    current: Vec<String>,
-    requested: Option<Vec<String>>,
-    agents: &[Agent],
-    panes: &[tmux::Pane],
-) -> Vec<String> {
-    let mut order = requested.unwrap_or(current);
+/// agent withdrawn by a brief scan fault returns to the same row.
+fn next_order(mut order: Vec<String>, agents: &[Agent], panes: &[tmux::Pane]) -> Vec<String> {
     order.retain(|pane| panes.iter().any(|p| &p.id == pane));
-    if order.is_empty() {
-        return index::rank(agents);
-    }
     for agent in agents {
         if !order.contains(&agent.pane) {
             order.push(agent.pane.clone());
@@ -670,39 +652,26 @@ mod tests {
     }
 
     #[test]
-    fn order_starts_ranked_appends_arrivals_keeps_withdrawn_and_only_s_rewrites() {
+    fn order_appends_arrivals_keeps_withdrawn_and_forgets_closed_panes() {
         let idle = agent_in("%1", RawState::Idle, 0);
         let blocked = agent_in("%2", RawState::Blocked, 0);
         let live = panes(&["%1", "%2", "%3"]);
-        let order = next_order(Vec::new(), None, &[idle.clone(), blocked.clone()], &live);
-        assert_eq!(order, ["%2", "%1"]);
+        let order = next_order(Vec::new(), &[idle.clone(), blocked.clone()], &live);
+        assert_eq!(order, ["%1", "%2"]);
         // A state change never moves a row.
         let now_blocked = agent_in("%1", RawState::Blocked, 0);
-        let order = next_order(order, None, &[now_blocked.clone(), blocked.clone()], &live);
-        assert_eq!(order, ["%2", "%1"]);
+        let order = next_order(order, &[now_blocked, blocked.clone()], &live);
+        assert_eq!(order, ["%1", "%2"]);
         // Arrivals append, whatever their state.
         let arrival = agent_in("%3", RawState::Blocked, 0);
-        let order = next_order(
-            order,
-            None,
-            &[idle.clone(), blocked.clone(), arrival.clone()],
-            &live,
-        );
-        assert_eq!(order, ["%2", "%1", "%3"]);
+        let order = next_order(order, &[idle.clone(), blocked, arrival.clone()], &live);
+        assert_eq!(order, ["%1", "%2", "%3"]);
         // Withdrawn by a fault with its pane alive: keeps its place, and returns to it.
-        let order = next_order(order, None, std::slice::from_ref(&arrival), &live);
-        assert_eq!(order, ["%2", "%1", "%3"]);
-        // `s` replaces the list; agents the request does not know still append.
-        let order = next_order(
-            order,
-            Some(vec!["%3".into(), "%1".into()]),
-            &[blocked, arrival],
-            &live,
-        );
-        assert_eq!(order, ["%3", "%1", "%2"]);
+        let order = next_order(order, std::slice::from_ref(&arrival), &live);
+        assert_eq!(order, ["%1", "%2", "%3"]);
         // A closed pane is forgotten: tmux never reuses its id within a server.
-        let order = next_order(order, None, &[idle], &panes(&["%1", "%3"]));
-        assert_eq!(order, ["%3", "%1"]);
+        let order = next_order(order, &[idle], &panes(&["%1", "%3"]));
+        assert_eq!(order, ["%1", "%3"]);
     }
 
     #[test]

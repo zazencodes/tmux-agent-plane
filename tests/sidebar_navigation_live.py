@@ -85,10 +85,12 @@ def index():
     return json.loads((STATE / "agents.json").read_text())
 
 
-def ranked_names():
-    priority = {"blocked": 0, "done": 1, "working": 2, "idle": 3}
-    return [a["name"] for a in sorted(index()["agents"], key=lambda a: (
-        a["session"], priority[a["state"]], a["state_since"], a["location"], a["pane"]))]
+def listed_names():
+    """Names in the published order, grouped under their sessions as the rows are."""
+    snapshot = index()
+    agents = {a["pane"]: a for a in snapshot["agents"]}
+    listed = [agents[pane] for pane in snapshot["order"] if pane in agents]
+    return [a["name"] for a in sorted(listed, key=lambda a: a["session"])]
 
 
 def agent(name):
@@ -632,42 +634,6 @@ def assert_lone_sidebar_closes():
     assert "sidebar:close" not in (STATE / "daemon.log").read_text()
 
 
-def assert_sort_everywhere(client, names):
-    # One press: on screen at once, never undone while the daemon catches up, then everywhere.
-    sidebar = client.context()[1]
-    selection = client.selected()
-    change("nav-work", "blocked", 0)
-    # `s` sorts what is on screen, so wait for the badge rather than the index.
-    wait("new attention", lambda: any("nav-work" in line and "blocked" in line
-                                      for line in client.text().splitlines()))
-    before = shown_names(client)
-    expected = ranked_names()
-    assert expected != before, expected
-    pressed = time.monotonic()
-
-    def press():
-        client.key(b"s")
-        return lambda: time.monotonic() > pressed + 2.5
-
-    screens = screens_during(client, press, 0)
-    (ROOT / "sort-frames.json").write_text(json.dumps(screens, indent=2) + "\n")
-    first = next(i for i, screen in enumerate(screens) if screen[2] == expected)
-    assert all(screen[2] == expected for screen in screens[first:]), screens
-    assert client.selected() == selection
-    panes = [agent(name)["pane"] for name in expected]
-    wait("daemon publishes the order", lambda: index()["order"] == panes)
-    assert_sidebars_agree_on_arrival(client, names)
-    tmux("switch-client", "-c", client.context()[0], "-t", sidebar)
-    wait("back after sort", lambda: client.context()[1] == sidebar)
-    assert shown_names(client) == expected
-    # Back to the states the rest of this proof starts from.
-    change("nav-work", "working", 0)
-    wait("working again", lambda: any("nav-work" in line and "working" in line
-                                      for line in client.text().splitlines()))
-    client.key(b"s")
-    wait("sorted again", lambda: shown_names(client) == ranked_names())
-
-
 def assert_idle_runs_only_the_daemon(seconds=10):
     # Windows full of sidebars, nothing changing: all that runs is the daemon's one snapshot.
     settle(2.5)
@@ -764,8 +730,6 @@ def extra_checks(client):
     tmux('switch-client', '-c', client.context()[0], '-t', base_sidebar)
     wait('stable base sidebar', lambda: client.context()[1] == base_sidebar and 'd all' in client.text())
     query(client, '')
-    client.key(b's')
-    wait('initial attention ranking', lambda: shown_names(client) == ranked_names())
     initial = shown_names(client)
     # New blocked priority must update its badge while leaving its original row in place.
     change('nav-idle', 'blocked', 0)
@@ -779,17 +743,12 @@ def extra_checks(client):
     before_age = idle_badge()
     settle(1.1)
     assert shown_names(client) == initial and idle_badge() != before_age
-    client.snapshot('sort-latched-live-badges')
-    # Oldest blocked in this session ranks first, independent of tmux location.
+    client.snapshot('fixed-rows-live-badges')
     change('nav-done', 'blocked', 3)
     wait('second blocked', lambda: agent('nav-done')['state'] == 'blocked')
     assert shown_names(client) == initial
     selection = client.selected()
-    client.key(b's')
-    wait('explicit S ranks oldest blocked', lambda: shown_names(client) == ranked_names())
-    assert client.selected() == selection
-    expected = shown_names(client)
-    assert expected.index('nav-idle') < expected.index('nav-done')
+    expected = initial
     change('nav-work', 'working', 0)
     wait('working badge stays latched', lambda: agent('nav-work')['state'] == 'working' and
          any('nav-work' in line and 'working' in line for line in client.text().splitlines()))
@@ -802,7 +761,7 @@ def extra_checks(client):
     wait('fresh keyboard visit', lambda: client.context()[1] == base_sidebar)
     settle(0.7)
     assert shown_names(client) == expected
-    client.snapshot('sort-unfocused-and-reentry')
+    client.snapshot('unfocused-and-reentry')
     plane('spawn', 'pi', '--in', 'window', '--session', 'scratch', '--cwd', str(ROOT), '--name', 'nav-new')
     SPAWNED.append('nav-new')
     plane('follow-sidebar', agent('nav-new')['window'])
@@ -829,7 +788,7 @@ def extra_checks(client):
     client.key(b'd')  # Idle is empty; deliberate F skips it and returns to All.
     wait('filtered preview returns to all rows', lambda: 'd all' in client.text() and
          shown_names(client) == expected)
-    client.snapshot('sort-preview-order')
+    client.snapshot('preview-order')
     assert client.context()[1] == base_sidebar, 'the previewing sidebar travels with the client'
     # The sidebar it swapped with now sits in the base window, with its own settings.
     base_sidebar = sidebar_pane(base_window)
@@ -844,7 +803,7 @@ def extra_checks(client):
     context = client.context()
     # Every command class cancels and consumes its key. No movement, mode/filter/query,
     # rename or close action may be replayed after the confirmation disappears.
-    for cancel in [b'n', b'\x1b', b'j', b'\x1b[B', b'G', b'd', b'f', b's', b'r', b'q', b'x', b'Y', b'/', b'\x19']:
+    for cancel in [b'n', b'\x1b', b'j', b'\x1b[B', b'G', b'd', b'f', b'c', b'r', b'q', b'x', b'Y', b'/', b'\x19']:
         client.key(b'x')
         wait('kill prompt', lambda: '? [Y/n]' in client.text())
         client.key(cancel)
@@ -902,7 +861,6 @@ def extra_checks(client):
     # No query: kill successive rows in one PTY burst; selection advances immediately,
     # even while the daemon still contains a just-closed pane.
     query(client, '')
-    client.key(b's')
     settle(0.25)
     names = shown_names(client)
     # Keep nav-idle for the original rename-exit proof. Select an adjacent pair that
@@ -1025,8 +983,8 @@ def extra_checks(client):
     wait('narrow cancelled', lambda: '? [Y/n]' not in client.text())
     tmux('resize-pane', '-t', client.context()[1], '-x', '38')
     assert not any(json.loads(line)[0] == 'kill-session' for line in (ROOT / 'tmux.calls').read_text().splitlines())
-    return {'latched_sort_live_badges': True, 'oldest_state_first': True,
-            'arrivals_removals': True, 'unfocused_and_reentry_rank': True, 'S_preserves_selection': True, 'search_v_keeps_order': True, 'V_search_F_combination': True,
+    return {'fixed_rows_live_badges': True,
+            'arrivals_removals': True, 'unfocused_and_reentry_order': True, 'search_v_keeps_order': True, 'V_search_F_combination': True,
             'kill_cancel_without_replay': True, 'kill_native_state_identity_rename_exit_pin': True,
             'kill_x_Enter_x_Enter_next_visible': True, 'kill_remote_y': True, 'kill_topology_change_pin': True,
             'kill_linked_sessions': True, 'kill_client_session_change_pin': True, 'kill_attached_final_refusal': True, 'kill_session_commands': 0}
@@ -1079,15 +1037,12 @@ try:
         RESULTS = {"passed": True, **fuzzy_results}
         sys.exit(0)
     start_sidebar = client.context()[1]
-    client.key(b"s")
-    wait("attention order", lambda: shown_names(client) == ranked_names())
     assert_sidebars_agree_on_arrival(client, ["nav-work", "nav-idle", "nav-away"])
     hop_screens = assert_quick_hops(client, ["nav-work", "nav-idle", "nav-away"])
     idle_calls = assert_idle_runs_only_the_daemon()
     tmux("switch-client", "-c", client.context()[0], "-t", start_sidebar)
     wait("in the first sidebar", lambda: client.context()[1] == start_sidebar)
     selected(client, "nav-away")  # the last agent used
-    assert_sort_everywhere(client, ["nav-work", "nav-idle", "nav-away"])
     selected(client, "nav-away")  # the last agent used
     original = client.context()
     client.key(b"j")
@@ -1103,7 +1058,7 @@ try:
     client.key(b"\x1b")
     wait("query cleared before burst", lambda: "f filter" in client.text())
     selected(client, "nav-work")
-    ordered = ranked_names()
+    ordered = listed_names()
     expected = ordered[(ordered.index("nav-work") + 3) % len(ordered)]
     client.key(b"jjj")
     previewed(client, expected)
@@ -1358,7 +1313,7 @@ try:
     assert not any(call[0] in ("copy-mode", "clock-mode") for call in calls)
     RESULTS = {**extended_results, **fuzzy_results, "passed": True, "native_fixtures": len(FIXTURES), "models_used": 0,
         "quick_hop_screens": hop_screens, "idle_commands_in_10s": idle_calls, "lone_sidebar_closes": True,
-        "left_windows_restored_without_input": True, "sort_everywhere_without_snap_back": True,
+        "left_windows_restored_without_input": True,
         "same_window": True, "cross_window_and_session": True, "gg_and_G_preview": True, "Enter_opens_from_search": True,
         "burst_jjj_exact_net_movement": True, "timed_stream_seven_j_exact_net_movement": True,
         "arrow_selection_identity": True, "timed_mixed_text_arrows_backspace_order": True,

@@ -10,7 +10,7 @@ The sidebar mixed lowercase action keys (`q`, `r`, `j`, `k`, `x`) with uppercase
 
 Every tmux-agent-plane key binding in the sidebar and popup is a lowercase letter or a symbol such as `/`. We do not bind uppercase letters or Shift chords. A new key takes the next free lowercase letter.
 
-The sidebar keys are `v` (view mode), `f` (state filter), `s` (re-sort), `/` (search), `r` (rename), `x` (kill), `j`/`k` (move) and `q` (quit).
+The sidebar keys are `v` (view mode), `f` (state filter), `/` (search), `r` (rename), `x` (kill), `j`/`k` (move) and `q` (quit).
 
 ## Consequences
 

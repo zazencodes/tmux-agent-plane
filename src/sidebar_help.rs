@@ -17,7 +17,6 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("^j ^k", "Move selection or in filter"),
     ("enter", "Open, even from filter / save"),
     ("enter", "Daemon down: restart it"),
-    ("s", "Re-sort agents"),
     ("/", "Search rows; enter keeps it"),
     ("n N", "Next/prev match; else n new"),
     ("f", "Filter rows; / freezes it"),

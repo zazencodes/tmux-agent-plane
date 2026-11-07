@@ -442,10 +442,6 @@ pub(crate) struct Sidebar {
     new_agent: Option<NewAgent>,
     /// Hide successfully closed panes until the daemon has removed them from the index.
     closed: HashSet<String>,
-    /// The order `s` chose, on its way to the daemon.
-    pub(crate) unsent_order: Option<Vec<String>>,
-    /// When the daemon acknowledged that order: older indexes must not undo it on screen.
-    sorted_at: Option<u64>,
     /// A client is viewing this sidebar with the keyboard in it: its selection is theirs.
     steering: bool,
     /// The agent active in this sidebar's window, shown in bold. Known while the window is hidden,
@@ -517,14 +513,6 @@ impl Sidebar {
             .map(|agent| agent.pane.clone());
     }
 
-    /// Show the new order at once, ahead of the daemon that publishes it to every sidebar.
-    fn resort(&mut self) {
-        let order = index::rank(&self.all_agents);
-        self.navigation.order = order.clone();
-        self.unsent_order = Some(order);
-        self.rebuild();
-    }
-
     pub(crate) fn refresh(&mut self, origin: Origin<'_>) {
         match index::read() {
             Ok(index) => self.apply(index, origin),
@@ -557,11 +545,7 @@ impl Sidebar {
         self.organize_status = index.organize;
         self.error = None;
         self.restart_failure = None;
-        // Any tick stamped after the acknowledgement has adopted the order `s` sent.
-        if self.sorted_at.is_none_or(|at| index.updated_at > at) {
-            self.sorted_at = None;
-            self.navigation.order = index.order;
-        }
+        self.navigation.order = index.order;
         self.rebuild();
         // An index stamped before the last key cannot know the keyboard is here.
         if let Origin::Sidebar(own) = origin
@@ -1053,14 +1037,6 @@ impl Sidebar {
         }
     }
 
-    /// Hand the order `s` chose to the daemon, which publishes it to every list.
-    pub(crate) fn send_order(&mut self, order: &[String]) {
-        match lifecycle::set_order(order) {
-            Ok(()) => self.sorted_at = Some(index::now_ms()),
-            Err(error) => self.notice = Some(format!("{error:#}")),
-        }
-    }
-
     fn help_key(&mut self, key: KeyEvent) -> bool {
         self.help.key(
             key,
@@ -1110,7 +1086,6 @@ impl Sidebar {
                 self.navigation.cycle_filter(&matches);
                 self.rebuild();
             }
-            KeyCode::Char('s') => self.resort(),
             KeyCode::Char('f') => self.start_search(),
             KeyCode::Char('/') => self.start_jump(),
             // The search first, then every filter, back to the whole list.
@@ -1384,11 +1359,6 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             if focus || !event::poll(Duration::ZERO)? {
                 break;
             }
-        }
-        if let Some(order) = sidebar.unsent_order.take() {
-            // On screen first: the daemon's control thread answers within its poll interval.
-            screen.show(&mut sidebar)?;
-            sidebar.send_order(&order);
         }
         if sidebar.restarting {
             screen.show(&mut sidebar)?;
@@ -1680,7 +1650,7 @@ fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
                     colour(state),
                 )
             }
-            None => hints(&[("⏎", "jump"), ("s", "sort"), ("x", "kill"), ("?", "keys")]),
+            None => hints(&[("⏎", "jump"), ("x", "kill"), ("?", "keys")]),
         }
     })
 }
@@ -2097,11 +2067,11 @@ mod tests {
         }
     }
 
-    /// A sidebar showing `agents` in the order the daemon first publishes.
+    /// A sidebar showing `agents` in the order given.
     fn showing(agents: Vec<Agent>) -> Sidebar {
         let mut sidebar = Sidebar {
             navigation: Navigation {
-                order: index::rank(&agents),
+                order: agents.iter().map(|a| a.pane.clone()).collect(),
                 ..Navigation::default()
             },
             all_agents: agents,
@@ -2219,9 +2189,9 @@ mod tests {
     #[test]
     fn selection_priority_and_identity() {
         let mut sidebar = showing(vec![
-            agent("%1", State::Working),
-            agent("%2", State::Done),
             agent("%3", State::Blocked),
+            agent("%2", State::Done),
+            agent("%1", State::Working),
         ]);
         assert_eq!(sidebar.navigation.pane.as_deref(), Some("%3"));
         press(&mut sidebar, KeyCode::Down);
@@ -2347,44 +2317,6 @@ mod tests {
         assert_eq!(order(&sidebar), ["%3", "%2", "%1"]);
         assert_eq!(sidebar.agents[0].state, State::Idle);
         assert_eq!(sidebar.selected().unwrap().pane, "%2");
-        // Another sidebar's `s` arrives through the index.
-        sidebar.apply(
-            index_at(3, &agents, &["%1", "%2", "%3"]),
-            Origin::Sidebar("%9"),
-        );
-        assert_eq!(order(&sidebar), ["%1", "%2", "%3"]);
-        assert_eq!(sidebar.selected().unwrap().pane, "%2");
-    }
-
-    #[test]
-    fn s_shows_at_once_and_older_indexes_never_snap_it_back() {
-        let mut agents = vec![agent("%1", State::Idle), agent("%2", State::Blocked)];
-        let mut sidebar = showing(agents.clone());
-        sidebar.apply(index_at(1, &agents, &["%1", "%2"]), Origin::Sidebar("%9"));
-        sidebar.select(Some(0));
-        press(&mut sidebar, KeyCode::Char('s'));
-        assert_eq!(order(&sidebar), ["%2", "%1"]);
-        assert_eq!(sidebar.selected().unwrap().pane, "%1");
-        assert_eq!(
-            sidebar.unsent_order.take().as_deref(),
-            Some(&["%2".to_string(), "%1".to_string()][..])
-        );
-        // Acknowledged at 100. Every tick up to then may have read the old order.
-        sidebar.sorted_at = Some(100);
-        for updated_at in [50, 100] {
-            agents[0].state = State::Working;
-            sidebar.apply(
-                index_at(updated_at, &agents, &["%1", "%2"]),
-                Origin::Sidebar("%9"),
-            );
-            assert_eq!(order(&sidebar), ["%2", "%1"]);
-        }
-        assert_eq!(sidebar.agents[1].state, State::Working); // Badges still update.
-        // The first tick after it has the sort; from then on the index rules again.
-        sidebar.apply(index_at(101, &agents, &["%2", "%1"]), Origin::Sidebar("%9"));
-        assert_eq!(sidebar.sorted_at, None);
-        sidebar.apply(index_at(102, &agents, &["%1", "%2"]), Origin::Sidebar("%9"));
-        assert_eq!(order(&sidebar), ["%1", "%2"]);
     }
 
     #[test]
@@ -2544,7 +2476,7 @@ mod tests {
         sidebar.rebuild();
         assert_eq!(order(&sidebar), ["%3", "%2", "%1", "%4"]);
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
-        assert!(footer(&sidebar, 38, 100).to_string().contains("sort"));
+        assert!(footer(&sidebar, 38, 100).to_string().contains("kill"));
     }
 
     #[test]

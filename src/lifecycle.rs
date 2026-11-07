@@ -106,12 +106,6 @@ fn request(path: &Path, command: &str) -> Result<()> {
     Ok(())
 }
 
-/// Hand the daemon the row order chosen by a sidebar's `s`. Once this returns, any tick stamped
-/// later publishes it.
-pub fn set_order(order: &[String]) -> Result<()> {
-    request(&socket_path()?, &format!("order {}", order.join(" ")))
-}
-
 /// Queue a manual background organization job with the configuration the user confirmed.
 pub fn organize(settings: &crate::autoname_config::Config) -> Result<()> {
     request(
@@ -342,12 +336,7 @@ fn control_loop(listener: UnixListener, done: &AtomicBool) -> Result<()> {
                         diagnostics::record("lifecycle", "graceful stop requested")?;
                         daemon::request_shutdown();
                     }
-                    request => match request.strip_prefix("order ") {
-                        Some(order) => daemon::request_order(
-                            order.split_whitespace().map(String::from).collect(),
-                        ),
-                        None => bail!("unknown daemon control request: {command:?}"),
-                    },
+                    _ => bail!("unknown daemon control request: {command:?}"),
                 }
                 socket.write_all(b"ok")?;
             }

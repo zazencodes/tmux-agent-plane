@@ -299,8 +299,6 @@ try:
         client.key(b'd')
         time.sleep(.15)
     wait('filter off', lambda: 'agents · ' not in client.text())
-    client.key(b's')
-    time.sleep(.2)
     assert 'j/k browse' in client.text()
     client.key(b'o')
     wait('organize refuses without configured AI', lambda: 'j/k browse' not in client.text())
