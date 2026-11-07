@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(50);
-/// Room for a row order of about ten thousand panes.
-const REQUEST_LIMIT: u64 = 64 * 1024;
+/// Requests are single short words.
+const REQUEST_LIMIT: u64 = 64;
 static SIGNAL: AtomicI32 = AtomicI32::new(0);
 
 #[derive(Clone, Copy, Subcommand)]
@@ -104,14 +104,6 @@ fn request(path: &Path, command: &str) -> Result<()> {
         bail!("daemon control failed: {response}");
     }
     Ok(())
-}
-
-/// Queue a manual background organization job with the configuration the user confirmed.
-pub fn organize(settings: &crate::autoname_config::Config) -> Result<()> {
-    request(
-        &socket_path()?,
-        &format!("organize {}", serde_json::to_string(settings)?),
-    )
 }
 
 fn control(action: Action) -> Result<()> {
@@ -319,17 +311,6 @@ fn control_loop(listener: UnixListener, done: &AtomicBool) -> Result<()> {
                 (&mut socket)
                     .take(REQUEST_LIMIT)
                     .read_to_string(&mut command)?;
-                if let Some(payload) = command.strip_prefix("organize ") {
-                    let result = serde_json::from_str(payload)
-                        .context("parsing organization settings")
-                        .and_then(crate::organize::request);
-                    let response = match result {
-                        Ok(()) => "ok".into(),
-                        Err(error) => format!("{error:#}"),
-                    };
-                    socket.write_all(response.as_bytes())?;
-                    continue;
-                }
                 match command.as_str() {
                     "ping" => {}
                     "stop" => {

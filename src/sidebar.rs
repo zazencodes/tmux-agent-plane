@@ -246,11 +246,6 @@ pub(crate) struct KillConfirmation {
     ends_sessions: Vec<String>,
 }
 
-pub(crate) struct OrganizeConfirmation {
-    settings: crate::autoname_config::Config,
-    client: Client,
-}
-
 /// The kinds `n` offers. Antigravity needs a task to start, and this picker starts agents empty.
 const NEW_AGENT_KINDS: [Kind; 5] = [
     Kind::Claude,
@@ -265,10 +260,6 @@ pub(crate) struct NewAgent {
     session: String,
     cwd: String,
     selected: usize,
-}
-
-fn organize_accepts(key: KeyEvent) -> bool {
-    key.modifiers.is_empty() && matches!(key.code, KeyCode::Enter | KeyCode::Char(' ' | 'y'))
 }
 
 /// Changes in task/state/turn or native identity require a new deliberate confirmation.
@@ -428,7 +419,6 @@ pub(crate) struct Sidebar {
     /// `n` took the client to its new agent, so a popup has nothing left to show.
     pub(crate) left: bool,
     recent_event: Option<RecentEvent>,
-    organize_status: Option<crate::organize::Status>,
     pub(crate) list: ListState,
     pub(crate) error: Option<String>,
     /// Enter asked for a daemon restart, which runs once the screen says so.
@@ -438,7 +428,6 @@ pub(crate) struct Sidebar {
     pub(crate) editing: Option<Rename>,
     pub(crate) notice: Option<String>,
     killing: Option<KillConfirmation>,
-    organizing: Option<OrganizeConfirmation>,
     new_agent: Option<NewAgent>,
     /// Hide successfully closed panes until the daemon has removed them from the index.
     closed: HashSet<String>,
@@ -534,15 +523,6 @@ impl Sidebar {
             .filter(|a| !self.closed.contains(&a.pane))
             .collect();
         self.recent_event = index.recent_event;
-        if index
-            .organize
-            .as_ref()
-            .is_some_and(|status| status.updated_at >= self.pressed_at)
-            && self.notice.as_deref() == Some("organization queued")
-        {
-            self.notice = None;
-        }
-        self.organize_status = index.organize;
         self.error = None;
         self.restart_failure = None;
         self.navigation.order = index.order;
@@ -902,58 +882,6 @@ impl Sidebar {
         matches!(origin, Origin::Sidebar(_)) && self.next_row(&agent.pane).is_some()
     }
 
-    /// Enter, Space or y dispatches; every other closing key is consumed.
-    fn organize_key(&mut self, key: KeyEvent, origin: Origin<'_>) -> bool {
-        if let Some(confirmation) = self.organizing.take() {
-            self.notice = None;
-            if organize_accepts(key) {
-                match self.confirm_organize(&confirmation, origin) {
-                    Ok(()) => self.notice = Some("organization queued".into()),
-                    Err(error) => self.notice = Some(error.to_string()),
-                }
-            }
-            return true;
-        }
-        if key.code != KeyCode::Char('o')
-            || !key.modifiers.is_empty()
-            || self.editing.is_some()
-            || self.typing_query()
-            || self.killing.is_some()
-        {
-            return false;
-        }
-        self.notice = None;
-        let result: Result<OrganizeConfirmation> = (|| {
-            let settings = crate::organize::settings()?;
-            if index::read()?.organize.is_some_and(|s| s.running) {
-                bail!("organization already running");
-            }
-            let clients = clients()?;
-            let client = input_client(&clients, origin)?.clone();
-            Ok(OrganizeConfirmation { settings, client })
-        })();
-        match result {
-            Ok(confirmation) => self.organizing = Some(confirmation),
-            Err(error) => self.notice = Some(error.to_string()),
-        }
-        true
-    }
-
-    fn confirm_organize(
-        &self,
-        confirmation: &OrganizeConfirmation,
-        origin: Origin<'_>,
-    ) -> Result<()> {
-        let clients = clients()?;
-        if input_client(&clients, origin)? != &confirmation.client {
-            bail!("confirmation client changed; press o again");
-        }
-        if crate::organize::settings()? != confirmation.settings {
-            bail!("background agent configuration changed; press o again");
-        }
-        lifecycle::organize(&confirmation.settings)
-    }
-
     /// While the picker is open it consumes every key: Enter starts, Esc or `n` cancels.
     fn new_agent_key(&mut self, key: KeyEvent, origin: Origin<'_>) -> bool {
         if let Some(picker) = &mut self.new_agent {
@@ -984,7 +912,6 @@ impl Sidebar {
             // While a search is on, `n` is its next match.
             || !self.navigation.pattern.is_empty()
             || self.killing.is_some()
-            || self.organizing.is_some()
         {
             return false;
         }
@@ -1002,19 +929,17 @@ impl Sidebar {
         true
     }
 
-    /// Help, setup, new agent, organize and kill, in priority order. True when one consumed
+    /// Help, setup, new agent and kill, in priority order. True when one consumed
     /// the key.
     pub(crate) fn action_key(&mut self, key: KeyEvent, origin: Origin<'_>) -> bool {
         let consumed = self.help_key(key)
             // Setup consumes its keys before navigation/kill, including Enter.
             || (self.killing.is_none()
-                && self.organizing.is_none()
                 && self.new_agent.is_none()
                 && self.editing.is_none()
                 && !self.typing_query()
                 && self.auto_name.key(key))
             || self.new_agent_key(key, origin)
-            || self.organize_key(key, origin)
             || self.kill_key(key, origin)
             || self.restart_key(key);
         self.pending_g &= !consumed;
@@ -1043,7 +968,6 @@ impl Sidebar {
             self.editing.is_none()
                 && !self.typing_query()
                 && !self.auto_name.open
-                && self.organizing.is_none()
                 && self.new_agent.is_none(),
         )
     }
@@ -1512,9 +1436,9 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
                 } else if sidebar.navigation.jump.is_some() {
                     hints(&[("type", "find a row"), ("^w ^u", "clear")])
                 } else if !sidebar.navigation.pattern.is_empty() {
-                    hints(&[("c", "configure"), ("o", "organize all")])
+                    hints(&[("c", "configure")])
                 } else {
-                    hints(&[("n", "new"), ("c", "configure"), ("o", "organize all")])
+                    hints(&[("n", "new"), ("c", "configure")])
                 },
                 footer(sidebar, inner + 2, index::now_ms()),
             ])
@@ -1530,12 +1454,6 @@ pub(crate) fn confirmation_footer(sidebar: &Sidebar, width: usize) -> Option<Vec
         .killing
         .as_ref()
         .map(|kill| kill_footer(kill, width))
-        .or_else(|| {
-            sidebar
-                .organizing
-                .as_ref()
-                .map(|organize| organize_footer(organize, width))
-        })
         .or_else(|| {
             sidebar
                 .new_agent
@@ -1561,35 +1479,6 @@ fn new_agent_footer(picker: &NewAgent, width: usize) -> Vec<Line<'static>> {
     }));
     lines.push(hints(&[("⏎", "start"), ("esc", "cancel")]));
     lines
-}
-
-fn organize_footer(confirmation: &OrganizeConfirmation, width: usize) -> Vec<Line<'static>> {
-    vec![
-        Line::styled(
-            truncate(
-                if width >= 28 {
-                    " organize all agents? [Y/n]"
-                } else {
-                    " organize all? [Y/n]"
-                },
-                width,
-            ),
-            Style::default().fg(TEXT).bold(),
-        ),
-        Line::styled(
-            truncate(
-                &format!(
-                    " via {}",
-                    std::path::Path::new(&confirmation.settings.auto_name.command[0])
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                ),
-                width,
-            ),
-            SUBTEXT,
-        ),
-    ]
 }
 
 /// Two lines keep both name and state readable in a narrow pane. Remote session
@@ -1634,7 +1523,7 @@ fn kill_footer(confirmation: &KillConfirmation, width: usize) -> Vec<Line<'stati
 
 /// Local failures and rename controls take priority; a shared event never hides them.
 fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
-    status_footer(sidebar, width, now).unwrap_or_else(|| {
+    status_footer(sidebar, width).unwrap_or_else(|| {
         match sidebar
             .recent_event
             .as_ref()
@@ -1656,7 +1545,7 @@ fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
 }
 
 /// What this list is in the middle of, if anything.
-pub(crate) fn status_footer(sidebar: &Sidebar, width: usize, now: u64) -> Option<Line<'static>> {
+pub(crate) fn status_footer(sidebar: &Sidebar, width: usize) -> Option<Line<'static>> {
     Some(match (&sidebar.notice, &sidebar.editing) {
         (Some(notice), _) => Line::styled(
             truncate(&format!(" {notice}"), width),
@@ -1671,21 +1560,6 @@ pub(crate) fn status_footer(sidebar: &Sidebar, width: usize, now: u64) -> Option
         }
         (None, None) if !sidebar.navigation.pattern.is_empty() => {
             hints(&[("n N", "next/prev"), ("⏎", "open"), ("esc", "clear")])
-        }
-        (None, None)
-            if sidebar.organize_status.as_ref().is_some_and(|s| {
-                s.running || s.failed || now.saturating_sub(s.updated_at) < 10_000
-            }) =>
-        {
-            let status = sidebar.organize_status.as_ref().unwrap();
-            Line::styled(
-                truncate(&format!(" {}", status.message), width),
-                if status.failed {
-                    colour(State::Blocked)
-                } else {
-                    SUBTEXT
-                },
-            )
         }
         (None, None) => return None,
     })
@@ -1796,46 +1670,6 @@ fn right<'a>(mut line: Line<'a>, end: Span<'a>, width: usize) -> Line<'a> {
 mod tests {
     use super::*;
 
-    fn organize_confirmation() -> OrganizeConfirmation {
-        OrganizeConfirmation {
-            settings: crate::autoname_config::Config {
-                auto_name: crate::autoname_config::AutoName {
-                    command: vec!["agy".into(), "{prompt}".into()],
-                    ..Default::default()
-                },
-            },
-            client: Client {
-                name: "/dev/fixture".into(),
-                pid: "42".into(),
-                session: "$1".into(),
-                window: "@1".into(),
-                pane: "%99".into(),
-            },
-        }
-    }
-
-    #[test]
-    fn organize_accepts_default_yes() {
-        for code in [KeyCode::Enter, KeyCode::Char(' '), KeyCode::Char('y')] {
-            assert!(organize_accepts(KeyEvent::from(code)));
-            for modifier in [
-                KeyModifiers::SHIFT,
-                KeyModifiers::CONTROL,
-                KeyModifiers::ALT,
-            ] {
-                assert!(!organize_accepts(KeyEvent::new(code, modifier)));
-            }
-        }
-        for code in [
-            KeyCode::Esc,
-            KeyCode::Char('n'),
-            KeyCode::Char('a'),
-            KeyCode::Char('A'),
-        ] {
-            assert!(!organize_accepts(KeyEvent::from(code)));
-        }
-    }
-
     #[test]
     fn new_agent_picker_pins_the_project_and_consumes_its_keys() {
         let mut sidebar = showing(vec![agent("%1", State::Idle)]);
@@ -1873,61 +1707,6 @@ mod tests {
         assert!(sidebar.notice.is_some());
     }
 
-    #[test]
-    fn organize_cancel_consumes_keys_without_other_sidebar_actions() {
-        for code in [
-            KeyCode::Esc,
-            KeyCode::Char('n'),
-            KeyCode::Char('a'),
-            KeyCode::Char('q'),
-            KeyCode::Char('x'),
-            KeyCode::Char('c'),
-            KeyCode::Char('j'),
-            KeyCode::Char('O'),
-            KeyCode::Char('A'),
-            KeyCode::Char('?'),
-        ] {
-            let mut sidebar = Sidebar {
-                organizing: Some(organize_confirmation()),
-                ..Sidebar::default()
-            };
-            assert!(sidebar.organize_key(KeyEvent::from(code), Origin::Sidebar("%99")));
-            assert!(sidebar.organizing.is_none());
-            assert!(
-                sidebar.killing.is_none() && sidebar.editing.is_none() && !sidebar.auto_name.open
-            );
-            assert!(sidebar.notice.is_none());
-        }
-    }
-
-    #[test]
-    fn organize_confirmation_stays_in_the_footer() {
-        let confirmation = organize_confirmation();
-        for width in [20, 38] {
-            let lines = organize_footer(&confirmation, width);
-            assert_eq!(lines.len(), 2);
-            assert!(lines[0].to_string().contains("all") && lines[0].to_string().contains("[Y/n]"));
-            assert!(lines.iter().all(|line| line.width() <= width));
-        }
-        let mut terminal = Terminal::new(TestBackend::new(38, 28)).unwrap();
-        let mut sidebar = Sidebar {
-            organizing: Some(confirmation),
-            ..Sidebar::default()
-        };
-        terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
-        let rows: Vec<String> = (0..28)
-            .map(|y| {
-                (0..38)
-                    .map(|x| terminal.backend().buffer()[(x, y)].symbol())
-                    .collect()
-            })
-            .collect();
-        assert!(rows[0].contains("agents"));
-        assert!(rows[26].contains("organize all agents? [Y/n]"));
-        assert!(rows[27].contains("via agy"));
-        assert!(!sidebar.help_key(KeyEvent::from(KeyCode::Char('?'))));
-        assert!(!sidebar.help.open);
-    }
     use crate::index::EventState;
 
     #[test]
@@ -2289,7 +2068,6 @@ mod tests {
             windows: Vec::new(),
             order: order.iter().map(|pane| pane.to_string()).collect(),
             last_agent: None,
-            organize: None,
         }
     }
 
@@ -2414,7 +2192,6 @@ mod tests {
         let at = |updated_at, active: &str, viewed| Index {
             windows: vec![window(active, viewed)],
             last_agent: Some("%1".into()),
-            organize: None,
             ..index_at(updated_at, &agents, &["%1", "%2"])
         };
         sidebar.apply(at(1, "%1", true), Origin::Sidebar("%9"));

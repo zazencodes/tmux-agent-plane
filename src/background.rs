@@ -1,4 +1,4 @@
-//! Shared noninteractive command transport for naming and organization.
+//! Shared noninteractive command transport for naming.
 use crate::autoname_config::{self as config, Config, Output};
 use anyhow::{Context, Result, bail};
 use std::fs::{File, OpenOptions};

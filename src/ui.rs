@@ -729,7 +729,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                     ("^w ^u", "clear"),
                 ])
             } else {
-                status_footer(sidebar, width, index::now_ms()).unwrap_or_else(|| {
+                status_footer(sidebar, width).unwrap_or_else(|| {
                     hints(&[
                         ("j/k", "browse"),
                         ("/", "search"),
@@ -739,7 +739,6 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                         ("n", "new"),
                         ("x", "kill"),
                         ("r", "rename"),
-                        ("o", "organize"),
                         ("f", "filter"),
                         ("d", "state"),
                         ("c", "configure"),
@@ -1102,7 +1101,6 @@ mod tests {
             }],
             order: Vec::new(),
             last_agent: Some("%3".into()),
-            organize: None,
         };
         let client = |pane: &str| Client {
             name: "client".into(),

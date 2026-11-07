@@ -253,9 +253,6 @@ fn review_lines(command: &[String], width: usize) -> Vec<Line<'static>> {
         TEXT,
     ));
     lines.push(muted(
-        "Confirming o also sends the full agent/session inventory for organization.",
-    ));
-    lines.push(muted(
         "Its AI provider may receive that data. No screens or file contents.",
     ));
     lines.push(Line::default());

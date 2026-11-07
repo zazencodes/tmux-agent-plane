@@ -8,6 +8,7 @@ before 1.0, a breaking change bumps the minor version.
 ### Removed
 
 - The `s` re-sort key and attention sorting: rows stay in a stable order, with new agents added at the end of their session
+- The sidebar's and picker's `o` organize action: agents you start by hand already join a session named after their folder, and an agent can still organize sessions through the CLI when you ask
 
 ### Added
 

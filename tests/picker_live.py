@@ -300,9 +300,6 @@ try:
         time.sleep(.15)
     wait('filter off', lambda: 'agents · ' not in client.text())
     assert 'j/k browse' in client.text()
-    client.key(b'o')
-    wait('organize refuses without configured AI', lambda: 'j/k browse' not in client.text())
-    assert '[Y/n]' not in client.text(), client.text()
     client.key(b'\x03')
     wait('ctrl-c cancel', lambda: 'filter names / projects / descriptions' not in client.text() and '▌' not in client.text())
     assert client.context() == origin
@@ -398,31 +395,6 @@ try:
     wait('popup closed', lambda: 'j/k browse' not in client.text())
     assert other.context() == untouched
     tmux('kill-window', '-t', created)
-    # o from the popup: n cancels; Space queues the daemon job. A fake command returns no plan,
-    # so nothing moves and no model is called.
-    (BIN / 'agy').write_text('#!/bin/sh\nexit 1\n')
-    (BIN / 'agy').chmod(0o755)
-    config = ROOT / 'config/tmux-agent-plane/config.json'
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text(json.dumps({'auto_name': {'enabled': False, 'output': 'text',
-        'command': ['agy', '--model', 'fixture-model', '--effort', 'low', '--print', '{prompt}']}}))
-    placed = {a['name']: a['session'] for a in agents()}
-    status = lambda: json.loads((ROOT / 's/tmux-agent-plane/agents.json').read_text()).get('organize')
-    assert status() is None
-    client.key(b'\x01a')
-    wait('reopen for organize', lambda: 'j/k browse' in client.text())
-    client.key(b'o')
-    wait('organize prompt', lambda: 'organize all agents? [Y/n]' in client.text() and 'via agy' in client.text())
-    client.key(b'n')
-    wait('organize cancelled', lambda: '[Y/n]' not in client.text() and 'j/k browse' in client.text())
-    assert status() is None
-    client.key(b'o')
-    wait('organize prompt again', lambda: '[Y/n]' in client.text())
-    client.key(b' ')
-    wait('organize ran', lambda: status() is not None and not status()['running'])
-    assert {a['name']: a['session'] for a in agents()} == placed
-    client.key(b'\x1b')
-    wait('closed after organize', lambda: 'via agy' not in client.text() and '▌' not in client.text())
     untouched_client = client.context()
     # Tab: keys reach exactly the selected agent, as typed, until Tab again.
     plane('spawn', 'pi', '--in', 'session', '--cwd', str(ROOT), '--name', 'talk-target')
@@ -472,7 +444,7 @@ try:
     for row in rows.values():
         path = ROOT / (row['pane'] + '.input')
         assert not path.exists() or path.read_bytes().replace(b'\x1b[I', b'').replace(b'\x1b[O', b'') == b''
-    print('PASS: prefix a and prefix f; command mode by default; opens on the agent in view, from its pane or a sidebar, else the top row; j/k, Ctrl-J/K and arrows; / search only; empty/no-match Enter; fuzzy name/title/detail and spanning queries; refresh selection; Esc/Ctrl-C/q; group column; help, filter, sort, organize, rename, kill and new from the popup; Tab typing to the pinned agent with exact bytes, cursor and exit; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
+    print('PASS: prefix a and prefix f; command mode by default; opens on the agent in view, from its pane or a sidebar, else the top row; j/k, Ctrl-J/K and arrows; / search only; empty/no-match Enter; fuzzy name/title/detail and spanning queries; refresh selection; Esc/Ctrl-C/q; group column; help, filter, rename, kill and new from the popup; Tab typing to the pinned agent with exact bytes, cursor and exit; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
     print('Evidence:', ROOT, flush=True)
 finally:
     for name in SPAWNED:

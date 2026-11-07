@@ -385,7 +385,6 @@ impl Runtime {
             windows: Vec::new(),
             order: Vec::new(),
             last_agent: None,
-            organize: None,
         };
         let rejected = |reason: String| {
             Outcome::Rejected(Rejection {
@@ -580,7 +579,6 @@ mod tests {
             windows: Vec::new(),
             order: Vec::new(),
             last_agent: None,
-            organize: None,
         };
         for name in [
             "payment-tests",

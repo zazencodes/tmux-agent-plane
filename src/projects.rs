@@ -1,7 +1,7 @@
 //! An agent started by hand joins the session named after its folder as soon as it is seen.
 use crate::diagnostics::{self, Issue};
 use crate::index::Agent;
-use crate::{organize, sessions, tmux};
+use crate::{sessions, tmux};
 use anyhow::{Context, Result, anyhow};
 use std::path::Path;
 
@@ -22,25 +22,22 @@ pub struct Placer {
 
 impl Placer {
     pub fn tick(&mut self, agents: &[Agent], panes: &[tmux::Pane]) -> Result<Vec<Issue>> {
-        // Organization validates a frozen roster and owns every move while it runs.
-        if !organize::busy() {
-            for agent in agents {
-                let pane = panes
-                    .iter()
-                    .find(|p| p.id == agent.pane)
-                    .context("agent pane missing from its own snapshot")?;
-                if pane.placed {
-                    continue;
-                }
-                // Agents already running when the daemon starts stay where the user has them.
-                if let Err(error) = place(agent, pane, self.started) {
-                    let message = format!("could not place {}: {error:#}", agent.name);
-                    diagnostics::record("projects", &message)?;
-                    self.failure = Some((agent.pane.clone(), message));
-                }
+        for agent in agents {
+            let pane = panes
+                .iter()
+                .find(|p| p.id == agent.pane)
+                .context("agent pane missing from its own snapshot")?;
+            if pane.placed {
+                continue;
             }
-            self.started = true;
+            // Agents already running when the daemon starts stay where the user has them.
+            if let Err(error) = place(agent, pane, self.started) {
+                let message = format!("could not place {}: {error:#}", agent.name);
+                diagnostics::record("projects", &message)?;
+                self.failure = Some((agent.pane.clone(), message));
+            }
         }
+        self.started = true;
         self.failure = self
             .failure
             .take()

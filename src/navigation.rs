@@ -197,7 +197,6 @@ mod tests {
             windows: Vec::new(),
             order: ["%2", "%gone", "%1", "%3"].map(String::from).into(),
             last_agent: Some("%1".into()),
-            organize: None,
         }
     }
 

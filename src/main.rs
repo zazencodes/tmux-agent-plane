@@ -11,7 +11,6 @@ mod fit;
 mod index;
 mod lifecycle;
 mod navigation;
-mod organize;
 mod popup;
 mod projects;
 mod sessions;
