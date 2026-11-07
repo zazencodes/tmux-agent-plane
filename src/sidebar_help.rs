@@ -9,6 +9,8 @@ use ratatui::widgets::Paragraph;
 /// Keep labels as individual whitespace-separated keys, so coverage can check them.
 const SHORTCUTS: &[(&str, &str)] = &[
     ("Alt-↑/↓", "Prev/next agent (global)"),
+    ("S-←", "Go into the sidebar (global)"),
+    ("S-→", "Open selected, leave sidebar"),
     ("j k", "Move selection and preview it"),
     ("g G", "gg first agent, G last agent"),
     ("↑ ↓", "Move selection or in filter"),

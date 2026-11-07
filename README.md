@@ -141,6 +141,19 @@ set -g @agent-plane-next-key C-M-j
 
 These are tmux key names (`C` is Ctrl, `M` is Alt). The defaults leave tmux's prefix-then-Alt-arrow bindings available for resizing. Your window manager and terminal must pass the chosen keys through to tmux.
 
+Press **Alt + H** to move into the sidebar, opening it if it is closed; from inside, it stays put. Press **Alt + L** to leave it for the selected agent, as `Enter` does, even halfway through typing a search. Everywhere else Alt + L goes to the pane as usual. To choose other keys:
+
+```tmux
+set -g @agent-plane-sidebar-in-key C-M-h
+set -g @agent-plane-sidebar-out-key C-M-l
+```
+
+Inside the sidebar, Shift + Right always leaves it the same way, with nothing to configure. To go in with Shift + Left, add this after the plugin loads:
+
+```tmux
+bind -n S-Left run-shell "tmux-agent-plane enter-sidebar '#{window_id}'"
+```
+
 ### Sidebar and agent list
 
 | Key | Action |
@@ -149,6 +162,7 @@ These are tmux key names (`C` is Ctrl, `M` is Alt). The defaults leave tmux's pr
 | `prefix + a` | Open the agent picker: the sidebar's list and actions, with a live screen preview |
 | `prefix + f` | Open the agent picker already filtering, so you can start typing |
 | `Alt + ↑` / `Alt + ↓` | Focus previous/next agent directly, across sessions; no prefix or sidebar focus needed |
+| `Alt + H` / `Alt + L` | Move into the sidebar and stay / leave it for the selected agent; no prefix needed |
 | `↓` `↑` | Move selection. In the sidebar, moving previews the selected agent's window/session while keyboard input stays in the sidebar; the popup previews inside itself. Both also accept `j` / `k` |
 | `gg` / `G` | Move to the first / last agent in the list, previewing it like any other move |
 | `s` | Re-sort agents within each session by attention, then longest in state; keep the selected pane |

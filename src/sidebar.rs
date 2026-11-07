@@ -52,8 +52,16 @@ pub fn toggle(window: &str) -> Result<()> {
     if is_open()? {
         return close();
     }
-    tmux::run(&["set-option", "-g", OPEN, "1"])?;
-    add_everywhere()?;
+    enter(window)
+}
+
+/// The in key: move into this window's sidebar, opening it everywhere if it is closed. From
+/// inside the sidebar this changes nothing.
+pub fn enter(window: &str) -> Result<()> {
+    if !is_open()? {
+        tmux::run(&["set-option", "-g", OPEN, "1"])?;
+        add_everywhere()?;
+    }
     let pane = add(window)?;
     tmux::run(&["select-pane", "-t", &pane]).map(drop)
 }
@@ -1342,7 +1350,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
                 let command = sidebar.editing.is_none() && !searching && !jumping;
                 let before = sidebar.navigation.pane.clone();
                 // Enter while typing a search keeps it, so `n` can go on from there.
-                let opens = key.code == KeyCode::Enter && !jumping;
+                let opens = (key.code == KeyCode::Enter && !jumping) || leaves_sidebar(key);
                 focus = opens && sidebar.editing.is_none() && sidebar.open_selected().is_some();
                 if sidebar.key(key) {
                     return Ok(());
@@ -1383,6 +1391,11 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             }
         }
     }
+}
+
+/// Shift-Right leaves like Enter, also mid-search. The plugin's out key sends it here too.
+fn leaves_sidebar(key: KeyEvent) -> bool {
+    key.code == KeyCode::Right && key.modifiers == KeyModifiers::SHIFT
 }
 
 /// The filter and the search on the top line, sharing the room the state filter leaves. An idle
@@ -2688,6 +2701,19 @@ mod tests {
         press(&mut sidebar, KeyCode::Enter);
         press(&mut sidebar, KeyCode::Char('n'));
         assert_eq!(sidebar.selected().unwrap().pane, "%4");
+    }
+
+    #[test]
+    fn only_shift_right_leaves_the_sidebar() {
+        assert!(leaves_sidebar(KeyEvent::new(
+            KeyCode::Right,
+            KeyModifiers::SHIFT
+        )));
+        assert!(!leaves_sidebar(KeyEvent::from(KeyCode::Right)));
+        assert!(!leaves_sidebar(KeyEvent::new(
+            KeyCode::Left,
+            KeyModifiers::SHIFT
+        )));
     }
 
     #[test]

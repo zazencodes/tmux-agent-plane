@@ -57,6 +57,11 @@ enum Cmd {
         /// tmux window id or target, e.g. `@104` or `work:2`
         window: String,
     },
+    /// Move into the window's sidebar, opening it everywhere if it is closed
+    EnterSidebar {
+        /// tmux window id or target, e.g. `@104` or `work:2`
+        window: String,
+    },
     /// Add the sidebar to a window while it is open (run by the plugin when a window is created)
     FollowSidebar {
         /// tmux window id or target
@@ -175,6 +180,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Sidebar => sidebar::run(),
         Cmd::Notice => popup::notice(),
         Cmd::ToggleSidebar { window } => sidebar::toggle(&commands::target_pane(&window)?),
+        Cmd::EnterSidebar { window } => sidebar::enter(&commands::target_pane(&window)?),
         Cmd::FollowSidebar { window } => sidebar::follow(&commands::target_pane(&window)?),
         Cmd::List { json } => commands::list(json),
         Cmd::Sessions { action } => sessions::run(action),

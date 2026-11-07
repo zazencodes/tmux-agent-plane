@@ -261,7 +261,22 @@ def assert_vim_search(client):
     wait("n opens the new agent picker", lambda: "new agent in" in client.text())
     client.key(b"\x1b")
     wait("new agent cancelled", lambda: "new agent in" not in client.text())
-    return {"vim_search": True}
+    # Shift-Right opens the selection like Enter, also mid-search; Shift-Left stays or returns.
+    sidebar = client.context()
+    client.key(b"\x1b[1;2D")
+    settle(.3)
+    assert client.context() == sidebar, "the in key must stay in the sidebar"
+    client.key(b"/nav-work")
+    wait("search before leaving", lambda: client.selected() == "nav-work")
+    client.key(b"\x1b[1;2C")
+    wait("Shift-Right leaves for the agent", lambda: client.context()[1] == agent("nav-work")["pane"])
+    client.key(b"\x1bh")
+    wait("the in key returns to the sidebar", lambda: "/ search" in client.text() and client.context()[1] != agent("nav-work")["pane"])
+    client.key(b"\x1bl")
+    wait("the out key leaves", lambda: client.context()[1] == agent("nav-work")["pane"])
+    client.key(b"\x1bh")
+    wait("back in the sidebar", lambda: client.context()[1] != agent("nav-work")["pane"])
+    return {"vim_search": True, "in_out_keys": True}
 
 
 def assert_cycle_keys(client):

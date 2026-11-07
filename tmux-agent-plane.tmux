@@ -41,6 +41,34 @@ tmux bind-key -n "$previous_key" run-shell "tmux-agent-plane cycle previous --cl
 tmux bind-key -n "$next_key" run-shell "tmux-agent-plane cycle next --client #{q:client_name}"
 tmux set-option -g @agent-plane-bound-previous-key "$previous_key"
 tmux set-option -g @agent-plane-bound-next-key "$next_key"
+# The in key moves into the sidebar and stays there. The out key leaves it for the selected agent
+# by sending it Shift-Right, which it understands directly; other panes get the key as usual.
+in_key="$(tmux show-option -gqv @agent-plane-sidebar-in-key)"
+out_key="$(tmux show-option -gqv @agent-plane-sidebar-out-key)"
+in_key="${in_key:-M-h}"
+out_key="${out_key:-M-l}"
+if [ "$in_key" = "$out_key" ]; then
+  tmux display-message "tmux-agent-plane: sidebar in and out keys must differ"
+  exit 1
+fi
+for direction in in out; do
+  old_key="$(tmux show-option -gqv "@agent-plane-bound-sidebar-$direction-key")"
+  if [ -n "$old_key" ]; then
+    case "$direction" in
+      in) owned="tmux-agent-plane enter-sidebar" ;;
+      out) owned="@agent-plane-sidebar" ;;
+    esac
+    while IFS= read -r binding; do
+      case "$binding" in
+        *" -T root $old_key "*"$owned"*) tmux unbind-key -n "$old_key" ;;
+      esac
+    done <<< "$bindings"
+  fi
+done
+tmux bind-key -n "$in_key" run-shell "tmux-agent-plane enter-sidebar '#{window_id}'"
+tmux bind-key -n "$out_key" if-shell -F '#{==:#{@agent-plane-sidebar},1}' 'send-keys S-Right' "send-keys $out_key"
+tmux set-option -g @agent-plane-bound-sidebar-in-key "$in_key"
+tmux set-option -g @agent-plane-bound-sidebar-out-key "$out_key"
 # While the sidebar is open, a window gets one as soon as it exists, so its agent has its final
 # width before anyone looks at it. window-linked also fires for new sessions and moved panes.
 # A fixed hook index, so reloading tmux.conf replaces these hooks and keeps any of your own.
