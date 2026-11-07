@@ -5,6 +5,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+## 0.5.0 - 2026-11-07
+
 ### Added
 
 - `/` in the sidebar and agent picker now searches as in Vim: type part of an agent's name or task, ignoring case, and the selection moves there with every row still listed and every match highlighted. `Enter` keeps the search, `n`/`N` go through the matches, and `Esc` or `Ctrl-C` clears it.
