@@ -7,6 +7,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
+- Agents you start by hand join a session named after their folder within a second, creating it if needed, and your screen moves with them; a later `move` sticks, and spawned agents stay where they were asked to go
 - When the sidebar or agent picker says the daemon is not running, press `Enter` to restart it; if it cannot start, the reason stays on screen
 - `prefix + f` opens the agent picker already searching, ready to type; this replaces tmux's window finder on that key
 - Sidebar session headings use the same per-session colours as the agent picker

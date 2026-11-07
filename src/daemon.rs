@@ -107,6 +107,7 @@ fn run_inner() -> Result<()> {
     let mut auto_name = None;
     let mut auto_name_issues = Vec::new();
     let mut fit = Fit::default();
+    let mut placer = crate::projects::Placer::default();
 
     loop {
         if SHUTDOWN.load(Ordering::Relaxed) {
@@ -155,6 +156,8 @@ fn run_inner() -> Result<()> {
             organize: organizer.status.clone(),
         })
         .context("writing agent index")?;
+        // Last, so everything above saw one consistent placement of the agents.
+        issues.extend(placer.tick(&agents, &panes)?);
         // Use the last diagnostic snapshot for presentation, then fold this attempt's issues
         // exactly once. A new fault/recovery reaches the status on the next tick.
         let segment = active.status() + &status_segment(&agents);
@@ -519,6 +522,7 @@ mod tests {
             sidebar: false,
             name: String::new(),
             parent: String::new(),
+            placed: false,
         };
         Detected {
             pane,
@@ -960,6 +964,7 @@ mod tests {
                 sidebar: false,
                 name: String::new(),
                 parent: String::new(),
+                placed: false,
             },
             kind: Kind::Claude,
             state: RawState::Blocked,

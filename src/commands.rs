@@ -428,6 +428,7 @@ pub fn spawn(s: Spawn) -> Result<()> {
         }
     };
     let pane = pane.trim().to_string();
+    tmux::mark_placed(&pane)?;
 
     let explicit_name = s.name.is_some();
     let name = s
@@ -515,6 +516,7 @@ pub fn open_agent_window(kind: Kind, session: &str, cwd: &str) -> Result<(String
         .trim()
         .split_once(' ')
         .context("unexpected new-window output")?;
+    tmux::mark_placed(pane)?;
     Ok((window.to_string(), pane.to_string()))
 }
 

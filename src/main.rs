@@ -13,6 +13,7 @@ mod lifecycle;
 mod navigation;
 mod organize;
 mod popup;
+mod projects;
 mod sessions;
 mod sidebar;
 mod sidebar_help;

@@ -174,6 +174,7 @@ mod tests {
             sidebar: false,
             name: String::new(),
             parent: String::new(),
+            placed: false,
         }];
         let processes = ProcessTable {
             processes: HashMap::from([(

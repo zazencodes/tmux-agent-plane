@@ -109,6 +109,7 @@ mod tests {
             sidebar: false,
             name: String::new(),
             parent: String::new(),
+            placed: false,
         }
     }
     fn observation(id: &str) -> Observation {

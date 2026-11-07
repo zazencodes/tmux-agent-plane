@@ -76,6 +76,8 @@ pub struct Pane {
     pub sidebar: bool,
     pub name: String,
     pub parent: String,
+    /// The pane has its project and is never placed automatically again.
+    pub placed: bool,
 }
 
 impl Pane {
@@ -89,7 +91,7 @@ impl Pane {
     }
 }
 
-const PANE_FIELDS: [&str; 13] = [
+const PANE_FIELDS: [&str; 14] = [
     "#{pane_id}",
     "#{pane_pid}",
     "#{session_name}",
@@ -103,6 +105,7 @@ const PANE_FIELDS: [&str; 13] = [
     "#{@agent-plane-sidebar}",
     "#{@agent-plane-name}",
     "#{@agent-plane-parent}",
+    "#{@agent-plane-placed}",
 ];
 
 fn parse_pane(line: &str) -> Result<Pane> {
@@ -124,6 +127,7 @@ fn parse_pane(line: &str) -> Result<Pane> {
         sidebar: f[10] == "1",
         name: f[11].to_string(),
         parent: f[12].to_string(),
+        placed: f[13] == "1",
     })
 }
 
@@ -248,6 +252,13 @@ pub fn clients() -> Result<Vec<Client>> {
         .collect()
 }
 
+/// Spawned and moved agents chose their project; a marked pane is never placed automatically.
+pub const PLACED_OPTION: &str = "@agent-plane-placed";
+
+pub fn mark_placed(pane: &str) -> Result<()> {
+    run(&["set-option", "-p", "-t", pane, PLACED_OPTION, "1"]).map(|_| ())
+}
+
 pub fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -297,6 +308,7 @@ mod tests {
             sidebar: false,
             name: "agent".into(),
             parent: String::new(),
+            placed: false,
         };
         let mut linked = first.clone();
         linked.session = "zeta".into();

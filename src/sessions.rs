@@ -1,6 +1,6 @@
 //! A tmux session is a project. Resolve exact destinations and move physical panes.
 use crate::index::{self, Agent};
-use crate::{detect, tmux};
+use crate::{detect, navigation, tmux};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -309,7 +309,13 @@ struct MovePlan<'a> {
     final_window: bool,
 }
 
-fn plan_move<'a>(snapshot: &'a Snapshot, pane: &str, target: &str) -> Result<MovePlan<'a>> {
+/// `following` counts the clients that switch to the destination with the agent.
+fn plan_move<'a>(
+    snapshot: &'a Snapshot,
+    pane: &str,
+    target: &str,
+    following: usize,
+) -> Result<MovePlan<'a>> {
     let destination = snapshot.find(target)?;
     independent(destination)?;
     let links: Vec<_> = snapshot.panes.iter().filter(|p| p.id == pane).collect();
@@ -333,7 +339,7 @@ fn plan_move<'a>(snapshot: &'a Snapshot, pane: &str, target: &str) -> Result<Mov
     // the hook has not yet run; never end any client's attached session.
     let final_window =
         source.windows.len() == 1 && window_panes.iter().all(|p| p.id == pane || p.sidebar);
-    if final_window && source.attached > 0 {
+    if final_window && source.attached as usize != following {
         bail!(
             "move would end attached session {:?}; leave another window or content pane in that session",
             source.name
@@ -385,15 +391,30 @@ pub fn move_agent(agent: &Agent, target: &str) -> Result<()> {
     {
         bail!("agent identity/name/placement changed; list agents again before moving");
     }
+    let location = relocate(agent, live.pane.pid, target, &[])?;
+    println!("{} {} {location}", agent.name, agent.pane);
+    Ok(())
+}
+
+/// Move a verified agent and mark it placed, in one tmux command, so nothing shows in between.
+/// Followers switch first because they may be the last clients of a session the move ends.
+fn relocate(agent: &Agent, pid: i32, target: &str, followers: &[String]) -> Result<String> {
     let snapshot = Snapshot::load()?;
-    let plan = plan_move(&snapshot, &agent.pane, target)?;
-    if plan.window != live.pane.window {
+    let plan = plan_move(&snapshot, &agent.pane, target, followers.len())?;
+    if plan.window != agent.window {
         bail!("agent window changed while planning move; retry after listing agents");
     }
     let output_format =
         "#{pane_id}\x1f#{session_id}\x1f#{session_name}:#{window_index}.#{pane_index}";
     let destination_window = format!("{}:", plan.destination.id);
-    let moving = command(&[
+    let switch = |target: &str| -> Vec<String> {
+        followers
+            .iter()
+            .map(|client| command(&["switch-client", "-c", client, "-t", target]))
+            .collect()
+    };
+    let mut moving = switch(&destination_window);
+    moving.push(command(&[
         "break-pane",
         "-d",
         "-P",
@@ -405,21 +426,31 @@ pub fn move_agent(agent: &Agent, target: &str) -> Result<()> {
         &destination_window,
         "-n",
         &agent.name,
-    ]);
+    ]));
+    moving.push(command(&[
+        "set-option",
+        "-p",
+        "-t",
+        &agent.pane,
+        tmux::PLACED_OPTION,
+        "1",
+    ]));
+    moving.extend(switch(&agent.pane));
+    let moving = moving.join(" ; ");
     let refused = command(&["display-message", "-p", "move-refused"]);
     // Recheck tmux topology inside its command queue. A concurrent link, group,
     // attachment or pane/window removal must not broaden the move's effects.
     let mut checks = vec![
         format!("#{{==:#{{window_id}},{}}}", plan.window),
         format!("#{{==:#{{session_id}},{}}}", plan.source.id),
-        format!("#{{==:#{{pane_pid}},{}}}", live.pane.pid),
+        format!("#{{==:#{{pane_pid}},{pid}}}"),
         format!("#{{==:#{{window_panes}},{}}}", plan.pane_count),
         format!("#{{==:#{{session_windows}},{}}}", plan.source.windows.len()),
         "#{==:#{window_linked_sessions},1}".into(),
         "#{==:#{session_grouped},0}".into(),
     ];
     if plan.final_window {
-        checks.push("#{==:#{session_attached},0}".into());
+        checks.push(format!("#{{==:#{{session_attached}},{}}}", followers.len()));
     }
     let condition = checks
         .into_iter()
@@ -450,8 +481,58 @@ pub fn move_agent(agent: &Agent, target: &str) -> Result<()> {
             result.trim()
         );
     }
-    println!("{} {} {}", agent.name, agent.pane, fields[2]);
-    Ok(())
+    Ok(fields[2].to_owned())
+}
+
+enum Placement<'a> {
+    Stay,
+    Existing(&'a Session),
+    New,
+}
+
+/// A window shared with other work, shared sessions, and a client already busy in the project
+/// keep the agent where it started. Those are the user's arrangement, not faults.
+fn plan_placement<'a>(
+    snapshot: &'a Snapshot,
+    pane: &str,
+    project: &str,
+    followers: usize,
+) -> Result<Placement<'a>> {
+    let links: Vec<_> = snapshot.panes.iter().filter(|p| p.id == pane).collect();
+    let [link] = links.as_slice() else {
+        return Ok(Placement::Stay);
+    };
+    let shared_window = snapshot
+        .panes
+        .iter()
+        .any(|p| p.window == link.window && p.id != pane && !p.sidebar);
+    if shared_window || snapshot.find(&link.session)?.group.is_some() {
+        return Ok(Placement::Stay);
+    }
+    Ok(match snapshot.sessions.iter().find(|s| s.name == project) {
+        Some(s) if s.group.is_some() || (followers > 0 && s.attached > 0) => Placement::Stay,
+        Some(s) => Placement::Existing(s),
+        None => Placement::New,
+    })
+}
+
+/// Put an agent in its project, taking along every client viewing it. Returns its new location,
+/// or nothing when it stays.
+pub fn place(agent: &Agent, pid: i32, project: &str) -> Result<Option<String>> {
+    let snapshot = Snapshot::load()?;
+    let mut followers = Vec::new();
+    for line in tmux::run(&["list-clients", "-F", navigation::CLIENT_FORMAT])?.lines() {
+        let client = navigation::parse_client(line)?;
+        if client.window == agent.window {
+            followers.push(client.name);
+        }
+    }
+    let destination = match plan_placement(&snapshot, &agent.pane, project, followers.len())? {
+        Placement::Stay => return Ok(None),
+        Placement::Existing(session) => session.id.clone(),
+        Placement::New => create_project(project, Some(agent.cwd.clone().into()))?,
+    };
+    relocate(agent, pid, &destination, &followers).map(Some)
 }
 
 #[cfg(test)]
@@ -499,12 +580,12 @@ mod tests {
                 + &row("$1", "api", 1, "", "@1", "%1", false)),
         )
         .unwrap();
-        let plan = plan_move(&snapshot, "%0", "api").unwrap();
+        let plan = plan_move(&snapshot, "%0", "api", 0).unwrap();
         assert_eq!(plan.pane_count, 3);
         assert!(!plan.final_window);
         assert_eq!(plan.destination.id, "$1");
-        assert!(plan_move(&snapshot, "%0", "work").is_err());
-        assert!(plan_move(&snapshot, "%3", "api").is_err());
+        assert!(plan_move(&snapshot, "%0", "work", 0).is_err());
+        assert!(plan_move(&snapshot, "%3", "api", 0).is_err());
     }
 
     #[test]
@@ -517,7 +598,7 @@ mod tests {
             }
             let snapshot = Snapshot::parse(&output).unwrap();
             assert!(
-                plan_move(&snapshot, "%0", "api")
+                plan_move(&snapshot, "%0", "api", 0)
                     .err()
                     .unwrap()
                     .to_string()
@@ -525,13 +606,17 @@ mod tests {
             );
             output += &row("$0", "work", 1, "", "@2", "%4", false);
             assert!(
-                !plan_move(&Snapshot::parse(&output).unwrap(), "%0", "api")
+                !plan_move(&Snapshot::parse(&output).unwrap(), "%0", "api", 0)
                     .unwrap()
                     .final_window
             );
         }
         let snapshot = Snapshot::parse(&base()).unwrap();
-        assert!(plan_move(&snapshot, "%0", "work-api").unwrap().final_window);
+        assert!(
+            plan_move(&snapshot, "%0", "work-api", 0)
+                .unwrap()
+                .final_window
+        );
     }
 
     #[test]
@@ -539,7 +624,7 @@ mod tests {
         let linked =
             Snapshot::parse(&(base() + &row("$2", "alias", 0, "", "@0", "%0", false))).unwrap();
         assert!(
-            plan_move(&linked, "%0", "work-api")
+            plan_move(&linked, "%0", "work-api", 0)
                 .err()
                 .unwrap()
                 .to_string()
@@ -552,7 +637,7 @@ mod tests {
             )
             .unwrap();
             assert!(
-                plan_move(&snapshot, "%0", "api")
+                plan_move(&snapshot, "%0", "api", 0)
                     .err()
                     .unwrap()
                     .to_string()
@@ -590,6 +675,53 @@ mod tests {
         let linked =
             Snapshot::parse(&(base() + &row("$2", "alias", 0, "", "@0", "%0", false))).unwrap();
         assert!(preflight(&linked, &assignments, &[]).is_err());
+    }
+
+    #[test]
+    fn a_followed_agent_may_end_its_session_but_not_with_a_client_left_behind() {
+        let snapshot = Snapshot::parse(
+            &(row("$0", "work", 1, "", "@0", "%0", false)
+                + &row("$1", "api", 0, "", "@1", "%1", false)),
+        )
+        .unwrap();
+        assert!(plan_move(&snapshot, "%0", "api", 1).unwrap().final_window);
+        assert!(plan_move(&snapshot, "%0", "api", 0).is_err());
+    }
+
+    #[test]
+    fn placement_leaves_shared_arrangements_alone() {
+        fn stays(rows: String, followers: usize) -> bool {
+            let snapshot = Snapshot::parse(&rows).unwrap();
+            matches!(
+                plan_placement(&snapshot, "%0", "api", followers).unwrap(),
+                Placement::Stay
+            )
+        }
+        let agent = || row("$0", "work", 1, "", "@0", "%0", false);
+        let api = |attached, group| row("$1", "api", attached, group, "@1", "%1", false);
+        assert!(!stays(agent() + &api(0, ""), 1));
+        assert!(!stays(agent(), 1));
+        // A sidebar beside the agent does not hold it back; a shell does.
+        assert!(!stays(
+            agent() + &row("$0", "work", 1, "", "@0", "%2", true) + &api(0, ""),
+            1
+        ));
+        assert!(stays(
+            agent() + &row("$0", "work", 1, "", "@0", "%2", false) + &api(0, ""),
+            1
+        ));
+        // Following into a project another client is using would change that client's window.
+        assert!(stays(agent() + &api(1, ""), 1));
+        assert!(!stays(agent() + &api(1, ""), 0));
+        assert!(stays(agent() + &api(0, "team"), 0));
+        assert!(stays(
+            row("$0", "work", 1, "team", "@0", "%0", false) + &api(0, ""),
+            1
+        ));
+        assert!(stays(
+            agent() + &row("$2", "alias", 0, "", "@0", "%0", false),
+            1
+        ));
     }
 
     #[test]
