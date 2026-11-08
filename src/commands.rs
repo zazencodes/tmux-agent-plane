@@ -337,13 +337,14 @@ pub struct Spawn {
     pub cwd: Option<PathBuf>,
     pub name: Option<String>,
     pub task: Option<String>,
+    pub agent_args: Vec<String>,
     pub wait: bool,
     pub timeout: Option<u64>,
 }
 
 pub fn spawn(s: Spawn) -> Result<()> {
     // Validate the interactive launch before creating a pane or contacting tmux.
-    let launch = (s.kind.adapter().launch)(s.task.as_deref())?;
+    let launch = (s.kind.adapter().launch)(s.task.as_deref(), &s.agent_args)?;
     validate_session_placement(s.placement, s.session.as_deref())?;
     let index = index::read()?;
     if let Some(name) = &s.name {
@@ -492,7 +493,7 @@ pub fn spawn(s: Spawn) -> Result<()> {
 /// Start an interactive agent in a new background window of an existing session, for a person to
 /// work in. Returns the window and pane ids.
 pub fn open_agent_window(kind: Kind, session: &str, cwd: &str) -> Result<(String, String)> {
-    let launch = (kind.adapter().launch)(None)?;
+    let launch = (kind.adapter().launch)(None, &[])?;
     let cwd = std::path::Path::new(cwd).canonicalize()?;
     let cwd = cwd.to_str().expect("cwd is UTF-8");
     let shell = tmux::default_shell(Some(session))?;
@@ -581,6 +582,34 @@ mod tests {
             .flat_map(|arg| arg.bytes().chain(std::iter::once(0)))
             .collect();
         assert_eq!(output.stdout, expected);
+    }
+
+    #[test]
+    fn agent_args_reach_every_kind_verbatim_before_the_task() {
+        use clap::ValueEnum;
+        let agent_args = vec![
+            "-c".to_string(),
+            "model_reasoning_effort=\"medium\"".into(),
+            "it's $HOME".into(),
+        ];
+        for kind in Kind::value_variants() {
+            let launch = (kind.adapter().launch)(Some("-task"), &agent_args).unwrap();
+            assert_eq!(launch.args[..agent_args.len()], agent_args[..]);
+            assert_eq!(launch.args.last().unwrap(), "-task");
+            let script = shell_launch("/usr/bin/true", "printf '%s\\0'", &launch.args);
+            let output = std::process::Command::new("/bin/sh")
+                .args(["-c", &script])
+                .stdin(std::process::Stdio::null())
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            let expected: Vec<u8> = launch
+                .args
+                .iter()
+                .flat_map(|arg| arg.bytes().chain(std::iter::once(0)))
+                .collect();
+            assert_eq!(output.stdout, expected);
+        }
     }
 
     #[test]

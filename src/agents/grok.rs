@@ -13,12 +13,12 @@ const RPC_ID: &str = "tmux-agent-plane-roster";
 const MAX_FRAME: usize = 16 * 1024 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 
-pub fn launch(task: Option<&str>) -> Result<Launch> {
+pub fn launch(task: Option<&str>, agent_args: &[String]) -> Result<Launch> {
+    let mut args = agent_args.to_vec();
+    args.extend(task.into_iter().flat_map(|s| ["--".into(), s.into()]));
     Ok(Launch {
         command: "grok",
-        args: task
-            .map(|task| vec!["--".to_string(), task.to_string()])
-            .unwrap_or_default(),
+        args,
     })
 }
 
@@ -659,10 +659,10 @@ mod tests {
     }
     #[test]
     fn interactive_prompt_stays_one_argument() {
-        assert_eq!(launch(None).unwrap().command, "grok");
-        assert!(launch(None).unwrap().args.is_empty());
+        assert_eq!(launch(None, &[]).unwrap().command, "grok");
+        assert!(launch(None, &[]).unwrap().args.is_empty());
         assert_eq!(
-            launch(Some("quote ' and\nnewline")).unwrap().args,
+            launch(Some("quote ' and\nnewline"), &[]).unwrap().args,
             ["--", "quote ' and\nnewline"]
         );
     }
@@ -729,5 +729,15 @@ mod tests {
         let bytes =
             serde_json::to_vec(&json!([{"pid":pid,"pid_start":start+1,"session_id":"s"}])).unwrap();
         assert!(active_sessions(&bytes, &context).unwrap().is_empty());
+    }
+
+    #[test]
+    fn launch_puts_agent_args_before_task() {
+        let args = ["-m".to_string(), "gpt".to_string()];
+        let launch_with = launch(Some("task"), &args).unwrap();
+        assert_eq!(launch_with.command, "grok");
+        assert_eq!(launch_with.args, ["-m", "gpt", "--", "task"]);
+        assert_eq!(launch(None, &args).unwrap().args, ["-m", "gpt"]);
+        assert!(launch(None, &[]).unwrap().args.is_empty());
     }
 }

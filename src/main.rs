@@ -169,6 +169,9 @@ enum Cmd {
         /// Give up waiting after this many seconds
         #[arg(long, requires = "wait")]
         timeout: Option<u64>,
+        /// Arguments after `--`, passed verbatim to the agent CLI
+        #[arg(last = true, value_name = "AGENT_ARGS")]
+        agent_args: Vec<String>,
     },
 }
 
@@ -207,6 +210,7 @@ fn main() -> anyhow::Result<()> {
             name,
             wait,
             timeout,
+            agent_args,
         } => commands::spawn(commands::Spawn {
             kind,
             placement,
@@ -214,6 +218,7 @@ fn main() -> anyhow::Result<()> {
             cwd,
             name,
             task,
+            agent_args,
             wait,
             timeout,
         }),

@@ -8,14 +8,13 @@ use std::path::Path;
 /// The publisher refreshes each second. Expiry is an error, never an idle signal.
 const STALE_AFTER_MS: u64 = 5_000;
 
-pub fn launch(task: Option<&str>) -> Result<Launch> {
+pub fn launch(task: Option<&str>, agent_args: &[String]) -> Result<Launch> {
+    let mut args = agent_args.to_vec();
+    // End option parsing so tasks beginning with '-' remain interactive messages.
+    args.extend(task.into_iter().flat_map(|s| ["--".into(), s.into()]));
     Ok(Launch {
         command: "pi",
-        // End option parsing so tasks beginning with '-' remain interactive messages.
-        args: task
-            .into_iter()
-            .flat_map(|s| ["--".into(), s.into()])
-            .collect(),
+        args,
     })
 }
 
@@ -366,8 +365,18 @@ mod tests {
 
     #[test]
     fn interactive_launch_protects_option_like_tasks() {
-        assert_eq!(launch(None).unwrap().command, "pi");
-        assert!(launch(None).unwrap().args.is_empty());
-        assert_eq!(launch(Some("-task")).unwrap().args, ["--", "-task"]);
+        assert_eq!(launch(None, &[]).unwrap().command, "pi");
+        assert!(launch(None, &[]).unwrap().args.is_empty());
+        assert_eq!(launch(Some("-task"), &[]).unwrap().args, ["--", "-task"]);
+    }
+
+    #[test]
+    fn launch_puts_agent_args_before_task() {
+        let args = ["-m".to_string(), "gpt".to_string()];
+        let launch_with = launch(Some("task"), &args).unwrap();
+        assert_eq!(launch_with.command, "pi");
+        assert_eq!(launch_with.args, ["-m", "gpt", "--", "task"]);
+        assert_eq!(launch(None, &args).unwrap().args, ["-m", "gpt"]);
+        assert!(launch(None, &[]).unwrap().args.is_empty());
     }
 }

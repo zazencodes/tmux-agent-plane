@@ -5,12 +5,12 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::Path;
 
-pub fn launch(task: Option<&str>) -> Result<Launch> {
+pub fn launch(task: Option<&str>, agent_args: &[String]) -> Result<Launch> {
+    let mut args = agent_args.to_vec();
+    args.extend(task.into_iter().flat_map(|s| ["--prompt".into(), s.into()]));
     Ok(Launch {
         command: "opencode",
-        args: task
-            .map(|task| vec!["--prompt".to_string(), task.to_string()])
-            .unwrap_or_default(),
+        args,
     })
 }
 
@@ -340,11 +340,21 @@ mod tests {
 
     #[test]
     fn launch_uses_interactive_prompt_flag() {
-        assert_eq!(launch(None).unwrap().command, "opencode");
-        assert!(launch(None).unwrap().args.is_empty());
+        assert_eq!(launch(None, &[]).unwrap().command, "opencode");
+        assert!(launch(None, &[]).unwrap().args.is_empty());
         assert_eq!(
-            launch(Some("task with 'quotes'")).unwrap().args,
+            launch(Some("task with 'quotes'"), &[]).unwrap().args,
             ["--prompt", "task with 'quotes'"]
         );
+    }
+
+    #[test]
+    fn launch_puts_agent_args_before_task() {
+        let args = ["-m".to_string(), "gpt".to_string()];
+        let launch_with = launch(Some("task"), &args).unwrap();
+        assert_eq!(launch_with.command, "opencode");
+        assert_eq!(launch_with.args, ["-m", "gpt", "--prompt", "task"]);
+        assert_eq!(launch(None, &args).unwrap().args, ["-m", "gpt"]);
+        assert!(launch(None, &[]).unwrap().args.is_empty());
     }
 }

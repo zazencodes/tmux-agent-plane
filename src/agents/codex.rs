@@ -2,10 +2,12 @@
 use super::{Launch, Observation, ProcessTable, RawState, ScanContext};
 use anyhow::Result;
 
-pub fn launch(task: Option<&str>) -> Result<Launch> {
+pub fn launch(task: Option<&str>, agent_args: &[String]) -> Result<Launch> {
+    let mut args = agent_args.to_vec();
+    args.extend(task.map(str::to_owned));
     Ok(Launch {
         command: "codex",
-        args: task.into_iter().map(str::to_owned).collect(),
+        args,
     })
 }
 
@@ -192,5 +194,15 @@ mod tests {
         );
         assert_eq!(clean_title("⠼ Fix tests | repo"), "Fix tests | repo");
         assert_eq!(clean_title("[ ! ] Action Required"), "Action Required");
+    }
+
+    #[test]
+    fn launch_puts_agent_args_before_task() {
+        let args = ["-m".to_string(), "gpt".to_string()];
+        let launch_with = launch(Some("task"), &args).unwrap();
+        assert_eq!(launch_with.command, "codex");
+        assert_eq!(launch_with.args, ["-m", "gpt", "task"]);
+        assert_eq!(launch(None, &args).unwrap().args, ["-m", "gpt"]);
+        assert!(launch(None, &[]).unwrap().args.is_empty());
     }
 }

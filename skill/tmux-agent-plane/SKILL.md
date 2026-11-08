@@ -51,7 +51,7 @@ tmux-agent-plane wait <agent> [--timeout S]
 tmux-agent-plane focus <agent>            # bring it on screen for the user
 tmux-agent-plane toggle-sidebar self  # requires known caller identity; opens/closes every sidebar
 tmux-agent-plane kill <agent>             # close its pane, ending it
-tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|window|session] [--session SESSION] [--cwd DIR] [--name NAME] [--wait] [--timeout S]
+tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|window|session] [--session SESSION] [--cwd DIR] [--name NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]
 ```
 
 `<agent>` is a name, pane id, or `self` when caller identity is reliable. `read` and `keys` also take any pane id, including a pane whose agent has not started yet.
@@ -70,12 +70,13 @@ tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|w
 - `spawn` placements are final. Only agents started by hand join a session named after their folder automatically, once, with any client viewing them.
 - Give the full task as the prompt: the new agent has none of your context. Say which files, what done looks like, and what to report back.
 - Always name agents you spawn (`--name reviewer`), following the naming rule above.
+- Pass agent CLI flags after `--`: `spawn codex "<task>" --in window --name reviewer -- -m <model>`. Each argument reaches the agent verbatim, ahead of the task; `spawn` adds none of its own.
 - `spawn` prints `<name> <pane> <location>`. The spawned agent records you as its parent when caller identity is known; Codex window/session spawns record `parent: null`.
 - A folder the agent has not trusted yet stops at a trust prompt, and `spawn` reports that the agent did not start. `read <pane>`, then answer with `keys <pane> ...` only when the user asked for that folder.
 
 ## Launch requirements
 
-`spawn` chooses each kind's interactive syntax: positional tasks for Claude/Codex, `grok -- <task>`, `pi -- <task>`, `opencode --prompt <task>`, and `agy --prompt-interactive <task>`. Install the Pi/OpenCode publishers or enable Grok leader mode before spawning those kinds. `spawn agy` requires a task and fails immediately without one. An agy started by hand appears after its first message and native folder trust acceptance; before then, address its pane ID with `read` or `keys`. A spawn timeout can mean an optional integration is missing; read the pane and check the documented opt-in setup.
+`spawn` chooses each kind's interactive syntax, with any `--` agent arguments first: `claude <args> <task>`, `codex <args> <task>`, `grok <args> -- <task>`, `pi <args> -- <task>`, `opencode <args> --prompt <task>`, and `agy <args> --prompt-interactive <task>`. Install the Pi/OpenCode publishers or enable Grok leader mode before spawning those kinds. `spawn agy` requires a task and fails immediately without one. An agy started by hand appears after its first message and native folder trust acceptance; before then, address its pane ID with `read` or `keys`. A spawn timeout can mean an optional integration is missing; read the pane and check the documented opt-in setup.
 
 Antigravity named projects (including resumed/forked projects) and `--settings` overlays excluding the cwd from `trustedWorkspaces` stay untracked because live trust cannot be proven.
 

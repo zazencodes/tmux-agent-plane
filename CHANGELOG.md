@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Added
+
+- `spawn` passes everything after `--` verbatim to the agent CLI, ahead of the task, so you can pick a model or any other flag: `tmux-agent-plane spawn codex "<task>" -- -m <model>`
+
 ## 0.5.0 - 2026-11-07
 
 ### Added

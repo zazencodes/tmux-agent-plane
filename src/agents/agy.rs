@@ -7,13 +7,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub fn launch(task: Option<&str>) -> Result<Launch> {
+pub fn launch(task: Option<&str>, agent_args: &[String]) -> Result<Launch> {
     let task = task
         .filter(|task| !task.trim().is_empty())
         .context("agy publishes no state until its first turn; give spawn a task")?;
+    let mut args = agent_args.to_vec();
+    args.extend(["--prompt-interactive".into(), task.into()]);
     Ok(Launch {
         command: "agy",
-        args: vec!["--prompt-interactive".into(), task.into()],
+        args,
     })
 }
 
@@ -948,13 +950,23 @@ mod tests {
 
     #[test]
     fn launch_stays_interactive() {
-        assert_eq!(launch(Some("task")).unwrap().command, "agy");
-        assert!(launch(None).is_err());
-        assert!(launch(Some("")).is_err());
-        assert!(launch(Some("  ")).is_err());
+        assert_eq!(launch(Some("task"), &[]).unwrap().command, "agy");
+        assert!(launch(None, &[]).is_err());
+        assert!(launch(Some(""), &[]).is_err());
+        assert!(launch(Some("  "), &[]).is_err());
         assert_eq!(
-            launch(Some("task")).unwrap().args,
+            launch(Some("task"), &[]).unwrap().args,
             ["--prompt-interactive", "task"]
         );
+    }
+
+    #[test]
+    fn launch_puts_agent_args_before_prompt() {
+        let args = ["-m".to_string(), "gpt".to_string()];
+        assert_eq!(
+            launch(Some("task"), &args).unwrap().args,
+            ["-m", "gpt", "--prompt-interactive", "task"]
+        );
+        assert!(launch(None, &args).is_err());
     }
 }

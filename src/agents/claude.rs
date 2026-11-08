@@ -5,10 +5,12 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-pub fn launch(task: Option<&str>) -> Result<Launch> {
+pub fn launch(task: Option<&str>, agent_args: &[String]) -> Result<Launch> {
+    let mut args = agent_args.to_vec();
+    args.extend(task.map(str::to_owned));
     Ok(Launch {
         command: "claude",
-        args: task.into_iter().map(str::to_owned).collect(),
+        args,
     })
 }
 
@@ -226,5 +228,15 @@ mod tests {
         };
         assert!(claude_sessions_in(&dir, &other).unwrap().is_empty());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn launch_puts_agent_args_before_task() {
+        let args = ["-m".to_string(), "gpt".to_string()];
+        let launch_with = launch(Some("task"), &args).unwrap();
+        assert_eq!(launch_with.command, "claude");
+        assert_eq!(launch_with.args, ["-m", "gpt", "task"]);
+        assert_eq!(launch(None, &args).unwrap().args, ["-m", "gpt"]);
+        assert!(launch(None, &[]).unwrap().args.is_empty());
     }
 }

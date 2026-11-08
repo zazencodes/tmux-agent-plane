@@ -262,14 +262,16 @@ An agent you start by hand joins a project by itself. Within a second of appeari
 
 `spawn` starts a persistent interactive session in tmux’s configured `default-shell`. It passes the launch command directly to an interactive login shell, which loads your startup files before running the agent, so aliases and flags apply even with long or multi-line tasks. Each argument is quoted separately. When the agent exits, a fresh interactive login shell stays open. `spawn` supplies its own launch command, so tmux’s `default-command` is not used.
 
-| Kind | Command sent to the shell with a task |
+Everything after `--` is passed verbatim to the agent CLI, each argument quoted separately, ahead of the task. `tmux-agent-plane spawn codex "Review the API" -- -m gpt-6.1-sol` runs `codex '-m' 'gpt-6.1-sol' 'Review the API'`. The arguments work with or without a task; `spawn` adds none of its own.
+
+| Kind | Command sent to the shell with a task and agent arguments |
 | --- | --- |
-| `claude` | `claude '<task>'` |
-| `codex` | `codex '<task>'` |
-| `pi` | `pi -- '<task>'` |
-| `opencode` | `opencode --prompt '<task>'` |
-| `agy` | `agy --prompt-interactive '<task>'` |
-| `grok` | `grok -- '<task>'` |
+| `claude` | `claude <args> '<task>'` |
+| `codex` | `codex <args> '<task>'` |
+| `pi` | `pi <args> -- '<task>'` |
+| `opencode` | `opencode <args> --prompt '<task>'` |
+| `agy` | `agy <args> --prompt-interactive '<task>'` |
+| `grok` | `grok <args> -- '<task>'` |
 
 All kinds except agy can be spawned without a task. `spawn agy` requires a task and fails immediately if it is missing: agy publishes no state until its first turn. An agy started by hand appears once you send its first message; before then, use `read <pane-id>` and `keys <pane-id> ...`. Pi and OpenCode need their opt-in publisher installed before `spawn` can detect them; Grok needs leader mode.
 
@@ -323,7 +325,7 @@ AI output must be two or three lowercase words joined by hyphens, each starting 
 | `focus <agent>` | Show the agent on your screen |
 | `cycle next\|previous --client CLIENT` | Direct key binding: focus the adjacent agent in global sidebar order for the exact invoking tmux client |
 | `kill <agent>` | Close the agent's pane |
-| `spawn claude\|codex\|pi\|opencode\|agy\|grok ["<task>"] [--in pane\|window\|session] [--session SESSION] [--cwd DIR] [--name NAME] [--wait] [--timeout S]` | Start an agent. `--in pane` (default) splits the caller's pane; `--session` selects an existing project with `--in window`, or names a new one with `--in session` |
+| `spawn claude\|codex\|pi\|opencode\|agy\|grok ["<task>"] [--in pane\|window\|session] [--session SESSION] [--cwd DIR] [--name NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]` | Start an agent. Arguments after `--` go verbatim to the agent CLI. `--in pane` (default) splits the caller's pane; `--session` selects an existing project with `--in window`, or names a new one with `--in session` |
 | `toggle-sidebar <window>` | What the sidebar key does, from a window (a window or pane id) |
 | `follow-sidebar <window>` | Add the sidebar to a window while it is open. The plugin runs it when a window is created |
 | `sidebar` | The sidebar's agent list, run in the sidebar pane |

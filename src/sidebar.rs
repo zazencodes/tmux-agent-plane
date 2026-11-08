@@ -1691,7 +1691,7 @@ mod tests {
     #[test]
     fn new_agent_kinds_all_start_without_a_task() {
         for kind in NEW_AGENT_KINDS {
-            assert!((kind.adapter().launch)(None).is_ok());
+            assert!((kind.adapter().launch)(None, &[]).is_ok());
         }
     }
 

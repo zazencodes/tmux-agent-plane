@@ -42,13 +42,15 @@ pub struct Observation {
     pub completion_epoch: Option<String>,
 }
 
+/// An interactive agent command line: `args` holds the agent arguments and then the task.
 pub struct Launch {
     pub command: &'static str,
     pub args: Vec<String>,
 }
 pub struct Adapter {
     pub scan: fn(&ScanContext<'_>) -> Result<Vec<Observation>>,
-    pub launch: fn(Option<&str>) -> Result<Launch>,
+    /// Builds the command from an optional task and verbatim agent arguments.
+    pub launch: fn(Option<&str>, &[String]) -> Result<Launch>,
 }
 pub struct ScanContext<'a> {
     pub panes: &'a [Pane],
