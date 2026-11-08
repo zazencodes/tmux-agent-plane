@@ -15,6 +15,10 @@ A background daemon tracks Claude Code, Codex and Antigravity in the user's tmux
 
 You appear in this list when your kind's tracking requirements are met. `list` marks you with `*` (or `"self": true` in JSON) when caller identity is reliable.
 
+## User configuration
+
+When you load this skill, read `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/skill.md` if it exists, and follow it. It holds the user's own instructions for agents using this skill, such as extra `spawn` arguments per kind, and overrides this skill's defaults. When the file is absent, use the defaults below.
+
 ## First: name yourself
 
 The user tells agents apart by name. Preserve a name already assigned in your task. When you load this skill, run `list`. Codex callers have no self marker: use an explicit name supplied in your task, and never run `rename self` or use `$TMUX_PANE`. Other callers whose own marked name is still the default `<kind>-<number>` (`claude-154`) name themselves after their task:

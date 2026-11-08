@@ -116,6 +116,25 @@ These integrations are independent. Install only the ones you use; absent publis
 
 - **Grok Build (macOS):** add `use_leader = true` to the existing `[cli]` table in `~/.grok/config.toml` (or `$GROK_HOME/config.toml`), then restart Grok sessions. [Example configuration](extensions/grok/config.toml.example). The daemon uses the same `GROK_HOME` and `GROK_LEADER_SOCKET` overrides as Grok; its default socket is `~/.grok/leader.sock`.
 
+## Skill configuration
+
+Optional. To give agents that use the skill your own standing instructions, write them in `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/skill.md`. The skill tells every agent that loads it to read this file and follow it, and its instructions win over the skill's defaults. It is free-form markdown, per user, and read only by agents: `tmux-agent-plane` itself never reads it. It is the place for any agent-facing preference: flags to pass each kind through `spawn ... -- <args>`, how to name agents, where to put them.
+
+An example:
+
+```markdown
+# My tmux-agent-plane preferences
+
+## Codex
+
+When spawning Codex, unless I name a different model or effort, pass
+`-- -m gpt-6.1-sol -c model_reasoning_effort="medium"`.
+
+## Placement
+
+Start helpers with `--in window` in the current project, never `--in pane`.
+```
+
 ## Usage
 
 Run your agents as usual. Then ask any of them things like:
