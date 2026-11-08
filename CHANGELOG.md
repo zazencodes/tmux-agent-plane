@@ -9,6 +9,7 @@ before 1.0, a breaking change bumps the minor version.
 
 - `spawn` passes everything after `--` verbatim to the agent CLI, ahead of the task, so you can pick a model or any other flag: `tmux-agent-plane spawn codex "<task>" -- -m <model>`
 - Give agents your standing preferences in `~/.config/tmux-agent-plane/config.toml`, such as the arguments to start Codex with; the skill tells agents to read and follow it. See step 5 of Install in the README
+- Install by asking your coding agent to "install and configure tmux-agent-plane with me"; the README walks it through onboarding you, one choice at a time
 
 ## 0.5.0 - 2026-11-07
 

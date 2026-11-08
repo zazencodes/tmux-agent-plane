@@ -23,6 +23,16 @@ Claude Code, Codex and Antigravity use native signals. Pi and OpenCode use publi
 
 https://github.com/user-attachments/assets/897c88e9-50fe-4c21-ab3f-0e1785ae2a5b
 
+## Quick start
+
+Open your coding agent (Claude Code, Codex or any other) and ask it:
+
+```text
+Install and configure tmux-agent-plane with me: https://github.com/zazencodes/tmux-agent-plane
+```
+
+It reads this README, installs the pieces and asks you about the choices along the way. To do it by hand, follow [Install](#install).
+
 ## Features
 
 - **Every agent, every session.** One daemon watches every pane in every tmux session and keeps a single index of the agents in them: name, state, task, location and working directory.
@@ -54,6 +64,8 @@ https://github.com/user-attachments/assets/897c88e9-50fe-4c21-ab3f-0e1785ae2a5b
 - macOS or Linux. Desktop notifications use `osascript` on macOS and `notify-send` on Linux.
 
 ## Install
+
+**Agents installing this for a user:** onboard them. Do each step below in order. Before changing any of their files (`~/.tmux.conf`, `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, skill folders), show the change and ask. Ask which agent CLIs they use, and set up the matching [More agents](#more-agents) integrations for Pi, OpenCode or Grok Build. Ask where the status bar should go, and whether they have standing preferences for their agents, such as the model for each kind (step 5). Then reload tmux, run `tmux-agent-plane list` and show them the sidebar key (default `prefix + S`) and [optional AI naming](#optional-ai-naming).
 
 **1. The binary.**
 
