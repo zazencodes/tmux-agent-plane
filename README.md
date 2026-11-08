@@ -88,7 +88,19 @@ ln -s ~/.tmux/plugins/tmux-agent-plane/skill/tmux-agent-plane ~/.claude/skills/t
 ln -s ~/.tmux/plugins/tmux-agent-plane/skill/tmux-agent-plane ~/.agents/skills/tmux-agent-plane   # Codex
 ```
 
-**5. Tell your agents.** Agents reach for raw tmux commands out of habit, even with the skill installed. One line in your global `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` fixes that:
+**5. Your agent preferences (optional).** Standing instructions for agents using the skill go in `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/config.toml`. The skill tells every agent that loads it to read this file, if it exists, and follow it over the skill's defaults. Only agents read it; the binary's own settings stay in `config.json` beside it. Without the file, agents use the skill as written.
+
+`instructions` apply to every agent. Each `[spawn.<kind>]` table holds the `args` agents pass after `--` whenever they spawn that kind, each array item as one argument, unless your request names other values for those options, plus `instructions` for that kind:
+
+```toml
+instructions = ["Start helpers with --in window in the current project."]
+
+[spawn.codex]
+args = ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="medium"']
+instructions = ["Never use GPT-6-Astra (gpt-6-astra)."]
+```
+
+**6. Tell your agents.** Agents reach for raw tmux commands out of habit, even with the skill installed. One line in your global `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` fixes that:
 
 ```markdown
 - Coding agents in my tmux are indexed by `tmux-agent-plane`. Whenever a task touches another agent (checking on, reading, messaging, waiting for, showing, closing or spawning one), load the `tmux-agent-plane` skill first and use its CLI; never drive agent panes with raw tmux commands.
@@ -115,25 +127,6 @@ These integrations are independent. Install only the ones you use; absent publis
   ```
 
 - **Grok Build (macOS):** add `use_leader = true` to the existing `[cli]` table in `~/.grok/config.toml` (or `$GROK_HOME/config.toml`), then restart Grok sessions. [Example configuration](extensions/grok/config.toml.example). The daemon uses the same `GROK_HOME` and `GROK_LEADER_SOCKET` overrides as Grok; its default socket is `~/.grok/leader.sock`.
-
-## Skill configuration
-
-Optional. To give agents that use the skill your own standing instructions, write them in `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/skill.md`. The skill tells every agent that loads it to read this file and follow it, and its instructions win over the skill's defaults. It is free-form markdown, per user, and read only by agents: `tmux-agent-plane` itself never reads it. It is the place for any agent-facing preference: flags to pass each kind through `spawn ... -- <args>`, how to name agents, where to put them.
-
-An example:
-
-```markdown
-# My tmux-agent-plane preferences
-
-## Codex
-
-When spawning Codex, unless I name a different model or effort, pass
-`-- -m gpt-6.1-sol -c model_reasoning_effort="medium"`.
-
-## Placement
-
-Start helpers with `--in window` in the current project, never `--in pane`.
-```
 
 ## Usage
 

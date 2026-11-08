@@ -17,7 +17,10 @@ You appear in this list when your kind's tracking requirements are met. `list` m
 
 ## User configuration
 
-When you load this skill, read `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/skill.md` if it exists, and follow it. It holds the user's own instructions for agents using this skill, such as extra `spawn` arguments per kind, and overrides this skill's defaults. When the file is absent, use the defaults below.
+When you load this skill, read `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/config.toml` if it exists. It holds the user's preferences for agents using this skill and overrides this skill's defaults. When it is absent, use the defaults below.
+
+- `instructions`: a list of rules; follow every one.
+- `[spawn.<kind>]`: when you spawn that kind, pass its `args` after `--`, each array item as one shell-quoted argument (`spawn codex "<task>" ... -- '-m' 'gpt-6.1-sol'`), and follow its `instructions`. When the user's request names a different value for one of those options, use the user's value for that option.
 
 ## First: name yourself
 
