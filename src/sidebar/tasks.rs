@@ -451,6 +451,32 @@ mod tests {
     }
 
     #[test]
+    fn tasks_stay_below_family_when_agents_overflow() {
+        let mut sidebar = with_tasks();
+        sidebar.all_agents = crate::ui::family::tests::family_agents();
+        for i in 10..40 {
+            sidebar
+                .all_agents
+                .push(agent(&format!("%{i}"), State::Idle));
+        }
+        sidebar.rebuild();
+        sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%2"));
+        key(&mut sidebar, KeyCode::Char('t'));
+        key(&mut sidebar, KeyCode::Char('p'));
+        let screen = rendered(&mut sidebar);
+        let family = screen.find(" family ").expect(&screen);
+        let tasks = screen.find("── tasks").expect(&screen);
+        assert!(family < tasks, "{screen}");
+        assert!(
+            screen.contains("web-dev") && screen.contains("worker"),
+            "{screen}"
+        );
+        key(&mut sidebar, KeyCode::Char('t'));
+        let screen = rendered(&mut sidebar);
+        assert!(!screen.contains("── tasks"), "{screen}");
+    }
+
+    #[test]
     fn rows_fit_narrow_widths() {
         let long = task(
             "a-very-long-task-name-indeed",

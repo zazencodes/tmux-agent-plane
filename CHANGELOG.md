@@ -27,6 +27,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Shown background tasks stay at the bottom of the sidebar, below the family graph, while the agent list scrolls
+
 - A parent link now belongs to the agents, not their panes: it ends when the spawned agent exits, so an agent started later in the same pane no longer inherits it, and `list` shows `ended` once the parent has exited. `spawn` from a plain shell records no parent
 - `?` in the sidebar and agent picker is shorter: your tmux keys for moving between agents and in and out of the sidebar, as you have them bound, then one line per key under Move, Find, Act and Show. Keys for confirming and editing text stay in the footer while you use them
 

@@ -1483,14 +1483,33 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         .filter(|_| sidebar.navigation.family && sidebar.error.is_none())
         .map(|selected| family::family(&sidebar.all_agents, selected))
         .filter(|family| !family.alone());
-    // The family takes at most half the height, so the list stays in view.
-    let family_height = family.as_ref().map_or(0, |family| {
-        (family.height() + 2).min(f.area().height.saturating_sub(quota_height) / 2)
-    });
-    let [list_area, family_area, quota_area, help_area] = Layout::vertical([
+    let task_items = tasks::items(
+        sidebar.tasks.rows(),
+        sidebar
+            .list
+            .selected()
+            .and_then(|row| row.checked_sub(sidebar.agents.len())),
+        sidebar.in_use.as_deref(),
+        f.area().width.saturating_sub(2) as usize,
+    );
+    let tasks_height = task_items
+        .iter()
+        .map(|item| item.height() as u16)
+        .sum::<u16>();
+    // Reserve tasks first; the family shares the remaining room with agents.
+    let remaining = f
+        .area()
+        .height
+        .saturating_sub(quota_height + footer_height + tasks_height);
+    // The family takes at most half the remaining height.
+    let family_height = family
+        .as_ref()
+        .map_or(0, |family| (family.height() + 2).min(remaining / 2));
+    let [list_area, family_area, quota_area, tasks_area, help_area] = Layout::vertical([
         Constraint::Min(3),
         Constraint::Length(family_height),
         Constraint::Length(quota_height),
+        Constraint::Length(tasks_height),
         Constraint::Length(footer_height),
     ])
     .areas(f.area());
@@ -1503,6 +1522,15 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     if sidebar.quota.pinned {
         sidebar.quota.draw_panel(f, quota_area);
     }
+    let tasks_area = tasks_area.inner(ratatui::layout::Margin::new(1, 0));
+    let mut task_state = ListState::default().with_selected(
+        sidebar
+            .list
+            .selected()
+            .and_then(|row| row.checked_sub(sidebar.agents.len())),
+    );
+    fill_viewport(&mut task_state, &task_items, tasks_area.height);
+    f.render_stateful_widget(List::new(task_items), tasks_area, &mut task_state);
     let inner = list_area.width.saturating_sub(2) as usize;
     let block = panel(Line::from(" agents "));
     let content = block.inner(list_area);
@@ -1531,7 +1559,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
             sidebar,
             e,
         );
-    } else if sidebar.agents.is_empty() && sidebar.tasks.rows().is_empty() {
+    } else if sidebar.agents.is_empty() {
         let text = if sidebar.all_agents.is_empty() {
             NO_AGENTS
         } else {
@@ -1546,7 +1574,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         );
     } else {
         let selected = sidebar.list.selected();
-        let mut items = items(
+        let items = items(
             &sidebar.agents,
             &sidebar.all_agents,
             selected,
@@ -1555,29 +1583,13 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
             &sidebar.navigation.pattern,
             inner,
         );
-        items.extend(tasks::items(
-            sidebar.tasks.rows(),
-            selected.and_then(|row| row.checked_sub(sidebar.agents.len())),
-            sidebar.in_use.as_deref(),
-            inner,
-        ));
-        let mut list_area = agents_area;
-        if sidebar.agents.is_empty() {
-            // Tasks only: the agent message above them.
-            let rows = sidebar.tasks.rows().len() as u16 + 2;
-            let [message_area, tasks_area] =
-                Layout::vertical([Constraint::Min(0), Constraint::Length(rows)]).areas(agents_area);
-            let text = if sidebar.all_agents.is_empty() {
-                NO_AGENTS
-            } else {
-                ["no matching agents", "d changes state · esc clears filter"]
-            };
-            let block = ratatui::widgets::Block::default();
-            message(f, message_area, block, TEXT, &text);
-            list_area = tasks_area;
+        let mut agent_state = sidebar.list;
+        if sidebar.selected_task().is_some() {
+            agent_state.select(None);
         }
-        fill_viewport(&mut sidebar.list, &items, list_area.height);
-        f.render_stateful_widget(List::new(items), list_area, &mut sidebar.list);
+        fill_viewport(&mut agent_state, &items, agents_area.height);
+        f.render_stateful_widget(List::new(items), agents_area, &mut agent_state);
+        *sidebar.list.offset_mut() = agent_state.offset();
     }
 
     let footer = confirmation.map_or_else(
