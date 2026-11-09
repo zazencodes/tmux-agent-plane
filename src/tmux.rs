@@ -78,6 +78,8 @@ pub struct Pane {
     pub parent: String,
     /// The pane has its project and is never placed automatically again.
     pub placed: bool,
+    /// The pane runs a background task, which is never an agent.
+    pub task: bool,
 }
 
 impl Pane {
@@ -91,7 +93,7 @@ impl Pane {
     }
 }
 
-const PANE_FIELDS: [&str; 14] = [
+const PANE_FIELDS: [&str; 15] = [
     "#{pane_id}",
     "#{pane_pid}",
     "#{session_name}",
@@ -106,6 +108,7 @@ const PANE_FIELDS: [&str; 14] = [
     "#{@agent-plane-name}",
     "#{@agent-plane-parent}",
     "#{@agent-plane-placed}",
+    "#{?@agent-plane-task,1,0}",
 ];
 
 fn parse_pane(line: &str) -> Result<Pane> {
@@ -128,6 +131,7 @@ fn parse_pane(line: &str) -> Result<Pane> {
         name: f[11].to_string(),
         parent: f[12].to_string(),
         placed: f[13] == "1",
+        task: f[14] == "1",
     })
 }
 
@@ -309,6 +313,7 @@ mod tests {
             name: "agent".into(),
             parent: String::new(),
             placed: false,
+            task: false,
         };
         let mut linked = first.clone();
         linked.session = "zeta".into();

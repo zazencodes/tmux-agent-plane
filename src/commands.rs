@@ -21,7 +21,7 @@ pub enum Placement {
     Session,
 }
 
-fn codex_caller() -> bool {
+pub(crate) fn codex_caller() -> bool {
     std::env::var_os("CODEX_THREAD_ID").is_some() || std::env::var_os("CODEX_SESSION_ID").is_some()
 }
 
@@ -34,7 +34,7 @@ fn resolve_caller(codex: bool, pane: Option<String>) -> Result<Option<String>> {
     Ok(pane)
 }
 
-fn self_pane() -> Result<Option<String>> {
+pub(crate) fn self_pane() -> Result<Option<String>> {
     resolve_caller(codex_caller(), std::env::var("TMUX_PANE").ok())
 }
 
@@ -64,7 +64,7 @@ fn display_parent(index: &Index, parent: &Option<String>) -> String {
     }
 }
 
-fn home_relative(path: &str) -> String {
+pub(crate) fn home_relative(path: &str) -> String {
     match std::env::var("HOME") {
         Ok(home) if path.starts_with(&home) => format!("~{}", &path[home.len()..]),
         _ => path.to_string(),
@@ -535,18 +535,24 @@ fn validate_session_placement(placement: Placement, session: Option<&str>) -> Re
 /// Keep the command name literal so interactive aliases/functions apply. Arguments
 /// are shell data, and after the agent returns a fresh login shell owns the terminal.
 fn shell_launch(shell: &str, command: &str, args: &[String]) -> String {
-    let mut script = command.to_owned();
-    for arg in args {
-        script.push(' ');
-        script.push_str(&shell_quote(arg));
-    }
+    let mut script = command_line(command, args);
     script.push_str("\nexec ");
     script.push_str(&shell_quote(shell));
     script.push_str(" -il");
     script
 }
 
-fn shell_quote(s: &str) -> String {
+/// The command name literal, so interactive aliases and functions apply; arguments as shell data.
+pub(crate) fn command_line(command: &str, args: &[String]) -> String {
+    let mut line = command.to_owned();
+    for arg in args {
+        line.push(' ');
+        line.push_str(&shell_quote(arg));
+    }
+    line
+}
+
+pub(crate) fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 

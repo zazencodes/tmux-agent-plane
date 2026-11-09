@@ -1101,6 +1101,7 @@ mod tests {
             }],
             order: Vec::new(),
             last_agent: Some("%3".into()),
+            tasks: Vec::new(),
         };
         let client = |pane: &str| Client {
             name: "client".into(),
@@ -1117,6 +1118,7 @@ mod tests {
         assert_eq!(view(&index, "%9").as_deref(), Some("%1"));
         let index = Index {
             last_agent: Some("%2".into()),
+            tasks: Vec::new(),
             ..index
         };
         assert_eq!(view(&index, "%9").as_deref(), Some("%2"));

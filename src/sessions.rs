@@ -1,6 +1,6 @@
 //! A tmux session is a project. Resolve exact destinations and move physical panes.
 use crate::index::{self, Agent};
-use crate::{detect, navigation, tmux};
+use crate::{detect, navigation, tasks, tmux};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -118,7 +118,11 @@ impl Snapshot {
 
 fn list(json: bool) -> Result<()> {
     let index = index::read()?;
-    let sessions = inventory(&index.agents)?;
+    // The tasks session holds background tasks, never a project.
+    let sessions: Vec<Session> = inventory(&index.agents)?
+        .into_iter()
+        .filter(|s| s.name != tasks::SESSION)
+        .collect();
     if json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
     } else {
@@ -168,6 +172,9 @@ pub fn validate_name(name: &str) -> Result<()> {
             "session name must be nonempty, without dots, colons, control characters or surrounding whitespace"
         );
     }
+    if name == tasks::SESSION {
+        bail!("{name:?} is the background tasks session; choose another project name");
+    }
     Ok(())
 }
 
@@ -204,6 +211,17 @@ pub fn create_project(name: &str, cwd: Option<PathBuf>) -> Result<String> {
     Ok(created.trim().to_owned())
 }
 
+/// Agents go to projects; the tasks session holds only tasks.
+fn project(session: &Session) -> Result<()> {
+    if session.name == tasks::SESSION {
+        bail!(
+            "{:?} holds background tasks, not agents; choose a project session",
+            session.name
+        );
+    }
+    independent(session)
+}
+
 fn independent(session: &Session) -> Result<()> {
     if session.group.is_some() {
         bail!(
@@ -218,7 +236,7 @@ fn independent(session: &Session) -> Result<()> {
 pub fn destination(target: &str) -> Result<String> {
     let snapshot = Snapshot::load()?;
     let session = snapshot.find(target)?;
-    independent(session)?;
+    project(session)?;
     Ok(session.id.clone())
 }
 
@@ -238,7 +256,7 @@ fn plan_move<'a>(
     following: usize,
 ) -> Result<MovePlan<'a>> {
     let destination = snapshot.find(target)?;
-    independent(destination)?;
+    project(destination)?;
     let links: Vec<_> = snapshot.panes.iter().filter(|p| p.id == pane).collect();
     let [link] = links.as_slice() else {
         bail!("agent pane is missing or its window is linked into multiple sessions; move refused");
@@ -423,6 +441,9 @@ fn plan_placement<'a>(
     let [link] = links.as_slice() else {
         return Ok(Placement::Stay);
     };
+    if project == tasks::SESSION {
+        return Ok(Placement::Stay);
+    }
     let shared_window = snapshot
         .panes
         .iter()
@@ -576,6 +597,20 @@ mod tests {
         .unwrap();
         assert!(plan_move(&snapshot, "%0", "api", 1).unwrap().final_window);
         assert!(plan_move(&snapshot, "%0", "api", 0).is_err());
+    }
+
+    #[test]
+    fn the_tasks_session_is_never_a_project() {
+        let rows = base() + &row("$2", tasks::SESSION, 0, "", "@2", "%2", false);
+        let snapshot = Snapshot::parse(&rows).unwrap();
+        assert!(project(snapshot.find(tasks::SESSION).unwrap()).is_err());
+        assert!(project(snapshot.find("work").unwrap()).is_ok());
+        assert!(plan_move(&snapshot, "%0", tasks::SESSION, 0).is_err());
+        assert!(matches!(
+            plan_placement(&snapshot, "%0", tasks::SESSION, 0).unwrap(),
+            Placement::Stay
+        ));
+        assert!(validate_name(tasks::SESSION).is_err());
     }
 
     #[test]

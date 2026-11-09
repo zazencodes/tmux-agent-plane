@@ -24,11 +24,13 @@ pub struct Detected {
 pub fn detect(panes: &[Pane]) -> Result<Batch<Detected>> {
     // A shared process-table failure invalidates the whole scan and is fatal.
     let processes = ProcessTable::load().context("loading process table")?;
-    let context = ScanContext {
-        panes,
-        processes: &processes,
-    };
-    Ok(scan_kinds(panes, |kind| (kind.adapter().scan)(&context)))
+    Ok(detect_with(panes, &processes))
+}
+
+/// Detect against a process table the caller also uses for something else.
+pub fn detect_with(panes: &[Pane], processes: &ProcessTable) -> Batch<Detected> {
+    let context = ScanContext { panes, processes };
+    scan_kinds(panes, |kind| (kind.adapter().scan)(&context))
 }
 
 fn scan_kinds(
@@ -60,6 +62,10 @@ fn scan_kinds(
                 ));
                 continue;
             };
+            // A task runs whatever it was given, an agent CLI included. It is never an agent.
+            if pane.task {
+                continue;
+            }
             occupied.entry(pane.id.clone()).or_default().push(kind);
             batch.values.push(Detected {
                 pane: pane.clone(),
@@ -110,6 +116,7 @@ mod tests {
             name: String::new(),
             parent: String::new(),
             placed: false,
+            task: false,
         }
     }
     fn observation(id: &str) -> Observation {
@@ -143,6 +150,21 @@ mod tests {
                 assert_eq!(batch.issues[0].message, "fixture session: unknown state");
             }
         }
+    }
+
+    #[test]
+    fn a_task_pane_is_never_an_agent_and_faults_nothing() {
+        let mut task = pane("%2");
+        task.task = true;
+        let panes = [pane("%1"), task];
+        let batch = scan_kinds(&panes, |kind| match kind {
+            Kind::Claude => Ok(vec![observation("%1"), observation("%2")]),
+            Kind::Codex => Ok(vec![observation("%2")]),
+            _ => Ok(Vec::new()),
+        });
+        assert_eq!(batch.values.len(), 1);
+        assert_eq!(batch.values[0].pane.id, "%1");
+        assert!(batch.issues.is_empty());
     }
 
     #[test]

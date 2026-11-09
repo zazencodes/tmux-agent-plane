@@ -2064,6 +2064,7 @@ mod tests {
             windows: Vec::new(),
             order: order.iter().map(|pane| pane.to_string()).collect(),
             last_agent: None,
+            tasks: Vec::new(),
         }
     }
 
@@ -2188,6 +2189,7 @@ mod tests {
         let at = |updated_at, active: &str, viewed| Index {
             windows: vec![window(active, viewed)],
             last_agent: Some("%1".into()),
+            tasks: Vec::new(),
             ..index_at(updated_at, &agents, &["%1", "%2"])
         };
         sidebar.apply(at(1, "%1", true), Origin::Sidebar("%9"));

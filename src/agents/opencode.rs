@@ -180,6 +180,7 @@ mod tests {
             name: String::new(),
             parent: String::new(),
             placed: false,
+            task: false,
         }
     }
     fn processes() -> ProcessTable {

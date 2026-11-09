@@ -44,6 +44,7 @@ It reads this README, installs the pieces and asks you about the choices along t
 - **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`. Optional AI naming can name the remaining default-named agents; press `c` in the sidebar to set it up.
 - **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. A spawned agent records its parent when caller identity is known.
 - **Sessions are projects.** Inspect and create named project sessions, start helpers directly in them, and move running agent panes between projects while their processes, names and parent links stay intact.
+- **Background tasks every agent can see.** Agents start dev servers, watchers and tunnels with `task start`, so there is one list of what runs, with its ports, and nobody starts a second copy. Tasks keep running after the agent that started them, and keep their output and exit status when they stop. See [Background tasks](#background-tasks).
 - **Your agents, unchanged.** Spawned agents start in a normal shell, so your aliases and flags apply, and the shell stays when the agent exits.
 
 ## States
@@ -282,6 +283,26 @@ A source window or detached session may disappear when it has no remaining conte
 
 An agent you start by hand joins a project by itself. Within a second of appearing it moves to the session named after its folder, which is created if needed, and any client viewing it moves too, so you keep working in it without interruption. The folder is the one the agent runs in, so a subfolder or worktree gets its own project; `.` and `:` in a folder name become `-`. This happens once per pane, so a later `move` sticks. Agents already running when the daemon starts, agents from `spawn` or the sidebar's `c`, and agents sharing a window with other panes stay put, as do moves into a session another client is using and any move involving grouped sessions or linked windows.
 
+### Background tasks
+
+A task is a long-running command an agent starts through the plane: a dev server, a file watcher, a tunnel, a queue worker. Every agent sees the same list, so an agent that needs the dev server reuses the running one instead of starting another on a different port.
+
+```bash
+tmux-agent-plane task start web --cwd ~/pro/site -- npm run dev
+tmux-agent-plane task list
+tmux-agent-plane task read web --lines 100
+tmux-agent-plane task restart web
+tmux-agent-plane task stop web
+```
+
+Each task runs in its own window, named after it, in a detached session called `agent-plane-tasks` that is created on first use. Its command runs the way `spawn` runs an agent, through an interactive login shell in tmux's `default-shell`, so your PATH and aliases apply. The first word after `--` is the program, one plain word such as `npm`; every later word reaches it verbatim. For pipes or other shell syntax, run `sh -c '...'`.
+
+Names are one word of letters, digits, `-`, `_` and `.`, unique across tmux. `task start` with a name that is already running the same command in the same folder reuses it and prints `(already running)`; if that task has exited, it runs it again. The same name with a different command or folder fails and shows what the existing task runs, where and who started it. `task start` returns at once and prints `<name> <pane> <state>`.
+
+A task keeps running when the agent that started it exits; only `task stop` (or `x` in the sidebar) ends it, and it then leaves the list. When a task's command ends, its window stays with its output and the list shows `exited <code>`; a command ended by a signal shows 128 plus the signal number, as a shell reports it. `task restart` runs the command again in the same window, clearing the earlier output.
+
+`task list` shows each task's state, the TCP ports its processes listen on, folder, the agent that started it, how long ago it started, and its command; `--json` gives every field. The daemon looks up ports with `lsof` at most every five seconds, only while tasks run. A task is never an agent, even when its command is an agent CLI, and projects and automatic placement leave the tasks session alone. The definition lives on the task's tmux pane, so tasks and their state survive a daemon restart.
+
 ### Agent launch syntax
 
 `spawn` starts a persistent interactive session in tmux’s configured `default-shell`. It passes the launch command directly to an interactive login shell, which loads your startup files before running the agent, so aliases and flags apply even with long or multi-line tasks. Each argument is quoted separately. When the agent exits, a fresh interactive login shell stays open. `spawn` supplies its own launch command, so tmux’s `default-command` is not used.
@@ -350,6 +371,11 @@ AI output must be two or three lowercase words joined by hyphens, each starting 
 | `cycle next\|previous --client CLIENT` | Direct key binding: focus the adjacent agent in global sidebar order for the exact invoking tmux client |
 | `kill <agent>` | Close the agent's pane |
 | `spawn claude\|codex\|pi\|opencode\|agy\|grok ["<task>"] [--in pane\|window\|session] [--session SESSION] [--cwd DIR] [--name NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]` | Start an agent. Arguments after `--` go verbatim to the agent CLI. `--in pane` (default) splits the caller's pane; `--session` selects an existing project with `--in window`, or names a new one with `--in session` |
+| `task start <name> [--cwd DIR] -- <command>...` | Start a long-running command in the background, or reuse the running task of that name and command. Different work under a taken name fails |
+| `task list [--json]` | Background tasks: state (`running` or `exited <code>`), listening ports, cwd, starter, age and command |
+| `task read <name> [--lines N]` | The task's screen, plus N lines of scrollback |
+| `task restart <name>` | Run the task's command again in its window |
+| `task stop <name>` | End the task; it leaves the list |
 | `toggle-sidebar <window>` | What the sidebar key does, from a window (a window or pane id) |
 | `follow-sidebar <window>` | Add the sidebar to a window while it is open. The plugin runs it when a window is created |
 | `sidebar` | The sidebar's agent list, run in the sidebar pane |
@@ -371,6 +397,7 @@ Read a blocked question before replying: `tmux-agent-plane read reviewer`, then 
 - **OpenCode** publishes its active TUI session and native status, permission and question snapshots through the opt-in TUI publisher plugin in `extensions/opencode/`. Its default TUI has no external HTTP listener.
 - **Grok Build** uses the official leader roster's `working`, `needs_input` and `idle` states. Native active-session records tie each local resident session to its live TUI process. The blinking terminal title is not used for state.
 - **The daemon** scans all enabled kinds once a second for every pane on the tmux server. It marks a turn that ends off screen as `done` until the pane is on screen, writes the index to `~/.local/state/tmux-agent-plane/agents.json` along with each window's active pane, the sidebar row order and the last agent used, closes sidebars left alone in a window, sets the `@agent_plane_status` tmux option, and sends notifications. It also keeps hidden windows at the size they will be shown at, so moving between agents resizes nothing: about two seconds after your terminal changes size, each hidden window gets one resize to its final layout, and tmux's global `default-size` follows so new windows start right. Agents redraw once per size change, off screen; idle, this runs nothing. Windows on screen, zoomed windows and any `window-size` other than tmux's default `latest` are left alone, as is everything while attached clients show different sizes. It runs detached from tmux jobs, exits with the tmux server, and starting it again keeps the existing watcher. Lifecycle and daemon errors are appended to `daemon.log` alongside the index (`$XDG_STATE_HOME/tmux-agent-plane/daemon.log` when set).
+- **Background tasks** are panes in the `agent-plane-tasks` session whose tmux pane options hold the task's name, folder, command, starter and start time, with `remain-on-exit` so a finished task keeps its exit status. The daemon adds them to the index each second, never as agents, with their listening ports from `lsof` on each task's process tree at most every five seconds.
 - **The CLI, the sidebars and the agent list** read the index. They fail with a clear error when the daemon is not running.
 - **`send`** pastes with bracketed paste, then presses Enter, so a multi-line prompt arrives as one message.
 

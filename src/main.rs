@@ -16,6 +16,7 @@ mod projects;
 mod sessions;
 mod sidebar;
 mod sidebar_help;
+mod tasks;
 mod tmux;
 mod ui;
 
@@ -147,6 +148,11 @@ enum Cmd {
         #[arg(long)]
         timeout: Option<u64>,
     },
+    /// Run long-lived commands (dev servers, watchers, tunnels) in the background, shared by every agent
+    Task {
+        #[command(subcommand)]
+        action: tasks::Action,
+    },
     /// Start an agent in a new pane, window or session
     Spawn {
         kind: index::Kind,
@@ -201,6 +207,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Cycle { direction, client } => navigation::cycle(direction, &client),
         Cmd::Kill { target } => commands::kill(&target),
         Cmd::Wait { target, timeout } => commands::wait(&target, timeout),
+        Cmd::Task { action } => tasks::run(action),
         Cmd::Spawn {
             kind,
             task,

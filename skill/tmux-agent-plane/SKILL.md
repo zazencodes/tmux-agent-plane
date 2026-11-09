@@ -40,7 +40,7 @@ Codex tool shells can inherit `TMUX_PANE` from a shared app-server. Their `CODEX
 
 ## Rule: the CLI, never raw tmux
 
-Do every agent job through `tmux-agent-plane`: finding agents, reading their screens, typing into them, starting, showing and closing them. Never run `tmux list-panes`, `capture-pane`, `send-keys`, `split-window`, `new-window` or `kill-pane` against agents yourself. The daemon already indexes every agent in every session; `list` answers in one call what tmux would make you piece together, and the CLI keeps names, parents and done/seen state right. Raw tmux is fine only for panes that are not agents (a dev server, a log tail).
+Do every agent job through `tmux-agent-plane`: finding agents, reading their screens, typing into them, starting, showing and closing them. Never run `tmux list-panes`, `capture-pane`, `send-keys`, `split-window`, `new-window` or `kill-pane` against agents yourself. The daemon already indexes every agent in every session; `list` answers in one call what tmux would make you piece together, and the CLI keeps names, parents and done/seen state right. Raw tmux is fine only for panes that are not agents or tasks (a log tail you opened yourself). Long-running commands go through `task` (see Background tasks).
 
 ## Commands
 
@@ -59,6 +59,11 @@ tmux-agent-plane focus <agent>            # bring it on screen for the user
 tmux-agent-plane toggle-sidebar self  # requires known caller identity; opens/closes every sidebar
 tmux-agent-plane kill <agent>             # close its pane, ending it
 tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|window|session] [--session SESSION] [--cwd DIR] [--name NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]
+tmux-agent-plane task list [--json]       # background tasks: state, ports, cwd, starter, command
+tmux-agent-plane task start <name> [--cwd DIR] -- <command>...  # reuses a running task with the same command
+tmux-agent-plane task read <name> [--lines N]
+tmux-agent-plane task restart <name>      # rerun its command in the same window
+tmux-agent-plane task stop <name>         # end it; it leaves the list
 ```
 
 `<agent>` is a name, pane id, or `self` when caller identity is reliable. `read` and `keys` also take any pane id, including a pane whose agent has not started yet.
@@ -98,6 +103,18 @@ Pi/OpenCode publish durable completion counters. Other kinds are sampled once pe
 - A turn wait returns when the turn ends or blocks; plain `wait` also returns immediately for an already idle/done agent. Sampled kinds have the fast-turn limitation above. Pass `--timeout` shorter than your shell tool limit, or run the wait in the background, then `read` the result.
 - A command fails loudly on a timeout, when the agent exits, or when the daemon is not running.
 
+## Background tasks
+
+Use `task start` for anything that must keep running after the command that starts it: dev servers, watchers, tunnels, queue workers. Never use `&`, `nohup`, `disown` or your own background shell for those; they would be invisible to other agents and to the user, and die or linger unpredictably.
+
+1. Run `task list` first. If a running task already does what you need (same command, same folder), use it: read its port from the list instead of starting another.
+2. Otherwise `task start <name> --cwd <dir> -- <program> <args>...`, with a short descriptive name such as `site-dev` or `api-watch`. The program is one plain word (`npm`, `python3`, `cargo`); for pipes or other shell syntax use `-- sh -c '...'`. Starting the same name with the same command and folder is safe: it prints `(already running)`, or reruns it if it had exited. A different command or folder under a taken name fails and shows who started that task; pick another name rather than stopping someone else's task.
+3. It returns at once with `<name> <pane> <state>`. Check it came up with `task read <name>` (add `--lines 100` for more) and `task list` for its ports, which appear within a few seconds of the server listening.
+4. `exited <code>` in the list means its command ended; `task read` shows why. `task restart <name>` reruns it in place.
+5. Tasks outlive you. Stop only tasks you started (`started_by` is your name) and no longer need, or that the user asks you to stop: `task stop <name>`.
+
+Tasks are never agents: they do not appear in `list`, and agent commands do not take task names. Never `move` agents into the `agent-plane-tasks` session or reorganize it; it holds tasks only.
+
 ## Daemon diagnostics
 
 A failed kind or observation is withdrawn while healthy agents keep tracking. The status bar shows active faults. Read `${XDG_STATE_HOME:-$HOME/.local/state}/tmux-agent-plane/daemon.log` for the full cause and recovery. Process/pane snapshot, index and log failures stop the watcher. `tmux-agent-plane daemon start` starts it when stopped; `tmux-agent-plane daemon restart` gracefully restarts the managed watcher on the current binary. Never guess a daemon PID or stop one with broad process matching.
@@ -123,4 +140,4 @@ Treat requests such as “organize my tmux sessions”, “clean up my tmux proj
 3. Move each existing agent with `move reviewer --session api`. Move its orchestrator and helpers individually when they belong together. Each move detaches only that agent pane into a destination window; other agents and shells in a mixed source window stay there. Moving preserves the process, pane ID, name, parent and completion history, and sends no prompt or keys. It prints the new location immediately; the index/sidebar follows on the next daemon scan.
 4. Start future helpers directly in that project: `spawn codex "<full task>" --in window --session api --cwd /path/to/worktree --name api-review`. Check `sessions list` and `list` to verify the result, then report the organization.
 
-Moves keep destination clients on their current windows. A source window, and a detached session with no remaining content, may disappear naturally, including the plugin's lone-sidebar cleanup. A move that would end an attached source session is refused; leave another content pane/window there before retrying. Linked source windows and grouped source/destination sessions are refused because they share work across sessions. Report those limits rather than using raw tmux to bypass them. Existing shell-only windows remain for the user; organizing projects does not authorize killing agents or unrelated shells.
+Moves keep destination clients on their current windows. A source window, and a detached session with no remaining content, may disappear naturally, including the plugin's lone-sidebar cleanup. A move that would end an attached source session is refused; leave another content pane/window there before retrying. Linked source windows and grouped source/destination sessions are refused because they share work across sessions. Report those limits rather than using raw tmux to bypass them. Existing shell-only windows remain for the user; organizing projects does not authorize killing agents or unrelated shells. Leave the `agent-plane-tasks` session alone: `sessions list` omits it and it is never a project.

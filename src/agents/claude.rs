@@ -177,6 +177,7 @@ mod tests {
             name: String::new(),
             parent: String::new(),
             placed: false,
+            task: false,
         }];
         let processes = ProcessTable {
             processes: HashMap::from([(

@@ -1,7 +1,7 @@
 //! The watcher: once a second, detect agents, track done/seen, write the index,
 //! update the status bar and notify on transitions.
 
-use crate::agents::RawState;
+use crate::agents::{ProcessTable, RawState};
 use crate::detect::{self, Detected};
 use crate::diagnostics::{self, Active, Batch, Issue};
 use crate::fit::Fit;
@@ -97,6 +97,7 @@ fn run_inner() -> Result<()> {
     let mut auto_name = None;
     let mut fit = Fit::default();
     let mut placer = crate::projects::Placer::default();
+    let mut tasks = crate::tasks::Tracker::default();
 
     loop {
         if SHUTDOWN.load(Ordering::Relaxed) {
@@ -107,7 +108,14 @@ fn run_inner() -> Result<()> {
         let now = index::now_ms();
         let (panes, geometry) = tmux::snapshot().context("listing tmux panes")?;
         let before = prev.clone();
-        let batch = fold(&mut prev, detect::detect(&panes)?, &panes, now);
+        // A shared process-table failure invalidates the whole scan and is fatal.
+        let processes = ProcessTable::load().context("loading process table")?;
+        let batch = fold(
+            &mut prev,
+            detect::detect_with(&panes, &processes),
+            &panes,
+            now,
+        );
         let agents = batch.values;
         let mut issues = batch.issues;
         issues.extend(crate::autoname::tick(&mut auto_name, &agents, &panes, now));
@@ -126,6 +134,8 @@ fn run_inner() -> Result<()> {
         issues.extend(notifications.deliver());
         // A failed popup is retried while its client is idle. Its failure never announces itself.
         issues.extend(announcements.deliver());
+        let tasks = tasks.tick(&panes, &processes, now);
+        issues.extend(tasks.issues);
         let views = windows(&panes);
         issues.extend(fit.tick(&views, &geometry));
         // Index persistence remains fatal and independent of status presentation.
@@ -136,6 +146,7 @@ fn run_inner() -> Result<()> {
             windows: views,
             order: order.clone(),
             last_agent: last_agent.clone(),
+            tasks: tasks.values,
         })
         .context("writing agent index")?;
         // Last, so everything above saw one consistent placement of the agents.
@@ -496,6 +507,7 @@ mod tests {
             name: String::new(),
             parent: String::new(),
             placed: false,
+            task: false,
         };
         Detected {
             pane,
@@ -925,6 +937,7 @@ mod tests {
                 name: String::new(),
                 parent: String::new(),
                 placed: false,
+                task: false,
             },
             kind: Kind::Claude,
             state: RawState::Blocked,

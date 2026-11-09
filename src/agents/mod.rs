@@ -429,6 +429,7 @@ mod tests {
             name: "fixture".into(),
             parent: String::new(),
             placed: false,
+            task: false,
         }];
         // Exercise the daemon's real process-to-pane adapter with the native snapshot.
         let observations = codex::scan(&ScanContext {
