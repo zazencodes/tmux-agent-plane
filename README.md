@@ -68,7 +68,7 @@ It reads this README, installs the pieces and asks you about the choices along t
 
 ## Install
 
-**Agents installing this for a user:** onboard them. Do each step below in order. Before changing any of their files (`~/.tmux.conf`, `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, skill folders), show the change and ask. Ask which agent CLIs they use, and set up the matching [More agents](#more-agents) integrations for Pi, OpenCode or Grok Build. Ask where the status bar should go, and whether they have standing preferences for their agents, such as the model for each kind (step 5). Then reload tmux, run `tmux-agent-plane list` and show them the sidebar key (default `prefix + S`) and [optional AI naming](#optional-ai-naming).
+**Agents installing this for a user:** onboard them. Do each step below in order. Before changing any of their files (`~/.tmux.conf`, `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, skill folders), show the change and ask. Ask which agent CLIs they use, and set up the matching [More agents](#more-agents) integrations for Pi, OpenCode or Grok Build. Ask which keys they want for moving between agents (step 2), where the status bar should go, and whether they have standing preferences for their agents, such as the model for each kind (step 5). Then reload tmux, run `tmux-agent-plane list` and show them the sidebar key (default `prefix + S`) and [optional AI naming](#optional-ai-naming).
 
 **1. The binary.**
 
@@ -89,6 +89,16 @@ The plugin starts the daemon once the first session exists, binds `prefix + S` t
 ```tmux
 set -g @agent-plane-sidebar-key Space   # replaces tmux's next-layout binding
 ```
+
+**Keys.** Without the prefix, Alt + K / J move to the previous / next agent and Alt + H / L go into and out of the sidebar. `prefix + K` turns them all off and on again, for when a program needs them. Ask whether these suit them, or whether they also want Shift + arrows, which are easier to reach but which some programs use for selecting text. Set keys only with these options, before the plugin loads, so `prefix + K` covers every one; a `bind -n` line of their own would not turn off. For Shift + arrows as well:
+
+```tmux
+set -g @agent-plane-previous-key 'M-k S-Up'
+set -g @agent-plane-next-key 'M-j S-Down'
+set -g @agent-plane-sidebar-in-key 'M-h S-Left'
+```
+
+Shift + Right needs no option: the sidebar reads it. See [Direct agent navigation](#direct-agent-navigation).
 
 **3. The status bar.** Add `#{@agent_plane_status}` to `status-right` (or `status-left`):
 
