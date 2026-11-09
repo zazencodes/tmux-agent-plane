@@ -20,6 +20,10 @@ before 1.0, a breaking change bumps the minor version.
 - Keep quota in sight: press `o`, then `u`, and every sidebar shows a quota panel below the agents, one line per plan with what is left and when it resets. It is off by default, and the sidebar footer offers `u quota` for the full view
 - Choose whether sidebars open with background tasks shown: `o`, then `t`. They are shown by default, and `t` in a sidebar still shows or hides them there
 
+### Changed
+
+- `?` in the sidebar and agent picker is shorter: your tmux keys for moving between agents and in and out of the sidebar, as you have them bound, then one line per key under Move, Find, Act and Show. Keys for confirming and editing text stay in the footer while you use them
+
 ## 0.5.0 - 2026-11-07
 
 ### Added

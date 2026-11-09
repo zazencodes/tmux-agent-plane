@@ -179,6 +179,15 @@ Inside the sidebar, Shift + Right always leaves it the same way, with nothing to
 bind -n S-Left run-shell "tmux-agent-plane enter-sidebar '#{window_id}'"
 ```
 
+tmux cannot see the Command key on macOS, but Ghostty can send another key for it. With the `C-M-` keys above, these lines in Ghostty's config put all four on Command + arrows, replacing Ghostty's own Command + arrow actions:
+
+```
+keybind = cmd+up=text:\x1b\x0b
+keybind = cmd+down=text:\x1b\x0a
+keybind = cmd+left=text:\x1b\x08
+keybind = cmd+right=text:\x1b\x0c
+```
+
 ### Sidebar and agent list
 
 | Key | Action |
@@ -186,7 +195,7 @@ bind -n S-Left run-shell "tmux-agent-plane enter-sidebar '#{window_id}'"
 | Sidebar key (default `prefix + S`) | Open the sidebar in every window and move into it; close it everywhere when it is open |
 | `prefix + a` | Open the agent picker: the sidebar's list and actions, with a live screen preview |
 | `prefix + f` | Open the agent picker already filtering, so you can start typing |
-| `Alt + ↑` / `Alt + ↓` | Focus previous/next agent directly, across sessions; no prefix or sidebar focus needed |
+| `Alt + K` / `Alt + J` | Focus previous/next agent directly, across sessions; no prefix or sidebar focus needed |
 | `Alt + H` / `Alt + L` | Move into the sidebar and stay / leave it for the selected agent; no prefix needed |
 | `↓` `↑` | Move selection. In the sidebar, moving previews the selected agent's window/session while keyboard input stays in the sidebar; the popup previews inside itself. Both also accept `j` / `k` |
 | `gg` / `G` | Move to the first / last agent in the list, previewing it like any other move |
@@ -207,7 +216,7 @@ bind -n S-Left run-shell "tmux-agent-plane enter-sidebar '#{window_id}'"
 | `c` | Start a new agent in the selected agent's project. Pick the kind with arrows or `j`/`k`, then `Enter`: it opens in a new window of that session, in that agent's directory, and takes you there. `Esc` or `c` cancels |
 | `Tab` | In the popup, type to the selected agent inside the preview; `Tab` again returns to the menu |
 | `u` | Show the [quota view](#quota) in place of the list, as the footer's `u quota` says; `u` or `Esc` goes back. `r` reads again, `j`/`k` scroll, and `Enter` allows reading Claude's login from the macOS Keychain when its card asks |
-| `?` | Show every sidebar shortcut. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search, filter and rename |
+| `?` | Show the shortcuts: the plugin's tmux keys as you have them bound, then the list keys by what they do. Keys that only matter mid-action, such as confirming or editing text, show in the footer at the time. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search, filter and rename |
 | `q` | Close the sidebar everywhere; close the popup |
 
 `c` offers Claude Code, Codex, Pi, OpenCode and Grok Build. Antigravity needs a first task to start, so use `spawn agy "<task>"` for it. Pi, OpenCode and Grok Build always appear in the picker, but are tracked only once their [optional integrations](#more-agents) are set up. Like `Enter`, `c` refuses a session another client is using.

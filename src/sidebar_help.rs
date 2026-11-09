@@ -1,54 +1,70 @@
-//! One shortcut list, paged on short terminals. Every closing key is consumed.
-use crate::ui::{SUBTEXT, TEXT};
+//! The shortcut list: a few short sections, one line per key, paged on short terminals. Keys
+//! that only matter mid-action (confirming, editing text) show in the footer at that moment.
+//! Every closing key is consumed.
+use crate::ui::{LAVENDER, OVERLAY, SUBTEXT, TEXT};
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::text::Line;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
+/// Key column width; actions take the rest of a 38-column sidebar.
+const KEYS: usize = 12;
+
 /// Keep labels as individual whitespace-separated keys, so coverage can check them.
-const SHORTCUTS: &[(&str, &str)] = &[
-    ("Alt-↑/↓", "Prev/next agent (global)"),
-    ("S-←", "Go into the sidebar (global)"),
-    ("S-→", "Open selected, leave sidebar"),
-    ("j k", "Move selection and preview it"),
-    ("g G", "gg first agent, G last agent"),
-    ("↑ ↓", "Move selection or in filter"),
-    ("^j ^k", "Move selection or in filter"),
-    ("enter", "Open, even from filter / save"),
-    ("enter", "Daemon down: restart it"),
-    ("/", "Search rows; enter keeps it"),
-    ("n N", "Next/prev search match"),
-    ("f", "Filter rows; / freezes it"),
-    ("d", "Cycle state filter"),
-    ("esc", "Clear / cancel / close"),
-    ("^c", "In lists, same as esc"),
-    ("r", "Rename selected agent"),
-    ("x", "Confirm kill of agent"),
-    ("t", "Show or hide background tasks"),
-    ("x", "Task row: confirm its stop"),
-    ("R", "Restart selected task"),
-    ("b", "Restore agents after restart"),
-    ("c", "New agent in this project"),
-    ("o", "Configure"),
-    ("u", "Quota left; u or esc back"),
-    ("r", "Quota view: read again"),
-    ("enter", "Quota: allow Keychain read"),
-    ("tab", "Picker: type to the agent"),
-    ("?", "Keyboard shortcuts"),
-    ("q", "Close sidebars or picker"),
-    ("ctrl-w", "Delete word in an edit"),
-    ("ctrl-u", "Clear text in an edit"),
-    ("bksp", "Delete character in an edit"),
-    ("space", "Rename: insert hyphen"),
-    ("enter y", "Kill or stop: confirm it"),
-    ("1-7", "Configure: choose AI command"),
-    ("d", "Configure: turn AI names off"),
+const SECTIONS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "Move",
+        &[
+            ("j k ↑ ↓", "Select and preview"),
+            ("gg G", "First / last row"),
+            ("enter", "Go to the selected row"),
+        ],
+    ),
+    (
+        "Find",
+        &[
+            ("/ n N", "Search; next / previous"),
+            ("f", "Filter by text"),
+            ("d", "Filter by state"),
+            ("esc", "Clear or cancel"),
+        ],
+    ),
+    (
+        "Act",
+        &[
+            ("c", "New agent in this project"),
+            ("r", "Rename agent"),
+            ("x", "Kill agent or stop task"),
+            ("R", "Restart task"),
+            ("tab", "Picker: type to agent"),
+        ],
+    ),
+    (
+        "Show",
+        &[
+            ("t", "Background tasks"),
+            ("u", "Quota left"),
+            ("b", "Agents to restore"),
+            ("o", "Configure"),
+            ("q", "Close"),
+        ],
+    ),
+];
+
+/// The plugin's global bindings, as tmux has them now: (option, what it does).
+const GLOBAL: [(&str, &str); 4] = [
+    ("previous", "Previous agent"),
+    ("next", "Next agent"),
+    ("sidebar-in", "Into the sidebar"),
+    ("sidebar-out", "Out to the selected agent"),
 ];
 
 #[derive(Default)]
 pub struct Help {
     pub open: bool,
+    lines: Vec<Line<'static>>,
     start: usize,
     next: usize,
 }
@@ -61,6 +77,7 @@ impl Help {
         }
         if can_open && key.code == KeyCode::Char('?') {
             self.open = true;
+            self.lines = lines(global_keys());
             self.start = self.next;
             return true;
         }
@@ -68,70 +85,119 @@ impl Help {
     }
 
     fn page(&mut self, height: u16) -> std::ops::Range<usize> {
-        // On tiny terminals retain at least one shortcut, even when no header fits.
-        let chrome = if height >= 4 {
-            3
-        } else {
-            u16::from(height >= 2)
-        };
-        let count = usize::from(height.saturating_sub(chrome).max(1));
-        let end = (self.start + count).min(SHORTCUTS.len());
-        self.next = if end == SHORTCUTS.len() { 0 } else { end };
-        self.start..end
+        let (title, footer) = chrome(height);
+        let count = usize::from(height.saturating_sub(title + footer).max(1));
+        let start = self.start.min(self.lines.len());
+        let end = (start + count).min(self.lines.len());
+        self.next = if end == self.lines.len() { 0 } else { end };
+        start..end
     }
 
     pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
         let height = area.height;
         let page = self.page(height);
+        let paged = page.start > 0 || self.next != 0;
+        let (title_height, footer_height) = chrome(height);
         let [title, body, footer] = Layout::vertical([
-            Constraint::Length(u16::from(height >= 4)),
+            Constraint::Length(title_height),
             Constraint::Min(0),
-            Constraint::Length(if height >= 4 {
-                2
-            } else {
-                u16::from(height >= 2)
-            }),
+            Constraint::Length(footer_height),
         ])
         .areas(area);
-        frame.render_widget(
-            Paragraph::new(format!(
-                "Keyboard shortcuts {}–{}/{}",
-                page.start + 1,
-                page.end,
-                SHORTCUTS.len()
-            )),
-            title,
-        );
-        let lines: Vec<_> = SHORTCUTS[page]
-            .iter()
-            .map(|(keys, action)| {
-                let pad = 9usize.saturating_sub(keys.chars().count());
-                Line::styled(format!("{keys}{}{action}", " ".repeat(pad)), TEXT)
-            })
-            .collect();
-        frame.render_widget(Paragraph::new(lines), body);
-        frame.render_widget(
-            Paragraph::new(vec![
-                Line::styled(
-                    if footer.height == 1 {
-                        "Any key closes; reopen ? for next"
-                    } else {
-                        "Any key closes (consumed)"
-                    },
-                    SUBTEXT,
-                ),
-                Line::styled(
-                    if self.next == 0 {
-                        "? reopens this help"
-                    } else {
-                        "Reopen ? for next page"
-                    },
-                    SUBTEXT,
-                ),
-            ]),
-            footer,
-        );
+        let mut heading = vec![Span::styled(
+            "Keyboard shortcuts",
+            Style::default().fg(TEXT).bold(),
+        )];
+        if paged {
+            heading.push(Span::styled(
+                format!("  {}–{}/{}", page.start + 1, page.end, self.lines.len()),
+                OVERLAY,
+            ));
+        }
+        frame.render_widget(Paragraph::new(Line::from(heading)), title);
+        frame.render_widget(Paragraph::new(self.lines[page].to_vec()), body);
+        let close = if self.next == 0 {
+            "Any key closes"
+        } else {
+            "Any key closes; ? for more"
+        };
+        let mut lines = vec![Line::styled(close, SUBTEXT)];
+        if footer.height > 1 {
+            lines.insert(0, Line::default());
+        }
+        frame.render_widget(Paragraph::new(lines), footer);
     }
+}
+
+/// Rows for the title and the footer, each with a blank line to the list when there is room.
+/// On tiny terminals at least one line of the list stays, even when no title fits.
+fn chrome(height: u16) -> (u16, u16) {
+    match height {
+        6.. => (2, 2),
+        4..=5 => (1, 2),
+        2..=3 => (0, 1),
+        _ => (0, 0),
+    }
+}
+
+/// `@agent-plane-bound-<name>-key` for each global binding, or why tmux could not say.
+#[cfg(not(test))]
+fn global_keys() -> Result<Vec<(String, &'static str)>, String> {
+    let options = crate::tmux::run(&["show-options", "-g"]).map_err(|e| format!("{e:#}"))?;
+    Ok(GLOBAL
+        .iter()
+        .filter_map(|(name, action)| {
+            let prefix = format!("@agent-plane-bound-{name}-key ");
+            options.lines().find_map(|line| {
+                let key = line.strip_prefix(&prefix)?.trim_matches('"');
+                Some((key.to_string(), *action))
+            })
+        })
+        .collect())
+}
+
+/// Tests never ask a tmux server.
+#[cfg(test)]
+fn global_keys() -> Result<Vec<(String, &'static str)>, String> {
+    Ok(Vec::new())
+}
+
+/// The plugin's tmux keys first, then the sections, a blank line apart.
+fn lines(global: Result<Vec<(String, &'static str)>, String>) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    match global {
+        Ok(keys) if keys.is_empty() => {}
+        Ok(keys) => {
+            lines.push(heading("Anywhere in tmux"));
+            lines.extend(keys.iter().map(|(key, action)| entry(key, action)));
+            lines.push(Line::default());
+        }
+        Err(error) => {
+            lines.push(heading("Anywhere in tmux"));
+            lines.push(Line::styled(error, OVERLAY));
+            lines.push(Line::default());
+        }
+    }
+    for (i, (title, keys)) in SECTIONS.iter().enumerate() {
+        if i > 0 {
+            lines.push(Line::default());
+        }
+        lines.push(heading(title));
+        lines.extend(keys.iter().map(|(key, action)| entry(key, action)));
+    }
+    lines
+}
+
+fn heading(title: &str) -> Line<'static> {
+    Line::styled(title.to_string(), Style::default().fg(LAVENDER).bold())
+}
+
+fn entry(key: &str, action: &str) -> Line<'static> {
+    let pad = KEYS.saturating_sub(key.chars().count()).max(1);
+    Line::from(vec![
+        Span::styled(format!("{key}{}", " ".repeat(pad)), SUBTEXT),
+        Span::styled(action.to_string(), TEXT),
+    ])
 }
 
 #[cfg(test)]
@@ -139,11 +205,20 @@ pub(crate) mod tests {
     use super::*;
 
     pub(crate) fn labels() -> Vec<&'static str> {
-        SHORTCUTS
+        SECTIONS
             .iter()
+            .flat_map(|(_, keys)| keys.iter())
             .flat_map(|(keys, _)| keys.split_whitespace())
+            .flat_map(|label| {
+                if label == "gg" {
+                    vec!["g", label]
+                } else {
+                    vec![label]
+                }
+            })
             .collect()
     }
+
     #[test]
     fn every_key_handled_by_sidebar_key_has_a_help_entry() {
         // Read the method itself: adding a command without a help entry fails this test.
@@ -154,10 +229,7 @@ pub(crate) mod tests {
             .split("\n    }\n")
             .next()
             .unwrap();
-        let labels = SHORTCUTS
-            .iter()
-            .flat_map(|(keys, _)| keys.split_whitespace())
-            .collect::<Vec<_>>();
+        let labels = labels();
         for token in source.split("KeyCode::").skip(1) {
             let label = if let Some(value) = token.strip_prefix("Char('") {
                 value.chars().next().unwrap().to_string()
@@ -177,17 +249,32 @@ pub(crate) mod tests {
                 "missing sidebar help for {label}"
             );
         }
-        for label in ["?", "c", "o", "x", "enter", "ctrl-w", "ctrl-u"] {
-            assert!(labels.contains(&label));
+        for label in ["c", "o", "x", "enter", "t", "u", "b", "R"] {
+            assert!(labels.contains(&label), "{label}");
         }
     }
 
     #[test]
-    fn every_shortcut_is_reachable_at_short_heights_and_each_close_is_consumed() {
-        for height in [1, 2, 3, 4, 8, 12, 28] {
+    fn global_keys_lead_and_a_tmux_failure_shows_in_their_place() {
+        let lines = lines(Ok(vec![("C-M-k".into(), "Previous agent")]));
+        let text: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+        assert_eq!(text[0], "Anywhere in tmux");
+        assert_eq!(text[1], format!("C-M-k{}Previous agent", " ".repeat(7)));
+        let failed = lines_text(Err("no server running".into()));
+        assert_eq!(failed[1], "no server running");
+        assert_eq!(lines_text(Ok(Vec::new()))[0], "Move");
+    }
+
+    fn lines_text(global: Result<Vec<(String, &'static str)>, String>) -> Vec<String> {
+        lines(global).iter().map(|l| l.to_string()).collect()
+    }
+
+    #[test]
+    fn every_line_is_reachable_at_short_heights_and_each_close_is_consumed() {
+        for height in [1, 2, 3, 4, 8, 12, 28, 60] {
             let mut help = Help::default();
             let mut visited = Vec::new();
-            for _ in 0..SHORTCUTS.len() {
+            loop {
                 assert!(help.key(KeyEvent::from(KeyCode::Char('?')), true));
                 visited.extend(help.page(height));
                 assert!(help.key(KeyEvent::from(KeyCode::Char('x')), true));
@@ -196,15 +283,20 @@ pub(crate) mod tests {
                     break;
                 }
             }
-            assert_eq!(visited, (0..SHORTCUTS.len()).collect::<Vec<_>>());
+            assert_eq!(visited, (0..help.lines.len()).collect::<Vec<_>>());
         }
     }
 
     #[test]
-    fn shortcut_lines_fit_38_columns() {
-        for (keys, action) in SHORTCUTS {
-            assert!(9 + action.chars().count() <= 38, "{keys}: {action}");
-            assert!(keys.chars().count() < 9);
+    fn every_line_fits_38_columns() {
+        for (_, keys) in SECTIONS {
+            for (key, action) in *keys {
+                assert!(KEYS + action.chars().count() <= 38, "{key}: {action}");
+                assert!(key.chars().count() < KEYS);
+            }
+        }
+        for (_, action) in GLOBAL {
+            assert!(KEYS + action.chars().count() <= 38, "{action}");
         }
     }
 }
