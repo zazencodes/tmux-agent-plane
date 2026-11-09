@@ -15,6 +15,7 @@ use std::fs::File;
 use std::os::fd::AsRawFd;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 
 const TICK: Duration = Duration::from_secs(1);
@@ -24,9 +25,29 @@ const STATUS_OPTION: &str = "@agent_plane_status";
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
+/// Set by `wake` to end the wait between ticks early.
+static WAKE: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
+
 /// Called by the lifecycle worker's signal/control handlers.
 pub fn request_shutdown() {
     SHUTDOWN.store(true, Ordering::Relaxed);
+}
+
+/// Run the next tick now, for a change people wait to see, such as turning the global keys off.
+pub fn wake() {
+    let (woken, wait) = &WAKE;
+    *woken.lock().unwrap_or_else(|e| e.into_inner()) = true;
+    wait.notify_one();
+}
+
+/// Wait out the tick, or until `wake`.
+fn wait_tick() {
+    let (woken, wait) = &WAKE;
+    let guard = woken.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut guard, _) = wait
+        .wait_timeout_while(guard, TICK, |woken| !*woken)
+        .unwrap_or_else(|e| e.into_inner());
+    *guard = false;
 }
 
 /// Persist and surface a fatal daemon/lifecycle error without desktop notification recursion.
@@ -193,7 +214,7 @@ fn run_inner() -> Result<()> {
                 diagnostics::log_path()?.display()
             ))?;
         }
-        std::thread::sleep(TICK);
+        wait_tick();
     }
 }
 

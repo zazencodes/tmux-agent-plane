@@ -32,11 +32,15 @@ pub enum Action {
     Stop,
     #[command(hide = true)]
     Serve,
+    /// Ask the running watcher to tick now
+    #[command(hide = true)]
+    Tick,
 }
 
 pub fn run(action: Action) -> Result<()> {
     match action {
         Action::Serve => serve(),
+        Action::Tick => ask("tick", TIMEOUT),
         _ => control(action).map_err(log_error),
     }
 }
@@ -337,6 +341,7 @@ fn control_loop(listener: UnixListener, done: &AtomicBool) -> Result<()> {
                     .read_to_string(&mut command)?;
                 match command.as_str() {
                     "ping" => {}
+                    "tick" => daemon::wake(),
                     // A quota fetch takes seconds: it answers from its own thread.
                     "quota-refresh" | "quota-allow-keychain" => {
                         let allow = command == "quota-allow-keychain";

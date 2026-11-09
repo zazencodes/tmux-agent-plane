@@ -83,9 +83,11 @@ for key in $out_keys; do
     'send-keys S-Right' "send-keys $key"
 done
 # No display-message: tmux freezes the screen while one shows, for display-time or until a key.
+# The daemon ticks at once, so the status bar and sidebars show the change without waiting.
+tick="run-shell -b 'tmux-agent-plane daemon tick'"
 tmux bind-key "$toggle_key" if-shell -F "$off" \
-  "set-option -g @agent-plane-keys on" \
-  "set-option -g @agent-plane-keys off"
+  "set-option -g @agent-plane-keys on ; $tick" \
+  "set-option -g @agent-plane-keys off ; $tick"
 tmux set-option -g @agent-plane-bound-previous-key "$previous_keys"
 tmux set-option -g @agent-plane-bound-next-key "$next_keys"
 tmux set-option -g @agent-plane-bound-sidebar-in-key "$in_keys"
