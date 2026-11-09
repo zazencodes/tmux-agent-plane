@@ -21,9 +21,7 @@ Start Claude Code, Codex or Antigravity (`agy`) in any tmux pane, the way you al
 
 Claude Code, Codex and Antigravity use native signals. Pi and OpenCode use publishers built on their official extension APIs; Grok Build uses its official leader mode. Each optional integration has one setup step under [More agents](#more-agents).
 
-<p align="center">
-  <img src="docs/assets/screenshot.png" alt="The agent sidebar on the left of a tmux window, next to a Codex agent" width="700">
-</p>
+https://github.com/user-attachments/assets/897c88e9-50fe-4c21-ab3f-0e1785ae2a5b
 
 ## Features
 
