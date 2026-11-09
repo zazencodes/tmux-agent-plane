@@ -201,6 +201,7 @@ bind -n S-Left run-shell "tmux-agent-plane enter-sidebar '#{window_id}'"
 | `t` | Show or hide background tasks below the agents, in the sidebar, under a `── tasks ──` rule. Each sidebar keeps its own choice, and the footer offers `t tasks` while any task exists. A row reads `▸ web-dev  :5173  site  3h` while running (its listening ports, project folder and age) or `✕ worker  exit 1  site  2m` once its command has ended. `j`/`k`, `gg` and `G` move through the agents and then the tasks, previewing a task's window like an agent's; `Enter` opens it |
 | `x` on a task | Ask to stop the task, in the same style as a kill: `Enter` or lowercase `y` stops it and it leaves the list, other keys cancel. The sidebar moves to the next row first |
 | `R` | Restart the selected task: run its command again in its window |
+| `b` | While agents from before tmux restarted wait (the sidebar's top line says `↺ N agents from before tmux restarted · b restore`), list them, those that cannot come back and why, and the tasks that were running with the agent that started each. `Enter` brings back the agents and the tasks, `a` the agents only, `d` forgets them, `Esc` cancels. It asks every time; see [Restore](#restore) |
 | `r` | Rename the agent (sidebar), starting from its current name. `Ctrl-W` deletes a word, `Ctrl-U` clears, `Enter` saves, `Esc` cancels |
 | `o` | Configure, in the sidebar. AI naming: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `d` disables naming, `Esc` goes back or closes |
 | `c` | Start a new agent in the selected agent's project. Pick the kind with arrows or `j`/`k`, then `Enter`: it opens in a new window of that session, in that agent's directory, and takes you there. `Esc` or `c` cancels |
@@ -347,7 +348,7 @@ A task keeps running when the agent that started it exits; only `task stop` (or 
 
 ### Restore
 
-The daemon keeps a roster of every window that holds an agent: its session, index, name and layout, and each pane's folder, with the agent's kind, session id, name and parent. It also records every running background task. When the tmux server dies and a new one starts, the daemon turns that roster into a pending restore, and the status bar shows `↺ N`, the number of agents that can come back. Nothing is restored until you ask:
+The daemon keeps a roster of every window that holds an agent: its session, index, name and layout, and each pane's folder, with the agent's kind, session id, name and parent. It also records every running background task. When the tmux server dies and a new one starts, the daemon turns that roster into a pending restore, and the status bar shows `↺ N`, the number of agents that can come back. Nothing is restored until you ask, every time: press `b` in the sidebar to see them and choose, or use the CLI:
 
 ```bash
 tmux-agent-plane restore              # list what would come back; changes nothing

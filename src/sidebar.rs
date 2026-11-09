@@ -1,5 +1,6 @@
 //! A narrow, always-on agent list in a pane down the side of a window.
 
+mod restore;
 mod tasks;
 
 use crate::agents::{ProcessTable, RawState, ScanContext};
@@ -446,6 +447,8 @@ pub(crate) struct Sidebar {
     pending_g: bool,
     /// Background tasks below the agents (sidebar only).
     pub(crate) tasks: tasks::Section,
+    /// Agents from before tmux restarted, and `b` (sidebar only).
+    pub(crate) restore: restore::Restore,
 }
 
 impl Navigation {
@@ -524,6 +527,7 @@ impl Sidebar {
             Err(e) => {
                 self.all_agents.clear();
                 self.tasks.clear();
+                self.restore.pending = 0;
                 self.recent_event = None;
                 self.error = Some(e.to_string());
                 self.rebuild();
@@ -541,6 +545,7 @@ impl Sidebar {
             .collect();
         self.recent_event = index.recent_event;
         self.tasks.apply(index.tasks);
+        self.restore.pending = index.pending_restore;
         self.error = None;
         self.restart_failure = None;
         self.navigation.order = index.order;
@@ -956,7 +961,9 @@ impl Sidebar {
     /// Help, setup, new agent and kill, in priority order. True when one consumed
     /// the key.
     pub(crate) fn action_key(&mut self, key: KeyEvent, origin: Origin<'_>) -> bool {
-        let consumed = self.help_key(key)
+        // The restore view consumes every key while it is open.
+        let consumed = self.restore_key(key, origin)
+            || self.help_key(key)
             // Setup consumes its keys before navigation/kill, including Enter.
             || (self.killing.is_none()
                 && self.new_agent.is_none()
@@ -1329,6 +1336,10 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             screen.show(&mut sidebar)?;
             sidebar.restart_daemon(origin);
         }
+        if sidebar.restore.chosen().is_some() {
+            screen.show(&mut sidebar)?;
+            sidebar.restore.run();
+        }
         if focus || (preview && !sidebar.typing_query()) {
             match switch_command(&sidebar, &own, focus) {
                 Ok(Some(command)) => {
@@ -1419,6 +1430,10 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         sidebar.auto_name.draw(f, f.area());
         return;
     }
+    if sidebar.restore.is_open() {
+        sidebar.restore.draw(f, f.area());
+        return;
+    }
     let confirmation = confirmation_footer(sidebar, f.area().width as usize);
     let footer_height = confirmation.as_ref().map_or(2, |lines| lines.len() as u16);
     let [list_area, help_area] =
@@ -1427,8 +1442,14 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let block = panel(Line::from(" agents "));
     let content = block.inner(list_area);
     f.render_widget(block, list_area);
-    let [mode_area, agents_area] =
-        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(content);
+    let restore = restore::top_lines(sidebar.restore.pending, inner);
+    let [mode_area, restore_area, agents_area] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(restore.len() as u16),
+        Constraint::Min(0),
+    ])
+    .areas(content);
+    f.render_widget(Paragraph::new(restore), restore_area);
     let mode = format!(
         " d {}",
         sidebar.navigation.filter.map_or("all", State::as_str)

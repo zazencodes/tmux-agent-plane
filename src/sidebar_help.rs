@@ -28,6 +28,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("t", "Show or hide background tasks"),
     ("x", "Task row: confirm its stop"),
     ("R", "Restart selected task"),
+    ("b", "Restore agents after restart"),
     ("c", "New agent in this project"),
     ("o", "Configure"),
     ("u", "Quota left; u or esc back"),
