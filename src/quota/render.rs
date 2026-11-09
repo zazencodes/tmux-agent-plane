@@ -361,6 +361,76 @@ pub fn cards(snapshot: &Snapshot, now: Time, width: usize, in_view: bool) -> Vec
     lines
 }
 
+/// The sidebar's quota panel: one line per provider that is set up, its scarcest group's
+/// percent left, bar and time to reset. `● claude ━━━━━━╸──── 62% 4h38m`
+pub fn summary(snapshot: &Snapshot, now: Time, width: usize) -> Vec<Line<'static>> {
+    snapshot
+        .providers
+        .iter()
+        .filter(|p| p.status != Status::NotSetUp)
+        .map(|provider| {
+            let name = Span::styled(
+                format!("{:<6} ", provider.provider.as_str()),
+                Style::default().fg(TEXT).bold(),
+            );
+            let problem = |style: Style, text: &str| {
+                let mut spans = vec![Span::styled("○ ", style), name.clone()];
+                spans.push(Span::styled(truncate(text, width.saturating_sub(9)), style));
+                Line::from(spans)
+            };
+            match provider.status {
+                Status::NeedsKeychain => {
+                    return problem(Style::default().fg(YELLOW), "needs Keychain · u");
+                }
+                Status::Failed => {
+                    return problem(
+                        Style::default().fg(RED),
+                        provider.error.as_deref().unwrap_or("failed"),
+                    );
+                }
+                Status::Ok | Status::Stale | Status::NotSetUp => {}
+            }
+            let (windows, dropped) = live(provider, now);
+            let stale = provider.status == Status::Stale || dropped;
+            let headline = groups(&windows)
+                .iter()
+                .map(|(_, members)| pace::headline(members, now, stale))
+                .min_by(|a, b| {
+                    let left = |h: &Headline<'_>| h.remaining.unwrap_or(f64::INFINITY);
+                    left(a).total_cmp(&left(b))
+                });
+            let (remaining, limiting) =
+                headline.map_or((None, None), |h| (h.remaining, h.limiting));
+            let marker = limiting
+                .and_then(|w| pace::pace(w, now, stale))
+                .map(|p| p.time_remaining_percent);
+            let icon = if stale {
+                Span::styled("◐ ", Style::default().fg(YELLOW))
+            } else {
+                Span::styled("● ", Style::default().fg(GREEN))
+            };
+            let mut spans = vec![icon, name];
+            spans.extend(bar(
+                remaining,
+                marker,
+                width.saturating_sub(2 + 7 + 5 + 1 + COUNTDOWN).max(3),
+            ));
+            spans.push(match remaining {
+                Some(r) => Span::styled(
+                    format!(" {:>4}", format!("{r:.0}%")),
+                    Style::default().fg(health(r)),
+                ),
+                None => Span::styled(format!(" {:>4}", "?"), OVERLAY),
+            });
+            let reset = limiting
+                .and_then(|w| w.resets_at)
+                .map_or(String::new(), |at| until(at, now));
+            spans.push(Span::styled(format!(" {reset:<COUNTDOWN$}"), OVERLAY));
+            Line::from(spans)
+        })
+        .collect()
+}
+
 /// The `quota` command's text: the title, then the cards without colour.
 pub fn text(snapshot: &Snapshot, now: Time, width: usize) -> Vec<String> {
     let mut out = vec![title(Some(snapshot), false), String::new()];
@@ -659,5 +729,26 @@ pub(crate) mod tests {
     fn title_shows_refreshing() {
         assert_eq!(title(None, true), "quota · refreshing…");
         assert!(title(Some(&sample()), false).starts_with("quota · "));
+    }
+
+    #[test]
+    fn summary_gives_each_set_up_provider_one_line_with_its_scarcest_group() {
+        let mut snapshot = sample();
+        let mut missing = sample().providers.remove(0);
+        missing.provider = crate::quota::ProviderId::Grok;
+        missing.status = Status::NotSetUp;
+        snapshot.providers.push(missing);
+        let lines: Vec<String> = plain(&summary(&snapshot, at(NOW), 34))
+            .iter()
+            .map(|l| l.trim_end().to_string())
+            .collect();
+        assert_eq!(lines.len(), 4, "{lines:#?}");
+        for line in plain(&summary(&snapshot, at(NOW), 34)).iter().take(3) {
+            assert_eq!(line.chars().count(), 34, "{line:?}");
+        }
+        assert!(lines[0].starts_with("● claude ━") && lines[0].ends_with(" 72% 4d21h"));
+        assert!(lines[1].starts_with("◐ codex  ") && lines[1].ends_with(" 83% 3d0h"));
+        assert!(lines[2].starts_with("● agy    ") && lines[2].ends_with(" 10% 1h0m"));
+        assert_eq!(lines[3], "○ grok   login expired");
     }
 }

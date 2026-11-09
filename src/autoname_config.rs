@@ -8,6 +8,26 @@ use std::path::{Path, PathBuf};
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub auto_name: AutoName,
+    pub sidebar: Sidebar,
+}
+
+/// What a sidebar shows when it opens. `t` still shows or hides one sidebar's tasks.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Sidebar {
+    /// Background tasks below the agents.
+    pub tasks: bool,
+    /// The quota panel below the list; `u` opens the full view either way.
+    pub quota: bool,
+}
+
+impl Default for Sidebar {
+    fn default() -> Self {
+        Self {
+            tasks: true,
+            quota: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -360,6 +380,16 @@ mod tests {
         assert_eq!(config, parse(b"{}").unwrap());
         assert!(!config.auto_name.enabled);
         assert!(config.auto_name.command.is_empty());
+    }
+    #[test]
+    fn sidebars_show_tasks_and_hide_the_quota_panel_unless_configured() {
+        let config = parse(b"{}").unwrap();
+        assert!(config.sidebar.tasks && !config.sidebar.quota);
+        let config = parse(br#"{"sidebar":{"quota":true}}"#).unwrap();
+        assert!(config.sidebar.tasks && config.sidebar.quota);
+        let config = parse(br#"{"sidebar":{"tasks":false}}"#).unwrap();
+        assert!(!config.sidebar.tasks && !config.sidebar.quota);
+        assert!(parse(br#"{"sidebar":{"usage":true}}"#).is_err());
     }
     #[test]
     fn removed_settings_fail_loudly() {

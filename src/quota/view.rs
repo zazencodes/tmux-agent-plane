@@ -9,7 +9,7 @@ use anyhow::Result;
 use chrono::Utc;
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
@@ -17,48 +17,19 @@ use std::time::{Duration, Instant};
 
 const EVERY: Duration = Duration::from_secs(300);
 
+/// What a sidebar knows of quota.json, and its own refresh request. The full view and the
+/// panel share one.
 #[derive(Default)]
-pub struct View {
-    pub open: bool,
+pub struct Feed {
     snapshot: Option<Snapshot>,
     /// This sidebar's request, while the daemon works on it.
     request: Option<Receiver<Result<()>>>,
     requested_at: Option<Instant>,
     /// Why the last request or read failed.
     notice: Option<String>,
-    scroll: usize,
-    /// Lines that fit, from the last draw.
-    height: usize,
-    lines: usize,
 }
 
-impl View {
-    /// While open, every key but `?` is the view's. `u` opens it when nothing else is typing.
-    pub fn key(&mut self, key: KeyEvent, can_open: bool) -> bool {
-        if !self.open {
-            if can_open && key.code == KeyCode::Char('u') && key.modifiers.is_empty() {
-                self.open = true;
-                self.scroll = 0;
-                self.reload();
-                self.ask(false);
-                return true;
-            }
-            return false;
-        }
-        match key.code {
-            KeyCode::Char('?') => return false,
-            KeyCode::Char('u') | KeyCode::Esc => self.open = false,
-            KeyCode::Char('r') => self.ask(false),
-            KeyCode::Enter if self.needs_keychain() => self.ask(true),
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.scroll = (self.scroll + 1).min(self.lines.saturating_sub(self.height))
-            }
-            KeyCode::Char('k') | KeyCode::Up => self.scroll = self.scroll.saturating_sub(1),
-            _ => {}
-        }
-        true
-    }
-
+impl Feed {
     fn needs_keychain(&self) -> bool {
         self.snapshot.as_ref().is_some_and(|s| {
             s.providers
@@ -97,12 +68,10 @@ impl View {
         }
     }
 
-    /// Called on every pass of the sidebar loop: picks up a finished request, refreshes every
-    /// five minutes, and rereads the snapshot another reader may have refreshed.
-    pub fn tick(&mut self) {
-        if !self.open {
-            return;
-        }
+    /// Picks up a finished request, rereads the snapshot another reader may have refreshed, and
+    /// asks again once both this sidebar's last request and the snapshot are five minutes old,
+    /// so many sidebars share one read.
+    fn tick(&mut self, now: super::Time) {
         if let Some(request) = &self.request {
             match request.try_recv() {
                 Ok(result) => {
@@ -116,10 +85,103 @@ impl View {
                 }
             }
         }
-        if self.request.is_none() && self.requested_at.is_none_or(|at| at.elapsed() >= EVERY) {
+        self.reload();
+        if self.request.is_none() && due(self.requested_at, self.snapshot.as_ref(), now) {
             self.ask(false);
         }
-        self.reload();
+    }
+}
+
+fn due(requested_at: Option<Instant>, snapshot: Option<&Snapshot>, now: super::Time) -> bool {
+    requested_at.is_none_or(|at| at.elapsed() >= EVERY)
+        && snapshot.is_none_or(|s| (now - s.updated_at).to_std().is_ok_and(|age| age >= EVERY))
+}
+
+#[derive(Default)]
+pub struct View {
+    /// `u`: the full view in place of the list.
+    pub open: bool,
+    /// The panel below the list, from the configuration.
+    pub pinned: bool,
+    feed: Feed,
+    scroll: usize,
+    /// Lines that fit, from the last draw.
+    height: usize,
+    lines: usize,
+}
+
+impl View {
+    /// While open, every key but `?` is the view's. `u` opens it when nothing else is typing.
+    pub fn key(&mut self, key: KeyEvent, can_open: bool) -> bool {
+        if !self.open {
+            if can_open && key.code == KeyCode::Char('u') && key.modifiers.is_empty() {
+                self.open = true;
+                self.scroll = 0;
+                self.feed.reload();
+                self.feed.ask(false);
+                return true;
+            }
+            return false;
+        }
+        match key.code {
+            KeyCode::Char('?') => return false,
+            KeyCode::Char('u') | KeyCode::Esc => self.open = false,
+            KeyCode::Char('r') => self.feed.ask(false),
+            KeyCode::Enter if self.feed.needs_keychain() => self.feed.ask(true),
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.scroll = (self.scroll + 1).min(self.lines.saturating_sub(self.height))
+            }
+            KeyCode::Char('k') | KeyCode::Up => self.scroll = self.scroll.saturating_sub(1),
+            _ => {}
+        }
+        true
+    }
+
+    /// Called on every pass of the sidebar loop while the view or the panel shows.
+    pub fn tick(&mut self) {
+        if self.open || self.pinned {
+            self.feed.tick(Utc::now());
+        }
+    }
+
+    /// The panel's height, borders included: one row per provider that is set up.
+    pub fn panel_height(&self) -> u16 {
+        let rows = self
+            .feed
+            .snapshot
+            .as_ref()
+            .map_or(1, |s| render::summary(s, Utc::now(), 1).len().max(1));
+        rows as u16 + 2
+    }
+
+    /// The pinned panel: one line per provider.
+    pub fn draw_panel(&self, f: &mut Frame, area: Rect) {
+        self.draw_panel_at(f, area, Utc::now());
+    }
+
+    fn draw_panel_at(&self, f: &mut Frame, area: Rect, now: super::Time) {
+        let mut title = String::from(" quota ");
+        if self.feed.refreshing() {
+            title.push_str("· refreshing… ");
+        }
+        let block = panel(Line::from(title));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let width = usize::from(inner.width.saturating_sub(2)).max(1);
+        let lines = match (&self.feed.notice, &self.feed.snapshot) {
+            (Some(notice), _) => vec![Line::styled(
+                truncate(notice, width),
+                colour(State::Blocked),
+            )],
+            (None, Some(snapshot)) => render::summary(snapshot, now, width),
+            (None, None) => vec![Line::styled("no quota read yet", OVERLAY)],
+        };
+        let lines = if lines.is_empty() {
+            vec![Line::styled("no plan set up · u shows why", OVERLAY)]
+        } else {
+            lines
+        };
+        f.render_widget(Paragraph::new(lines), inner.inner(Margin::new(1, 0)));
     }
 
     pub fn draw(&mut self, f: &mut Frame, area: Rect) {
@@ -131,7 +193,7 @@ impl View {
             Layout::vertical([Constraint::Min(3), Constraint::Length(2)]).areas(area);
         let block = panel(Line::from(format!(
             " {} ",
-            render::title(self.snapshot.as_ref(), self.refreshing())
+            render::title(self.feed.snapshot.as_ref(), self.feed.refreshing())
         )));
         let inner = block.inner(body);
         f.render_widget(block, body);
@@ -141,7 +203,7 @@ impl View {
             width: inner.width.saturating_sub(2),
             ..inner
         };
-        let lines = match &self.snapshot {
+        let lines = match &self.feed.snapshot {
             Some(snapshot) => render::cards(snapshot, now, usize::from(cards.width).max(1), true),
             None => vec![Line::styled(" no quota read yet", OVERLAY)],
         };
@@ -150,14 +212,14 @@ impl View {
         self.scroll = self.scroll.min(self.lines.saturating_sub(self.height));
         f.render_widget(Paragraph::new(lines).scroll((self.scroll as u16, 0)), cards);
         let mut keys = Vec::new();
-        if self.needs_keychain() {
+        if self.feed.needs_keychain() {
             keys.push(("⏎", "allow"));
         }
         keys.extend([("r", "refresh"), ("u", "back")]);
         if self.lines > self.height {
             keys.push(("j k", "scroll"));
         }
-        let status = match &self.notice {
+        let status = match &self.feed.notice {
             Some(notice) => Line::styled(
                 truncate(&format!(" {notice}"), usize::from(area.width)),
                 colour(State::Blocked),
@@ -192,7 +254,10 @@ mod tests {
     fn draws_cards_in_a_panel_with_the_view_keys() {
         let mut view = View {
             open: true,
-            snapshot: Some(render::tests::sample()),
+            feed: Feed {
+                snapshot: Some(render::tests::sample()),
+                ..Feed::default()
+            },
             ..View::default()
         };
         let rows = screen(&mut view, 38, 40);
@@ -212,7 +277,10 @@ mod tests {
     fn keys_close_scroll_and_leave_help_alone() {
         let mut view = View {
             open: true,
-            snapshot: Some(render::tests::sample()),
+            feed: Feed {
+                snapshot: Some(render::tests::sample()),
+                ..Feed::default()
+            },
             ..View::default()
         };
         screen(&mut view, 38, 12);
@@ -236,5 +304,37 @@ mod tests {
             "not while typing"
         );
         assert!(!view.open);
+    }
+
+    #[test]
+    fn the_panel_draws_one_line_per_provider_in_a_frame() {
+        let view = View {
+            pinned: true,
+            feed: Feed {
+                snapshot: Some(render::tests::sample()),
+                ..Feed::default()
+            },
+            ..View::default()
+        };
+        let height = view.panel_height();
+        assert_eq!(height, 6, "four providers and two borders");
+        let mut terminal = Terminal::new(TestBackend::new(38, height)).unwrap();
+        let now = crate::quota::tests::at(render::tests::NOW);
+        terminal
+            .draw(|f| view.draw_panel_at(f, f.area(), now))
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..height)
+            .map(|y| (0..38).map(|x| buffer[(x, y)].symbol()).collect())
+            .collect();
+        assert!(rows[0].starts_with("╭ quota "), "{}", rows[0]);
+        assert!(rows[1].starts_with("│ ● claude ━"), "{}", rows[1]);
+        assert!(rows[1].ends_with("72% 4d21h  │"), "{}", rows[1]);
+        assert!(
+            rows[4].starts_with("│ ○ grok   login expired"),
+            "{}",
+            rows[4]
+        );
+        assert!(rows[5].starts_with('╰'));
     }
 }

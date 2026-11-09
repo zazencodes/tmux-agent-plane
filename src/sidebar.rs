@@ -975,7 +975,20 @@ impl Sidebar {
             || self.kill_key(key, origin)
             || self.restart_key(key);
         self.pending_g &= !consumed;
+        // Only a sidebar takes up its own settings; the picker shows neither.
+        if let Some(saved) = self.auto_name.saved_sidebar.take()
+            && matches!(origin, Origin::Sidebar(_))
+        {
+            self.show(&saved);
+        }
         consumed
+    }
+
+    /// Shows tasks and the quota panel as configured.
+    pub(crate) fn show(&mut self, config: &crate::autoname_config::Sidebar) {
+        self.tasks.shown = config.tasks;
+        self.quota.pinned = config.quota;
+        self.rebuild();
     }
 
     /// The quota view takes every key but `?` while open; `u` opens it when nothing is typed.
@@ -1274,6 +1287,10 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
         shown: None,
     };
     let mut sidebar = Sidebar::default();
+    match crate::autoname_config::read() {
+        Ok(config) => sidebar.show(&config.sidebar),
+        Err(error) => sidebar.notice = Some(format!("{error:#}")),
+    }
     let mut next_read = Instant::now();
     let mut check_width = true;
     loop {
@@ -1437,8 +1454,20 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     }
     let confirmation = confirmation_footer(sidebar, f.area().width as usize);
     let footer_height = confirmation.as_ref().map_or(2, |lines| lines.len() as u16);
-    let [list_area, help_area] =
-        Layout::vertical([Constraint::Min(3), Constraint::Length(footer_height)]).areas(f.area());
+    let quota_height = if sidebar.quota.pinned {
+        sidebar.quota.panel_height()
+    } else {
+        0
+    };
+    let [list_area, quota_area, help_area] = Layout::vertical([
+        Constraint::Min(3),
+        Constraint::Length(quota_height),
+        Constraint::Length(footer_height),
+    ])
+    .areas(f.area());
+    if sidebar.quota.pinned {
+        sidebar.quota.draw_panel(f, quota_area);
+    }
     let inner = list_area.width.saturating_sub(2) as usize;
     let block = panel(Line::from(" agents "));
     let content = block.inner(list_area);
@@ -1524,9 +1553,14 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
                 } else if sidebar.navigation.jump.is_some() {
                     hints(&[("type", "find a row"), ("^w ^u", "clear")])
                 } else if sidebar.tasks.exist() {
-                    hints(&[("c", "new"), ("o", "configure"), ("t", "tasks")])
+                    hints(&[
+                        ("c", "new"),
+                        ("o", "configure"),
+                        ("t", "tasks"),
+                        ("u", "quota"),
+                    ])
                 } else {
-                    hints(&[("c", "new"), ("o", "configure")])
+                    hints(&[("c", "new"), ("o", "configure"), ("u", "quota")])
                 },
                 footer(sidebar, inner + 2, index::now_ms()),
             ])

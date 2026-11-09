@@ -21,6 +21,8 @@ pub struct Setup {
     config_error: Option<String>,
     /// Presets whose CLI was not on `PATH` when the menu opened.
     missing: Vec<char>,
+    /// Sidebar settings just saved with `t` or `u`, for the sidebar to take up.
+    pub saved_sidebar: Option<config::Sidebar>,
 }
 
 /// A wider screen, such as the picker's, shows the setup as a centred card of this width.
@@ -137,6 +139,27 @@ impl Setup {
                     self.custom = Some(String::new());
                     self.error = None;
                 }
+                KeyCode::Char(key @ ('t' | 'u')) => {
+                    // Read afresh to keep whatever another sidebar saved meanwhile.
+                    let result = config::read().and_then(|mut config| {
+                        let shown = if key == 't' {
+                            &mut config.sidebar.tasks
+                        } else {
+                            &mut config.sidebar.quota
+                        };
+                        *shown = !*shown;
+                        config::write(&config)?;
+                        Ok(config)
+                    });
+                    match result {
+                        Ok(config) => {
+                            self.saved_sidebar = Some(config.sidebar.clone());
+                            self.config = config;
+                            self.error = None;
+                        }
+                        Err(error) => self.error = Some(format!("{error:#}")),
+                    }
+                }
                 KeyCode::Char('d') if self.config.auto_name.enabled => {
                     // Read afresh to preserve a concurrent setup's command and consent.
                     let result = config::read().and_then(|mut config| {
@@ -159,7 +182,6 @@ impl Setup {
     }
 
     pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
-        let enabled = self.config.auto_name.enabled;
         let width = usize::from(area.width.min(CARD_WIDTH).saturating_sub(4));
         let (mut lines, keys): (Vec<Line>, Vec<(&str, &str)>) = if let Some(input) = &self.custom {
             (
@@ -172,12 +194,10 @@ impl Setup {
                 vec![("⏎", "enable"), ("esc", "back")],
             )
         } else {
-            let keys = if enabled {
-                vec![("1-7", "choose"), ("d", "turn off"), ("esc", "close")]
-            } else {
-                vec![("1-7", "choose"), ("esc", "close")]
-            };
-            (self.menu_lines(width), keys)
+            (
+                self.menu_lines(width),
+                vec![("1-7", "names"), ("t u", "sidebar"), ("esc", "close")],
+            )
         };
         if let Some(error) = self.config_error.as_ref().or(self.error.as_ref()) {
             lines.push(Line::default());
@@ -186,12 +206,7 @@ impl Setup {
         let [panel_area, footer_area] =
             Layout::vertical([Constraint::Min(3), Constraint::Length(1)])
                 .areas(card(area, &lines, width));
-        let state = if enabled {
-            Line::styled(" ● on ", colour(State::Done)).right_aligned()
-        } else {
-            Line::styled(" ○ off ", OVERLAY).right_aligned()
-        };
-        let block = panel(Line::from(" configure ")).title_top(state);
+        let block = panel(Line::from(" configure "));
         let inner = block.inner(panel_area).inner(Margin::new(1, 0));
         frame.render_widget(block, panel_area);
         frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
@@ -204,7 +219,12 @@ impl Setup {
             auto_name.enabled && config::preset(choice).as_ref() == Some(&auto_name.command)
         };
         let any_preset = CHOICES.iter().any(|(choice, _)| is_current(*choice));
-        let mut lines = vec![heading("AI agent names", width)];
+        let state = if auto_name.enabled {
+            Span::styled("● on", colour(State::Done))
+        } else {
+            Span::styled("○ off", OVERLAY)
+        };
+        let mut lines = vec![heading_with("AI agent names", state, width)];
         lines.push(muted(
             "Name agents after their task, using an AI CLI on this computer.",
         ));
@@ -218,6 +238,15 @@ impl Setup {
         lines.push(muted(
             "You review each choice before anything runs. Presets use a low-cost model.",
         ));
+        if auto_name.enabled {
+            lines.push(muted("d turns AI names off."));
+        }
+        lines.push(Line::default());
+        lines.push(heading("Sidebar", width));
+        let sidebar = &self.config.sidebar;
+        lines.push(toggle_line('t', "Background tasks", sidebar.tasks, width));
+        lines.push(toggle_line('u', "Quota panel", sidebar.quota, width));
+        lines.push(muted("What every sidebar shows when it opens."));
         lines
     }
 }
@@ -247,6 +276,24 @@ fn choice_line(
         Span::styled("not installed", OVERLAY)
     } else {
         return Line::from(left);
+    };
+    let used = left.iter().map(Span::width).sum::<usize>() + status.width();
+    let mut spans = left;
+    spans.push(Span::raw(" ".repeat(width.saturating_sub(used).max(1))));
+    spans.push(status);
+    Line::from(spans)
+}
+
+/// `t Background tasks      shown`: a setting with its state at the right edge.
+fn toggle_line(key: char, label: &str, shown: bool, width: usize) -> Line<'static> {
+    let left = vec![
+        Span::styled(format!("{key} "), SUBTEXT),
+        Span::styled(label.to_string(), TEXT),
+    ];
+    let status = if shown {
+        Span::styled("● shown", colour(State::Done))
+    } else {
+        Span::styled("○ hidden", OVERLAY)
     };
     let used = left.iter().map(Span::width).sum::<usize>() + status.width();
     let mut spans = left;
@@ -290,6 +337,16 @@ fn heading(text: &str, width: usize) -> Line<'static> {
     Line::from(vec![
         Span::styled(text.to_string(), Style::default().fg(LAVENDER).bold()),
         Span::styled(format!(" {}", "─".repeat(rule)), SURFACE2),
+    ])
+}
+
+/// A heading whose rule ends in `state`.
+fn heading_with(text: &str, state: Span<'static>, width: usize) -> Line<'static> {
+    let rule = width.saturating_sub(text.chars().count() + state.width() + 2);
+    Line::from(vec![
+        Span::styled(text.to_string(), Style::default().fg(LAVENDER).bold()),
+        Span::styled(format!(" {} ", "─".repeat(rule)), SURFACE2),
+        state,
     ])
 }
 
@@ -405,7 +462,10 @@ mod tests {
         setup.config.auto_name.enabled = true;
         setup.config.auto_name.command = config::preset('1').unwrap();
         let text = rendered(&mut setup, 38, 28);
-        assert!(text.contains("● on"));
+        assert!(
+            text.lines()
+                .any(|l| l.contains("AI agent names") && l.contains("● on"))
+        );
         assert!(
             text.lines()
                 .any(|l| l.contains("1 Claude Code") && l.contains("✓ active"))
@@ -414,8 +474,16 @@ mod tests {
             text.lines()
                 .any(|l| l.contains("2 Codex") && l.contains("not installed"))
         );
-        assert!(text.contains("1-7 choose"));
-        assert!(text.contains("d turn off"));
+        assert!(text.contains("1-7 names"));
+        assert!(text.contains("d turns AI names off"));
+        assert!(
+            text.lines()
+                .any(|l| l.contains("t Background tasks") && l.contains("● shown"))
+        );
+        assert!(
+            text.lines()
+                .any(|l| l.contains("u Quota panel") && l.contains("○ hidden"))
+        );
     }
 
     #[test]

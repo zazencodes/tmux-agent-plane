@@ -40,7 +40,7 @@ It reads this README, installs the pieces and asks you about the choices along t
 - **A sidebar of agents.** Your sidebar key (default `prefix + S`) opens a live list of every agent down the left of every window, in every session, and puts you in it: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar is there too. Close it once and it closes everywhere.
 - **Flip through your agents.** Alt + K / J (Option + K / J on macOS) goes straight to the previous or next agent from anywhere, across sessions, with no prefix. Tap it repeatedly to scroll through them. See [Direct agent navigation](#direct-agent-navigation).
 - **Search and peek before you jump.** `prefix + a` opens an agent picker with a large live preview and the sidebar's actions; `prefix + f` opens it ready to type a filter. Browse with `j`/`k`, press `/` then `n`/`N` to hop between matching rows, press `f` to fuzzy-filter names, projects and descriptions across every session, and press Enter to focus.
-- **How much is left.** Press `u` in the sidebar to see how much of your Claude, Codex, Antigravity and Grok Build plans is left, window by window, with a marker for where steady use would be and whether you will run out before the reset. `tmux-agent-plane quota` prints the same, and agents can check it before handing out work. See [Quota](#quota).
+- **How much is left.** Press `u` in the sidebar, or turn on its quota panel with `o`, to see how much of your Claude, Codex, Antigravity and Grok Build plans is left, window by window, with a marker for where steady use would be and whether you will run out before the reset. `tmux-agent-plane quota` prints the same, and agents can check it before handing out work. See [Quota](#quota).
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
 - **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`. Optional AI naming can name the remaining default-named agents; press `c` in the sidebar to set it up.
 - **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. A spawned agent records its parent when caller identity is known.
@@ -198,15 +198,15 @@ bind -n S-Left run-shell "tmux-agent-plane enter-sidebar '#{window_id}'"
 | `Esc` / `Ctrl-C` | Cancel a search or filter being typed. Outside editing, clear the search, then the text and state filters together, back to the whole list; then close the popup |
 | `Enter` | Jump to the agent. The sidebar stays open; the popup closes. When the list says the daemon is not running, `Enter` restarts it and shows the reason if it cannot start |
 | `x` | Ask to kill the selected agent’s pane. The footer pins its name/state; `Enter` or lowercase `y` confirms; `?` temporarily shows help; other keys cancel without replay. Refuses to end your attached session; warns if a remote session would end |
-| `t` | Show or hide background tasks below the agents, in the sidebar, under a `── tasks ──` rule. Each sidebar keeps its own choice, and the footer offers `t tasks` while any task exists. A row reads `▸ web-dev  :5173  site  3h` while running (its listening ports, project folder and age) or `✕ worker  exit 1  site  2m` once its command has ended. `j`/`k`, `gg` and `G` move through the agents and then the tasks, previewing a task's window like an agent's; `Enter` opens it |
+| `t` | Show or hide background tasks below the agents, in the sidebar, under a `── tasks ──` rule. Sidebars open with tasks shown; `o` sets that, and `t` changes one sidebar. The footer offers `t tasks` while any task exists. A row reads `▸ web-dev  :5173  site  3h` while running (its listening ports, project folder and age) or `✕ worker  exit 1  site  2m` once its command has ended. `j`/`k`, `gg` and `G` move through the agents and then the tasks, previewing a task's window like an agent's; `Enter` opens it |
 | `x` on a task | Ask to stop the task, in the same style as a kill: `Enter` or lowercase `y` stops it and it leaves the list, other keys cancel. The sidebar moves to the next row first |
 | `R` | Restart the selected task: run its command again in its window |
 | `b` | While agents from before tmux restarted wait (the sidebar's top line says `↺ N agents from before tmux restarted · b restore`), list them, those that cannot come back and why, and the tasks that were running with the agent that started each. `Enter` brings back the agents and the tasks, `a` the agents only, `d` forgets them, `Esc` cancels. It asks every time; see [Restore](#restore) |
 | `r` | Rename the agent (sidebar), starting from its current name. `Ctrl-W` deletes a word, `Ctrl-U` clears, `Enter` saves, `Esc` cancels |
-| `o` | Configure, in the sidebar. AI naming: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `d` disables naming, `Esc` goes back or closes |
+| `o` | Configure. AI naming: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `d` disables naming. Sidebar: `t` sets whether sidebars open with tasks shown, `u` whether they show the quota panel. Each saves at once and applies to this sidebar; other sidebars take it when they next open. `Esc` goes back or closes |
 | `c` | Start a new agent in the selected agent's project. Pick the kind with arrows or `j`/`k`, then `Enter`: it opens in a new window of that session, in that agent's directory, and takes you there. `Esc` or `c` cancels |
 | `Tab` | In the popup, type to the selected agent inside the preview; `Tab` again returns to the menu |
-| `u` | Show the [quota view](#quota) in place of the list; `u` or `Esc` goes back. `r` reads again, `j`/`k` scroll, and `Enter` allows reading Claude's login from the macOS Keychain when its card asks |
+| `u` | Show the [quota view](#quota) in place of the list, as the footer's `u quota` says; `u` or `Esc` goes back. `r` reads again, `j`/`k` scroll, and `Enter` allows reading Claude's login from the macOS Keychain when its card asks |
 | `?` | Show every sidebar shortcut. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search, filter and rename |
 | `q` | Close the sidebar everywhere; close the popup |
 
@@ -290,7 +290,20 @@ Press `u` in the sidebar for the quota view; `u` or `Esc` returns to the agent l
 
 Each card shows what is left of the plan's tightest window (the headline), then every window with its time to reset. Percentages are what is left: green from 50%, yellow from 20%, red below. `┃` marks where the bar would be if you used the window evenly up to its reset: fill short of the marker means you are using it faster than the clock. The verdict on the right is `on pace ✓` when every window lasts to its reset, `empty in 7h21m` when, at the rate so far this window, one runs out first, `✗ exhausted now`, or `runway unknown` when a window's cycle is not known. Antigravity shows its Gemini and Claude/GPT groups separately, because each is its own budget.
 
-The view reads again when you open it, every five minutes while it is open, and on `r`; it keeps showing the last reading with `refreshing…` meanwhile. The daemon does every read, so the sidebar stays idle and `codex` or `agy` never appear as agents. When a read fails for a moment (timeout, network, rate limit, server error), the card keeps the windows that have not reset yet, marked `◐ stale` with the reason; a sign-out drops them. A number is never shown past its reset. A failed card says what to do, such as `run grok to renew it`. Provider failures are logged to `daemon.log` once each and never count as daemon faults.
+To keep quota in sight, press `o`, then `u`: sidebars show a quota panel below the agents, one line per plan you have set up, with what is left of its tightest window and the time to its reset:
+
+```
+╭ quota ─────────────────────────────╮
+│ ● claude ━━━━━━━━━┃───  72% 4d21h  │
+│ ◐ codex  ━━━━━━━━━━━──  83% 3d0h   │
+│ ● agy    ━╸─┃─────────  10% 1h0m   │
+│ ○ grok   login expired             │
+╰────────────────────────────────────╯
+```
+
+It is off by default. `u` opens the full view either way.
+
+The view reads again when you open it, every five minutes while it or the panel shows (unless another sidebar just did), and on `r`; it keeps showing the last reading with `refreshing…` meanwhile. The daemon does every read, so the sidebar stays idle and `codex` or `agy` never appear as agents. When a read fails for a moment (timeout, network, rate limit, server error), the card keeps the windows that have not reset yet, marked `◐ stale` with the reason; a sign-out drops them. A number is never shown past its reset. A failed card says what to do, such as `run grok to renew it`. Provider failures are logged to `daemon.log` once each and never count as daemon faults.
 
 Each provider is read one way, with the login its own CLI already keeps. Tokens go only to that provider's own endpoint, and are never written, cached or logged; refresh tokens are never read, and nothing is ever written to a credential store. No read spends any usage.
 
@@ -384,7 +397,7 @@ AI naming is **off by default**. With it off, no automatic naming command runs. 
 
 Press `o` and choose `1` Claude Code, `2` Codex, `3` Pi, `4` OpenCode, `5` Antigravity (`agy`), `6` Grok Build, or `7` for a custom command. Setup checks the executable is installed without running it, shows the command and data disclosure, and requires `Enter` to enable. `Esc` goes back or closes; `o`, then `d` disables naming. For Antigravity, authenticate `agy` normally first, then use **`o`, `5`, `Enter`**. Setup itself never calls a model or changes folder trust. Use your configured sidebar key to open or reopen it (the plugin default is `prefix + S`).
 
-The one configuration file is `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/config.json`. Setup writes it; the daemon reads changes on its existing tick, without a restart. An Antigravity configuration looks like:
+The one configuration file is `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/config.json`. Setup writes it; the daemon reads changes on its existing tick, without a restart. Its `sidebar` table holds what sidebars show when they open: `"tasks"` (default `true`) and `"quota"` (default `false`). An Antigravity configuration looks like:
 
 ```json
 {

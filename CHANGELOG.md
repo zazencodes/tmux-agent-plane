@@ -17,6 +17,8 @@ before 1.0, a breaking change bumps the minor version.
 - Press `u` in the sidebar to see how much of your Claude, Codex, Antigravity and Grok Build plans is left: each window's remaining percent and time to reset, a marker for even use, and whether it lasts until the reset. `u` or `Esc` returns to the list and `r` reads again
 - `tmux-agent-plane quota [--json]` reads the same, fresh, so agents can check capacity before handing out work
 - Claude's login is read from the macOS Keychain only after you allow it once: press `Enter` on its card in the quota view
+- Keep quota in sight: press `o`, then `u`, and every sidebar shows a quota panel below the agents, one line per plan with what is left and when it resets. It is off by default, and the sidebar footer offers `u quota` for the full view
+- Choose whether sidebars open with background tasks shown: `o`, then `t`. They are shown by default, and `t` in a sidebar still shows or hides them there
 
 ## 0.5.0 - 2026-11-07
 
