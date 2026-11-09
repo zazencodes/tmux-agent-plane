@@ -984,7 +984,8 @@ impl Sidebar {
             && !self.typing_query()
             && !self.auto_name.open
             && self.new_agent.is_none()
-            && self.killing.is_none();
+            && self.killing.is_none()
+            && !self.restore.is_open();
         !self.help.open && self.quota.key(key, can_open)
     }
 

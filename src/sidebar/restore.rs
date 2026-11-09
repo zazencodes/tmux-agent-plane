@@ -277,6 +277,7 @@ impl Sidebar {
             || self.tasks.stopping.is_some()
             || self.auto_name.open
             || self.help.open
+            || self.quota.open
         {
             return false;
         }
@@ -374,6 +375,14 @@ mod tests {
             name: "x".into(),
         });
         assert!(!sidebar.restore_key(b, OWN));
+    }
+
+    #[test]
+    fn the_quota_view_never_opens_over_the_question() {
+        let mut sidebar = confirming();
+        assert!(!sidebar.quota_key(KeyEvent::from(KeyCode::Char('u'))));
+        assert!(!sidebar.quota.open);
+        assert!(matches!(sidebar.restore.view, Some(View::Confirm(_))));
     }
 
     #[test]
