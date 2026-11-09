@@ -762,6 +762,14 @@ impl Sidebar {
     }
 
     /// Letters are query text, for the filter or the search.
+    /// `l` and → open the selected row as Enter does, except while text is being typed.
+    pub(crate) fn opens_like_enter(&self, key: KeyEvent) -> bool {
+        key.modifiers.is_empty()
+            && matches!(key.code, KeyCode::Right | KeyCode::Char('l'))
+            && self.editing.is_none()
+            && !self.typing_query()
+    }
+
     pub(crate) fn typing_query(&self) -> bool {
         self.navigation.search.is_some() || self.navigation.jump.is_some()
     }
@@ -1332,7 +1340,9 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
                 let command = sidebar.editing.is_none() && !searching && !jumping;
                 let before = sidebar.navigation.pane.clone();
                 // Enter while typing a search keeps it, so `n` can go on from there.
-                let opens = (key.code == KeyCode::Enter && !jumping) || leaves_sidebar(key);
+                let opens = (key.code == KeyCode::Enter && !jumping)
+                    || leaves_sidebar(key)
+                    || sidebar.opens_like_enter(key);
                 focus = opens
                     && sidebar.editing.is_none()
                     && (sidebar.selected_task().is_some() || sidebar.open_selected().is_some());

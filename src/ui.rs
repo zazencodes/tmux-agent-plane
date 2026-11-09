@@ -375,9 +375,10 @@ impl App {
             return ControlFlow::Continue(());
         }
         // Enter while typing a search keeps it, so `n` can go on from there.
-        if key.code == KeyCode::Enter
+        if (key.code == KeyCode::Enter
             && self.sidebar.editing.is_none()
-            && self.sidebar.navigation.jump.is_none()
+            && self.sidebar.navigation.jump.is_none())
+            || self.sidebar.opens_like_enter(key)
         {
             return match self.sidebar.open_selected() {
                 Some(agent) => ControlFlow::Break(Some(agent)),
@@ -1616,6 +1617,22 @@ mod tests {
             panic!("Enter opens the match");
         };
         assert_eq!(chosen.pane, "%11");
+    }
+
+    #[test]
+    fn l_and_right_open_like_enter_but_type_into_a_search() {
+        for code in [KeyCode::Char('l'), KeyCode::Right] {
+            let mut app = app();
+            let expected = app.sidebar.selected().unwrap().pane.clone();
+            let ControlFlow::Break(Some(chosen)) = press(&mut app, code) else {
+                panic!("{code:?} opens the selected agent");
+            };
+            assert_eq!(chosen.pane, expected);
+        }
+        let mut app = app();
+        app.sidebar.start_search();
+        assert!(press(&mut app, KeyCode::Char('l')).is_continue());
+        assert!(press(&mut app, KeyCode::Right).is_continue());
     }
 
     #[test]
