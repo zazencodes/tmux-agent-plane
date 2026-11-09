@@ -40,6 +40,7 @@ It reads this README, installs the pieces and asks you about the choices along t
 - **A sidebar of agents.** Your sidebar key (default `prefix + S`) opens a live list of every agent down the left of every window, in every session, and puts you in it: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar is there too. Close it once and it closes everywhere.
 - **Flip through your agents.** Alt + K / J (Option + K / J on macOS) goes straight to the previous or next agent from anywhere, across sessions, with no prefix. Tap it repeatedly to scroll through them. See [Direct agent navigation](#direct-agent-navigation).
 - **Search and peek before you jump.** `prefix + a` opens an agent picker with a large live preview and the sidebar's actions; `prefix + f` opens it ready to type a filter. Browse with `j`/`k`, press `/` then `n`/`N` to hop between matching rows, press `f` to fuzzy-filter names, projects and descriptions across every session, and press Enter to focus.
+- **How much is left.** Press `u` in the sidebar to see how much of your Claude, Codex, Antigravity and Grok Build plans is left, window by window, with a marker for where steady use would be and whether you will run out before the reset. `tmux-agent-plane quota` prints the same, and agents can check it before handing out work. See [Quota](#quota).
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
 - **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`. Optional AI naming can name the remaining default-named agents; press `c` in the sidebar to set it up.
 - **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. A spawned agent records its parent when caller identity is known.
@@ -203,6 +204,7 @@ bind -n S-Left run-shell "tmux-agent-plane enter-sidebar '#{window_id}'"
 | `o` | Configure, in the sidebar. AI naming: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `d` disables naming, `Esc` goes back or closes |
 | `c` | Start a new agent in the selected agent's project. Pick the kind with arrows or `j`/`k`, then `Enter`: it opens in a new window of that session, in that agent's directory, and takes you there. `Esc` or `c` cancels |
 | `Tab` | In the popup, type to the selected agent inside the preview; `Tab` again returns to the menu |
+| `u` | Show the [quota view](#quota) in place of the list; `u` or `Esc` goes back. `r` reads again, `j`/`k` scroll, and `Enter` allows reading Claude's login from the macOS Keychain when its card asks |
 | `?` | Show every sidebar shortcut. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search, filter and rename |
 | `q` | Close the sidebar everywhere; close the popup |
 
@@ -264,6 +266,42 @@ When an agent finishes or blocks off screen, every open sidebar shows the latest
 Pi and OpenCode completion counters also report a new finished turn when it completes between polls while the agent still shows `done`. Each new completion follows the same footer and desktop policy.
 
 Desktop notifications keep the task or blocked detail and work with the sidebar closed. Daemon faults and recoveries open in their own window a little below the top of the terminal, once you pause typing so it does not swallow keystrokes. A notice stays until you press a key or for 10 seconds, and it takes keyboard input while it is open.
+
+### Quota
+
+Press `u` in the sidebar for the quota view; `u` or `Esc` returns to the agent list:
+
+```
+╭ quota · 14:02 · refreshing… ───────╮
+│ ● claude max             on pace ✓ │
+│   72% week                         │
+│   ━━━━━━━━━━━━━━━━━━━━━┃╸───────── │
+│   session ━━━━━━━━━━━┃  97% 4h38m  │
+│   week    ━━━━━━━━┃───  72% 4d21h  │
+│                                    │
+│ ● codex  pro        empty in 7h21m │
+│   …                                │
+│ ○ grok   not set up                │
+╰────────────────────────────────────╯
+ r refresh  u back
+```
+
+Each card shows what is left of the plan's tightest window (the headline), then every window with its time to reset. Percentages are what is left: green from 50%, yellow from 20%, red below. `┃` marks where the bar would be if you used the window evenly up to its reset: fill short of the marker means you are using it faster than the clock. The verdict on the right is `on pace ✓` when every window lasts to its reset, `empty in 7h21m` when, at the rate so far this window, one runs out first, `✗ exhausted now`, or `runway unknown` when a window's cycle is not known. Antigravity shows its Gemini and Claude/GPT groups separately, because each is its own budget.
+
+The view reads again when you open it, every five minutes while it is open, and on `r`; it keeps showing the last reading with `refreshing…` meanwhile. The daemon does every read, so the sidebar stays idle and `codex` or `agy` never appear as agents. When a read fails for a moment (timeout, network, rate limit, server error), the card keeps the windows that have not reset yet, marked `◐ stale` with the reason; a sign-out drops them. A number is never shown past its reset. A failed card says what to do, such as `run grok to renew it`. Provider failures are logged to `daemon.log` once each and never count as daemon faults.
+
+Each provider is read one way, with the login its own CLI already keeps. Tokens go only to that provider's own endpoint, and are never written, cached or logged; refresh tokens are never read, and nothing is ever written to a credential store. No read spends any usage.
+
+| Provider | How |
+| --- | --- |
+| Claude | `GET https://api.anthropic.com/api/oauth/usage` with Claude Code's OAuth token. macOS: the `Claude Code-credentials` Keychain item (suffixed with a hash of `CLAUDE_CONFIG_DIR` when that is set); Linux: `${CLAUDE_CONFIG_DIR:-~/.claude}/.credentials.json`. A rejected token means its login expired: open Claude Code, which renews it. |
+| Codex | Its own `codex app-server`, found on the daemon's `PATH`, asked only for the account and its rate limits. Codex renews its own login. |
+| Antigravity | `agy -p /quota --output-format json`, with `open` and `xdg-open` stubbed out so it can never open a browser. |
+| Grok Build | grok.com's credits for Grok Build, with the session login in `${GROK_HOME:-~/.grok}/auth.json`. API keys are never used. |
+
+**Claude on macOS asks once.** Reading the Keychain item can make macOS ask for permission, so nothing reads it until you allow it: the Claude card says `needs Keychain access · enter allows`. Press `Enter` in the quota view; macOS may show its dialog, where **Always Allow** keeps later reads silent. Once a read succeeds, the daemon remembers your consent in a marker file, `quota-keychain-granted` in its state directory, which holds no secret. Delete it to withdraw consent. If a later read is denied, the marker is removed and the card asks again. Until then only the item's presence is checked, which never shows a dialog. The `quota` command reports the same remedy.
+
+The snapshot lives in `${XDG_STATE_HOME:-~/.local/state}/tmux-agent-plane/quota.json`, written only by the daemon. HTTPS honours `HTTPS_PROXY` and `NO_PROXY`, follows no redirects and gives up after 15 seconds.
 
 ### Project sessions
 

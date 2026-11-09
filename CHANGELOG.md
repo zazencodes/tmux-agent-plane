@@ -12,7 +12,9 @@ before 1.0, a breaking change bumps the minor version.
 - Background tasks: agents start dev servers, watchers and tunnels with `tmux-agent-plane task start <name> -- <command>`, so every agent sees one list (`task list`) with each task's state and listening ports, reuses a running one instead of starting a second copy, and can `task read`, `task restart` and `task stop` it. Tasks run in their own windows in an `agent-plane-tasks` session, outlive the agent that started them, and keep their output and exit status when their command ends. The skill tells agents to use them instead of backgrounding commands themselves
 - Press `t` in the sidebar to list background tasks below the agents, with each one's ports or exit code, project and age. Move onto a task to preview its window, `Enter` to open it, `x` to stop it after confirming, and `R` to restart it
 - Install by asking your coding agent to "install and configure tmux-agent-plane with me"; the README walks it through onboarding you, one choice at a time
-- `tmux-agent-plane quota [--json]` reads how much of your Claude, Codex, Antigravity and Grok Build plans is left, fresh, so agents can check capacity before handing out work
+- Press `u` in the sidebar to see how much of your Claude, Codex, Antigravity and Grok Build plans is left: each window's remaining percent and time to reset, a marker for even use, and whether it lasts until the reset. `u` or `Esc` returns to the list and `r` reads again
+- `tmux-agent-plane quota [--json]` reads the same, fresh, so agents can check capacity before handing out work
+- Claude's login is read from the macOS Keychain only after you allow it once: press `Enter` on its card in the quota view
 
 ## 0.5.0 - 2026-11-07
 

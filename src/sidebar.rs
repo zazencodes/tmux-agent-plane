@@ -412,6 +412,8 @@ pub(crate) struct Sidebar {
     // Auto-naming setup is local UI state; it never performs periodic work.
     pub(crate) auto_name: crate::autoname_setup::Setup,
     pub(crate) help: crate::sidebar_help::Help,
+    /// `u`: the quota view, sidebar only.
+    pub(crate) quota: crate::quota::view::View,
     pub(crate) all_agents: Vec<Agent>,
     pub(crate) agents: Vec<Agent>,
     pub(crate) navigation: Navigation,
@@ -969,6 +971,16 @@ impl Sidebar {
         consumed
     }
 
+    /// The quota view takes every key but `?` while open; `u` opens it when nothing is typed.
+    fn quota_key(&mut self, key: KeyEvent) -> bool {
+        let can_open = self.editing.is_none()
+            && !self.typing_query()
+            && !self.auto_name.open
+            && self.new_agent.is_none()
+            && self.killing.is_none();
+        !self.help.open && self.quota.key(key, can_open)
+    }
+
     /// With the daemon down the list has no rows, so Enter has nothing else to open.
     fn restart_key(&mut self, key: KeyEvent) -> bool {
         let restart = key.code == KeyCode::Enter && self.error.is_some() && self.editing.is_none();
@@ -1262,6 +1274,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             sidebar.refresh(origin);
             next_read = Instant::now() + REFRESH;
         }
+        sidebar.quota.tick();
         // tmux rescales panes proportionally when the window or a client resizes, and a
         // dragged border moves them: every sidebar is always exactly WIDTH columns. Asking only
         // after a resize means a window too narrow for WIDTH is asked once, not every wake.
@@ -1283,7 +1296,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             {
                 sidebar.pressed(index::now_ms());
                 // Help consumes every closing key before setup, kill or navigation.
-                if sidebar.action_key(key, origin) {
+                if sidebar.quota_key(key) || sidebar.action_key(key, origin) {
                     if !event::poll(Duration::ZERO)? {
                         break;
                     }
@@ -1396,6 +1409,10 @@ fn delete_word(name: &mut String) {
 fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     if sidebar.help.open {
         sidebar.help.draw(f, f.area());
+        return;
+    }
+    if sidebar.quota.open {
+        sidebar.quota.draw(f, f.area());
         return;
     }
     if sidebar.auto_name.open {

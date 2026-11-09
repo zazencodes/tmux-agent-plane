@@ -10,6 +10,7 @@ mod grok;
 mod http;
 pub mod pace;
 pub mod render;
+pub mod view;
 
 use crate::index;
 use anyhow::{Context, Result};
