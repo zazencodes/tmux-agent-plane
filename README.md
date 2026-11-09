@@ -173,19 +173,24 @@ set -g @agent-plane-sidebar-in-key C-M-h
 set -g @agent-plane-sidebar-out-key C-M-l
 ```
 
-Inside the sidebar, Shift + Right always leaves it the same way, with nothing to configure. To go in with Shift + Left, add this after the plugin loads:
+Inside the sidebar, `l`, → and Shift + Right also leave it the same way, with nothing to configure.
+
+Each of these four options takes one key or several, separated by spaces. To also move between agents with Shift + Up / Down and go into the sidebar with Shift + Left:
 
 ```tmux
-bind -n S-Left run-shell "tmux-agent-plane enter-sidebar '#{window_id}'"
+set -g @agent-plane-previous-key 'M-k S-Up'
+set -g @agent-plane-next-key 'M-j S-Down'
+set -g @agent-plane-sidebar-in-key 'M-h S-Left'
 ```
 
-tmux cannot see the Command key on macOS, but Ghostty can send another key for it. With the `C-M-` keys above, these lines in Ghostty's config put all four on Command + arrows, replacing Ghostty's own Command + arrow actions:
+#### Turning the global keys off
 
-```
-keybind = cmd+up=text:\x1b\x0b
-keybind = cmd+down=text:\x1b\x0a
-keybind = cmd+left=text:\x1b\x08
-keybind = cmd+right=text:\x1b\x0c
+The keys above work without the prefix, so a program in tmux never sees them. When you need them in a program, such as Shift + arrows to select text, press **prefix + K** to turn them all off: each key then reaches the pane as usual. The status bar shows `keys off · prefix K` until you press prefix + K again. Inside the sidebar, its own keys keep working.
+
+To start with them off, add `set -g @agent-plane-keys off` to `tmux.conf`. To toggle with another key, set `@agent-plane-keys-toggle-key` before the plugin loads:
+
+```tmux
+set -g @agent-plane-keys-toggle-key N
 ```
 
 ### Sidebar and agent list
@@ -196,6 +201,7 @@ keybind = cmd+right=text:\x1b\x0c
 | `prefix + a` | Open the agent picker: the sidebar's list and actions, with a live screen preview |
 | `prefix + f` | Open the agent picker already filtering, so you can start typing |
 | `Alt + K` / `Alt + J` | Focus previous/next agent directly, across sessions; no prefix or sidebar focus needed |
+| `prefix + K` | Turn the global keys (these four and any you add) off, so programs get them, and on again; see [Turning the global keys off](#turning-the-global-keys-off) |
 | `Alt + H` / `Alt + L` | Move into the sidebar and stay / leave it for the selected agent; no prefix needed |
 | `↓` `↑` | Move selection. In the sidebar, moving previews the selected agent's window/session while keyboard input stays in the sidebar; the popup previews inside itself. Both also accept `j` / `k` |
 | `gg` / `G` | Move to the first / last agent in the list, previewing it like any other move |
@@ -216,7 +222,7 @@ keybind = cmd+right=text:\x1b\x0c
 | `c` | Start a new agent in the selected agent's project. Pick the kind with arrows or `j`/`k`, then `Enter`: it opens in a new window of that session, in that agent's directory, and takes you there. `Esc` or `c` cancels |
 | `Tab` | In the popup, type to the selected agent inside the preview; `Tab` again returns to the menu |
 | `u` | Show the [quota view](#quota) in place of the list, as the footer's `u quota` says; `u` or `Esc` goes back. `r` reads again, `j`/`k` scroll, and `Enter` allows reading Claude's login from the macOS Keychain when its card asks |
-| `?` | Show the shortcuts: the plugin's tmux keys as you have them bound, then the list keys by what they do. Keys that only matter mid-action, such as confirming or editing text, show in the footer at the time. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search, filter and rename |
+| `?` | Show the shortcuts: the plugin's tmux keys as you have them bound, whether they are off, and the key that turns them on or off, then the list keys by what they do. Keys that only matter mid-action, such as confirming or editing text, show in the footer at the time. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search, filter and rename |
 | `q` | Close the sidebar everywhere; close the popup |
 
 `c` offers Claude Code, Codex, Pi, OpenCode and Grok Build. Antigravity needs a first task to start, so use `spawn agy "<task>"` for it. Pi, OpenCode and Grok Build always appear in the picker, but are tracked only once their [optional integrations](#more-agents) are set up. Like `Enter`, `c` refuses a session another client is using.

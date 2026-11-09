@@ -1,6 +1,7 @@
 //! The shortcut list: a few short sections, one line per key, paged on short terminals. Keys
 //! that only matter mid-action (confirming, editing text) show in the footer at that moment.
 //! Every closing key is consumed.
+use crate::quota::render::YELLOW;
 use crate::ui::{LAVENDER, OVERLAY, SUBTEXT, TEXT};
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
@@ -140,36 +141,69 @@ fn chrome(height: u16) -> (u16, u16) {
     }
 }
 
-/// `@agent-plane-bound-<name>-key` for each global binding, or why tmux could not say.
+/// The plugin's global keys as tmux has them bound now.
+#[derive(Default)]
+struct Global {
+    /// (keys, what they do), for each action with keys bound.
+    keys: Vec<(String, &'static str)>,
+    off: bool,
+    toggle: Option<String>,
+}
+
+/// `@agent-plane-bound-<name>-key` for each global action, `@agent-plane-keys` and the toggle,
+/// or why tmux could not say.
 #[cfg(not(test))]
-fn global_keys() -> Result<Vec<(String, &'static str)>, String> {
+fn global_keys() -> Result<Global, String> {
     let options = crate::tmux::run(&["show-options", "-g"]).map_err(|e| format!("{e:#}"))?;
-    Ok(GLOBAL
-        .iter()
-        .filter_map(|(name, action)| {
-            let prefix = format!("@agent-plane-bound-{name}-key ");
-            options.lines().find_map(|line| {
-                let key = line.strip_prefix(&prefix)?.trim_matches('"');
-                Some((key.to_string(), *action))
-            })
+    let value = |name: &str| {
+        let prefix = format!("{name} ");
+        options.lines().find_map(|line| {
+            let value = line.strip_prefix(&prefix)?.trim_matches('"');
+            Some(value.to_string())
         })
-        .collect())
+    };
+    Ok(Global {
+        keys: GLOBAL
+            .iter()
+            .filter_map(|(name, action)| {
+                Some((value(&format!("@agent-plane-bound-{name}-key"))?, *action))
+            })
+            .filter(|(keys, _)| !keys.is_empty())
+            .collect(),
+        off: value("@agent-plane-keys").as_deref() == Some("off"),
+        toggle: value("@agent-plane-bound-keys-toggle-key"),
+    })
 }
 
 /// Tests never ask a tmux server.
 #[cfg(test)]
-fn global_keys() -> Result<Vec<(String, &'static str)>, String> {
-    Ok(Vec::new())
+fn global_keys() -> Result<Global, String> {
+    Ok(Global::default())
 }
 
 /// The plugin's tmux keys first, then the sections, a blank line apart.
-fn lines(global: Result<Vec<(String, &'static str)>, String>) -> Vec<Line<'static>> {
+fn lines(global: Result<Global, String>) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     match global {
-        Ok(keys) if keys.is_empty() => {}
-        Ok(keys) => {
-            lines.push(heading("Anywhere in tmux"));
-            lines.extend(keys.iter().map(|(key, action)| entry(key, action)));
+        Ok(global) if global.keys.is_empty() => {}
+        Ok(global) => {
+            let mut title = vec![Span::styled(
+                "Anywhere in tmux",
+                Style::default().fg(LAVENDER).bold(),
+            )];
+            if global.off {
+                title.push(Span::styled("  off", Style::default().fg(YELLOW).bold()));
+            }
+            lines.push(Line::from(title));
+            lines.extend(global.keys.iter().map(|(key, action)| entry(key, action)));
+            if let Some(toggle) = &global.toggle {
+                let action = if global.off {
+                    "Turn these on"
+                } else {
+                    "Turn these off"
+                };
+                lines.push(entry(&format!("prefix {toggle}"), action));
+            }
             lines.push(Line::default());
         }
         Err(error) => {
@@ -255,17 +289,33 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn global_keys_lead_and_a_tmux_failure_shows_in_their_place() {
-        let lines = lines(Ok(vec![("C-M-k".into(), "Previous agent")]));
-        let text: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    fn global_keys_lead_with_their_toggle_and_a_tmux_failure_shows_in_their_place() {
+        let mut global = Global {
+            keys: vec![("C-M-k S-Up".into(), "Previous agent")],
+            off: false,
+            toggle: Some("K".into()),
+        };
+        let text = lines_text(Ok(Global {
+            keys: global.keys.clone(),
+            toggle: global.toggle.clone(),
+            off: false,
+        }));
         assert_eq!(text[0], "Anywhere in tmux");
-        assert_eq!(text[1], format!("C-M-k{}Previous agent", " ".repeat(7)));
+        assert_eq!(
+            text[1],
+            format!("C-M-k S-Up{}Previous agent", " ".repeat(2))
+        );
+        assert_eq!(text[2], format!("prefix K{}Turn these off", " ".repeat(4)));
+        global.off = true;
+        let text = lines_text(Ok(global));
+        assert_eq!(text[0], "Anywhere in tmux  off");
+        assert!(text[2].ends_with("Turn these on"));
         let failed = lines_text(Err("no server running".into()));
         assert_eq!(failed[1], "no server running");
-        assert_eq!(lines_text(Ok(Vec::new()))[0], "Move");
+        assert_eq!(lines_text(Ok(Global::default()))[0], "Move");
     }
 
-    fn lines_text(global: Result<Vec<(String, &'static str)>, String>) -> Vec<String> {
+    fn lines_text(global: Result<Global, String>) -> Vec<String> {
         lines(global).iter().map(|l| l.to_string()).collect()
     }
 

@@ -14,61 +14,83 @@ fi
 # and move into it; close it everywhere when you are in it.
 sidebar_key="$(tmux show-option -gqv @agent-plane-sidebar-key)"
 tmux bind-key "${sidebar_key:-S}" run-shell "tmux-agent-plane toggle-sidebar '#{window_id}'"
-# Direct navigation keeps keyboard input in the agent; no sidebar focus is needed.
-# run-shell is synchronous so repeated keys resolve the live client in order.
-previous_key="$(tmux show-option -gqv @agent-plane-previous-key)"
-next_key="$(tmux show-option -gqv @agent-plane-next-key)"
-previous_key="${previous_key:-M-k}"
-next_key="${next_key:-M-j}"
-if [ "$previous_key" = "$next_key" ]; then
-  tmux display-message "tmux-agent-plane: previous and next keys must differ"
+# Global keys work without the prefix: previous/next agent, into and out of the sidebar. Each
+# option holds one key or several, separated by spaces. They keep keyboard input in the agent and
+# need no sidebar focus; run-shell is synchronous so repeated keys resolve the live client in order.
+# set -f: key names such as * stay literal when the lists are split.
+set -f
+key_option() {
+  value="$(tmux show-option -gqv "@agent-plane-$1-key")"
+  printf '%s' "${value:-$2}"
+}
+previous_keys="$(key_option previous M-k)"
+next_keys="$(key_option next M-j)"
+in_keys="$(key_option sidebar-in M-h)"
+out_keys="$(key_option sidebar-out M-l)"
+repeated="$(printf '%s\n' $previous_keys $next_keys $in_keys $out_keys | sort | uniq -d | tr '\n' ' ')"
+if [ -n "$repeated" ]; then
+  tmux display-message "tmux-agent-plane: each global key needs one action; repeated: $repeated"
   exit 1
 fi
-# Reloading after a key change removes only bindings this plugin still owns.
-bindings="$(tmux list-keys -T root)"
-for direction in previous next; do
-  old_key="$(tmux show-option -gqv "@agent-plane-bound-$direction-key")"
-  if [ -n "$old_key" ]; then
-    while IFS= read -r binding; do
-      case "$binding" in
-        *" -T root $old_key "*"tmux-agent-plane cycle $direction --client "*)
-          tmux unbind-key -n "$old_key" ;;
-      esac
-    done <<< "$bindings"
-  fi
+# @agent-plane-keys off turns every global key off, so it reaches the pane as usual. prefix + K
+# (or @agent-plane-keys-toggle-key) turns them on and off; the status bar says when they are off.
+case "$(tmux show-option -gqv @agent-plane-keys)" in
+  ''|on|off) ;;
+  *)
+    tmux display-message "tmux-agent-plane: @agent-plane-keys must be on or off"
+    exit 1 ;;
+esac
+toggle_key="$(key_option keys-toggle K)"
+# Reloading after a key change removes only bindings this plugin still owns. tmux pads its
+# columns, so squeeze the spaces before matching.
+bindings="$(tmux list-keys | tr -s ' ')"
+owns() {
+  while IFS= read -r binding; do
+    case "$binding" in
+      *" -T $1 $2 "*"$3"*) return 0 ;;
+    esac
+  done <<< "$bindings"
+  return 1
+}
+for name in previous next sidebar-in sidebar-out; do
+  for old_key in $(tmux show-option -gqv "@agent-plane-bound-$name-key"); do
+    if owns root "$old_key" agent-plane; then
+      tmux unbind-key -n "$old_key"
+    fi
+  done
 done
-tmux bind-key -n "$previous_key" run-shell "tmux-agent-plane cycle previous --client #{q:client_name}"
-tmux bind-key -n "$next_key" run-shell "tmux-agent-plane cycle next --client #{q:client_name}"
-tmux set-option -g @agent-plane-bound-previous-key "$previous_key"
-tmux set-option -g @agent-plane-bound-next-key "$next_key"
+old_toggle="$(tmux show-option -gqv @agent-plane-bound-keys-toggle-key)"
+if [ -n "$old_toggle" ] && owns prefix "$old_toggle" @agent-plane-keys; then
+  tmux unbind-key "$old_toggle"
+fi
+off='#{==:#{@agent-plane-keys},off}'
+for key in $previous_keys; do
+  tmux bind-key -n "$key" if-shell -F "$off" "send-keys $key" \
+    "run-shell 'tmux-agent-plane cycle previous --client #{q:client_name}'"
+done
+for key in $next_keys; do
+  tmux bind-key -n "$key" if-shell -F "$off" "send-keys $key" \
+    "run-shell 'tmux-agent-plane cycle next --client #{q:client_name}'"
+done
 # The in key moves into the sidebar and stays there. The out key leaves it for the selected agent
 # by sending it Shift-Right, which it understands directly; other panes get the key as usual.
-in_key="$(tmux show-option -gqv @agent-plane-sidebar-in-key)"
-out_key="$(tmux show-option -gqv @agent-plane-sidebar-out-key)"
-in_key="${in_key:-M-h}"
-out_key="${out_key:-M-l}"
-if [ "$in_key" = "$out_key" ]; then
-  tmux display-message "tmux-agent-plane: sidebar in and out keys must differ"
-  exit 1
-fi
-for direction in in out; do
-  old_key="$(tmux show-option -gqv "@agent-plane-bound-sidebar-$direction-key")"
-  if [ -n "$old_key" ]; then
-    case "$direction" in
-      in) owned="tmux-agent-plane enter-sidebar" ;;
-      out) owned="@agent-plane-sidebar" ;;
-    esac
-    while IFS= read -r binding; do
-      case "$binding" in
-        *" -T root $old_key "*"$owned"*) tmux unbind-key -n "$old_key" ;;
-      esac
-    done <<< "$bindings"
-  fi
+for key in $in_keys; do
+  tmux bind-key -n "$key" if-shell -F "$off" "send-keys $key" \
+    "run-shell \"tmux-agent-plane enter-sidebar '#{window_id}'\""
 done
-tmux bind-key -n "$in_key" run-shell "tmux-agent-plane enter-sidebar '#{window_id}'"
-tmux bind-key -n "$out_key" if-shell -F '#{==:#{@agent-plane-sidebar},1}' 'send-keys S-Right' "send-keys $out_key"
-tmux set-option -g @agent-plane-bound-sidebar-in-key "$in_key"
-tmux set-option -g @agent-plane-bound-sidebar-out-key "$out_key"
+for key in $out_keys; do
+  tmux bind-key -n "$key" if-shell -F "#{&&:#{!=:#{@agent-plane-keys},off},#{==:#{@agent-plane-sidebar},1}}" \
+    'send-keys S-Right' "send-keys $key"
+done
+tmux bind-key "$toggle_key" if-shell -F "$off" \
+  "set-option -g @agent-plane-keys on ; display-message 'tmux-agent-plane: global keys on'" \
+  "set-option -g @agent-plane-keys off ; display-message 'tmux-agent-plane: global keys off; prefix + $toggle_key turns them on'"
+tmux set-option -g @agent-plane-bound-previous-key "$previous_keys"
+tmux set-option -g @agent-plane-bound-next-key "$next_keys"
+tmux set-option -g @agent-plane-bound-sidebar-in-key "$in_keys"
+tmux set-option -g @agent-plane-bound-sidebar-out-key "$out_keys"
+tmux set-option -g @agent-plane-bound-keys-toggle-key "$toggle_key"
+set +f
 # While the sidebar is open, a window gets one as soon as it exists, so its agent has its final
 # width before anyone looks at it. window-linked also fires for new sessions and moved panes.
 # A fixed hook index, so reloading tmux.conf replaces these hooks and keeps any of your own.

@@ -186,7 +186,17 @@ fn parse_size(width: &str, height: &str) -> Result<Size> {
 
 /// The daemon's view of tmux each tick: panes and sizes from one tmux process, so reading the
 /// sizes costs no extra process.
-pub fn snapshot() -> Result<(Vec<Pane>, Geometry)> {
+/// The plugin's global keys, from `@agent-plane-keys` and the prefix key bound to toggle them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GlobalKeys {
+    pub off: bool,
+    pub toggle: Option<String>,
+}
+
+const KEYS_OPTION: &str = "@agent-plane-keys";
+const TOGGLE_OPTION: &str = "@agent-plane-bound-keys-toggle-key";
+
+pub fn snapshot() -> Result<(Vec<Pane>, Geometry, GlobalKeys)> {
     let format = PANE_FIELDS.join(&SEP.to_string());
     let out = run(&[
         "list-panes",
@@ -202,10 +212,33 @@ pub fn snapshot() -> Result<(Vec<Pane>, Geometry)> {
         "-a",
         "-F",
         WINDOW_ROW,
+        ";",
+        "show-options",
+        "-gq",
+        KEYS_OPTION,
+        ";",
+        "show-options",
+        "-gq",
+        TOGGLE_OPTION,
     ])?;
     let mut panes = Vec::new();
     let mut geometry = Geometry::default();
+    let mut keys = GlobalKeys::default();
     for line in out.lines() {
+        // show-options prints `name value`, quoting a value tmux would otherwise split.
+        let option = |name: &str| {
+            line.strip_prefix(name)?
+                .strip_prefix(' ')
+                .map(|value| value.trim_matches('"').to_string())
+        };
+        if let Some(value) = option(KEYS_OPTION) {
+            keys.off = value == "off";
+            continue;
+        }
+        if let Some(value) = option(TOGGLE_OPTION) {
+            keys.toggle = Some(value);
+            continue;
+        }
         match line.split(SEP).collect::<Vec<_>>().as_slice() {
             ["client", width, height, sizing] => geometry.clients.push(ClientSize {
                 size: parse_size(width, height)?,
@@ -224,7 +257,7 @@ pub fn snapshot() -> Result<(Vec<Pane>, Geometry)> {
             _ => panes.push(parse_pane(line)?),
         }
     }
-    Ok((physical_panes(panes), geometry))
+    Ok((physical_panes(panes), geometry, keys))
 }
 
 /// A linked window is listed once per session, but its processes belong to one

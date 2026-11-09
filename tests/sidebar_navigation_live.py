@@ -399,12 +399,42 @@ def assert_cycle_keys(client):
     assert not any('C-M-Down' in row for row in bindings.splitlines())
     keys = default_keys
     hop('next')
+    # An option lists several keys for one action; each works.
+    tmux('set-option', '-g', '@agent-plane-next-key', 'M-j S-Down')
+    subprocess.run(['bash', str(SOURCE.parent / 'tmux-agent-plane.tmux')], env=ENV, check=True)
+    keys = {'next': b'\x1b[1;2B', 'previous': b'\x1bk'}
+    hop('next')
+    keys = default_keys
+    hop('next')
+    # prefix + K turns every global key off: each reaches the agent instead, and the status bar
+    # says how to turn them back on. prefix + K again turns them on.
+    origin = here()
+    name = next(a['name'] for a in index()['agents'] if a['pane'] == origin)
+    client.key(b'\x02K')
+    wait('keys off', lambda: tmux('show-option', '-gqv', '@agent-plane-keys') == 'off')
+    wait('status says keys are off',
+         lambda: 'keys off · prefix K' in tmux('show-option', '-gqv', '@agent_plane_status'))
+    sent = input_bytes(name)
+    client.key(b'\x1bj\x1b[1;2B\x1bh')
+    wait('off keys reach the agent',
+         lambda: input_bytes(name)[len(sent):] == b'\x1bj\x1b[1;2B\x1bh')
+    settle(0.5)
+    assert here() == origin
+    client.key(b'\x02K')
+    wait('keys on', lambda: tmux('show-option', '-gqv', '@agent-plane-keys') == 'on')
+    wait('status no longer says off',
+         lambda: 'keys off' not in tmux('show-option', '-gqv', '@agent_plane_status'))
+    hop('next')
+    tmux('set-option', '-gu', '@agent-plane-next-key')
+    subprocess.run(['bash', str(SOURCE.parent / 'tmux-agent-plane.tmux')], env=ENV, check=True)
+    bindings = tmux('list-keys', '-T', 'root')
+    assert not any(' S-Down ' in row for row in bindings.splitlines())
     client.snapshot('cycle-keys')
     return {'prefixless_option_keys': True, 'plain_arrows_preserved': True,
             'cross_session_wrap': True, 'rapid_keys': 11, 'no_modifier_input_leak': True,
             'explicit_client': True, 'shared_target_refused': True, 'departed_row': True,
             'works_with_sidebar_open': True, 'custom_keys_reload': True,
-            'user_rebinding_preserved': True}
+            'user_rebinding_preserved': True, 'key_lists': True, 'keys_toggle': True}
 
 
 def bold_names(client):

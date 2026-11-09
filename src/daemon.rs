@@ -107,7 +107,7 @@ fn run_inner() -> Result<()> {
         // Stamp the index before reading anything, so `updated_at` never postdates what it says:
         // a sidebar compares it with the moment of a key press.
         let now = index::now_ms();
-        let (panes, geometry) = tmux::snapshot().context("listing tmux panes")?;
+        let (panes, geometry, keys) = tmux::snapshot().context("listing tmux panes")?;
         let before = prev.clone();
         // A shared process-table failure invalidates the whole scan and is fatal.
         let processes = ProcessTable::load().context("loading process table")?;
@@ -160,8 +160,10 @@ fn run_inner() -> Result<()> {
         issues.extend(placer.tick(&agents, &panes)?);
         // Use the last diagnostic snapshot for presentation, then fold this attempt's issues
         // exactly once. A new fault/recovery reaches the status on the next tick.
-        let segment =
-            active.status() + &crate::restore::status(restore.pending) + &status_segment(&agents);
+        let segment = active.status()
+            + &crate::restore::status(restore.pending)
+            + &keys_status(&keys)
+            + &status_segment(&agents);
         issues.extend(presentation.update(&segment));
         let changes = active.update(&issues)?;
         let changes: Vec<_> = changes
@@ -475,6 +477,17 @@ fn system_notification(name: &str, message: &str) -> Result<()> {
     Ok(())
 }
 
+/// While the global keys are off, say so and how to turn them back on.
+fn keys_status(keys: &tmux::GlobalKeys) -> String {
+    if !keys.off {
+        return String::new();
+    }
+    match &keys.toggle {
+        Some(key) => format!("#[fg=#f9e2af]keys off · prefix {key}#[default] "),
+        None => "#[fg=#f9e2af]keys off#[default] ".into(),
+    }
+}
+
 pub fn status_segment(agents: &[Agent]) -> String {
     let count = |s: State| agents.iter().filter(|a| a.state == s).count();
     [
@@ -497,6 +510,19 @@ pub fn status_segment(agents: &[Agent]) -> String {
 mod tests {
     use super::*;
     use crate::index::Kind;
+
+    #[test]
+    fn the_status_says_when_global_keys_are_off_and_how_to_turn_them_on() {
+        let mut keys = tmux::GlobalKeys::default();
+        assert_eq!(keys_status(&keys), "");
+        keys.toggle = Some("K".into());
+        assert_eq!(keys_status(&keys), "");
+        keys.off = true;
+        assert_eq!(
+            keys_status(&keys),
+            "#[fg=#f9e2af]keys off · prefix K#[default] "
+        );
+    }
     use crate::tmux::Pane;
 
     fn observation(state: RawState, visible: bool) -> Detected {
