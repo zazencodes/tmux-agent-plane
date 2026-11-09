@@ -449,6 +449,8 @@ pub(crate) struct Sidebar {
     pub(crate) tasks: tasks::Section,
     /// Agents from before tmux restarted, and `b` (sidebar only).
     pub(crate) restore: restore::Restore,
+    /// The plugin's global keys, from the index: the footer says when they are off.
+    pub(crate) global_keys: crate::tmux::GlobalKeys,
 }
 
 impl Navigation {
@@ -546,6 +548,7 @@ impl Sidebar {
         self.recent_event = index.recent_event;
         self.tasks.apply(index.tasks);
         self.restore.pending = index.pending_restore;
+        self.global_keys = index.global_keys;
         self.error = None;
         self.restart_failure = None;
         self.navigation.order = index.order;
@@ -1678,12 +1681,22 @@ fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
                     colour(state),
                 )
             }
+            None if sidebar.global_keys.off => Line::from(keys_off(&sidebar.global_keys)),
             None if sidebar.selected_task().is_some() => {
                 hints(&[("⏎", "open"), ("x", "stop"), ("R", "restart")])
             }
             None => hints(&[("⏎", "jump"), ("x", "kill"), ("?", "keys")]),
         }
     })
+}
+
+/// ` global keys off · prefix g`, for the bottom left of the sidebar and the picker.
+pub(crate) fn keys_off(keys: &crate::tmux::GlobalKeys) -> Span<'static> {
+    let text = match &keys.toggle {
+        Some(key) => format!(" global keys off · prefix {key} "),
+        None => " global keys off ".into(),
+    };
+    Span::styled(text, Style::default().fg(crate::quota::render::YELLOW))
 }
 
 /// What this list is in the middle of, if anything.
@@ -1918,6 +1931,33 @@ mod tests {
             assert!(sidebar.killing.is_some());
             terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
         }
+    }
+
+    #[test]
+    fn the_bottom_line_says_when_global_keys_are_off_after_any_event() {
+        let mut sidebar = Sidebar {
+            global_keys: crate::tmux::GlobalKeys {
+                off: true,
+                toggle: Some("g".into()),
+            },
+            recent_event: Some(RecentEvent {
+                name: "grok-support".into(),
+                state: EventState::Done,
+                occurred_at: 100,
+                expires_at: 5100,
+            }),
+            ..Sidebar::default()
+        };
+        assert_eq!(
+            footer(&sidebar, 38, 100).to_string(),
+            " ✓ grok-support done"
+        );
+        assert_eq!(
+            footer(&sidebar, 38, 5100).to_string(),
+            " global keys off · prefix g "
+        );
+        sidebar.global_keys.off = false;
+        assert!(footer(&sidebar, 38, 5100).to_string().contains("jump"));
     }
 
     #[test]
@@ -2212,6 +2252,7 @@ mod tests {
             last_agent: None,
             tasks: Vec::new(),
             pending_restore: 0,
+            global_keys: Default::default(),
         }
     }
 

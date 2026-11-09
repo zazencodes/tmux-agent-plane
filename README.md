@@ -195,7 +195,7 @@ set -g @agent-plane-sidebar-in-key 'M-h S-Left'
 
 #### Turning the global keys off
 
-The keys above work without the prefix, so a program in tmux never sees them. When you need them in a program, such as Shift + arrows to select text, press **prefix + g** to turn them all off: each key then reaches the pane as usual. The status bar shows `keys off · prefix g` until you press it again. Inside the sidebar, its own keys keep working.
+The keys above work without the prefix, so a program in tmux never sees them. When you need them in a program, such as Shift + arrows to select text, press **prefix + g** to turn them all off: each key then reaches the pane as usual. The status bar shows `keys off · prefix g`, and the bottom left of the sidebar and the agent picker `global keys off · prefix g`, until you press it again. Inside the sidebar, its own keys keep working.
 
 To start with them off, add `set -g @agent-plane-keys off` to `tmux.conf`. To toggle with another key, set `@agent-plane-keys-toggle-key` before the plugin loads:
 

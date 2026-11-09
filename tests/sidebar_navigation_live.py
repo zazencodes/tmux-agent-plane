@@ -414,6 +414,9 @@ def assert_cycle_keys(client):
     wait('keys off', lambda: tmux('show-option', '-gqv', '@agent-plane-keys') == 'off')
     wait('status says keys are off',
          lambda: 'keys off · prefix g' in tmux('show-option', '-gqv', '@agent_plane_status'))
+    sidebar = next(w['sidebar'] for w in index()['windows'] if w['sidebar'])
+    wait('sidebar says keys are off',
+         lambda: 'global keys off · prefix g' in tmux('capture-pane', '-p', '-t', sidebar))
     sent = input_bytes(name)
     client.key(b'\x1bj\x1b[1;2B\x1bh')
     wait('off keys reach the agent',
@@ -424,6 +427,8 @@ def assert_cycle_keys(client):
     wait('keys on', lambda: tmux('show-option', '-gqv', '@agent-plane-keys') == 'on')
     wait('status no longer says off',
          lambda: 'keys off' not in tmux('show-option', '-gqv', '@agent_plane_status'))
+    wait('sidebar no longer says off',
+         lambda: 'global keys off' not in tmux('capture-pane', '-p', '-t', sidebar))
     hop('next')
     tmux('set-option', '-gu', '@agent-plane-next-key')
     subprocess.run(['bash', str(SOURCE.parent / 'tmux-agent-plane.tmux')], env=ENV, check=True)

@@ -2,7 +2,9 @@
 
 use crate::index::{self, Agent, Index, State};
 use crate::navigation::Client;
-use crate::sidebar::{Origin, Sidebar, clients, confirmation_footer, input_client, status_footer};
+use crate::sidebar::{
+    Origin, Sidebar, clients, confirmation_footer, input_client, keys_off, status_footer,
+};
 use crate::tmux;
 use ansi_to_tui::IntoText;
 use anyhow::{Context, Result, bail};
@@ -731,7 +733,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                 ])
             } else {
                 status_footer(sidebar, width).unwrap_or_else(|| {
-                    hints(&[
+                    let mut line = hints(&[
                         ("j/k", "browse"),
                         ("/", "search"),
                         ("⏎", "focus"),
@@ -744,7 +746,11 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                         ("d", "state"),
                         ("o", "configure"),
                         ("q", "close"),
-                    ])
+                    ]);
+                    if sidebar.global_keys.off {
+                        line.spans.insert(0, keys_off(&sidebar.global_keys));
+                    }
+                    line
                 })
             })
         },
@@ -1104,6 +1110,7 @@ mod tests {
             last_agent: Some("%3".into()),
             tasks: Vec::new(),
             pending_restore: 0,
+            global_keys: Default::default(),
         };
         let client = |pane: &str| Client {
             name: "client".into(),

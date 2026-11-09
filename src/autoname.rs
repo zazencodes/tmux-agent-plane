@@ -387,6 +387,7 @@ impl Runtime {
             last_agent: None,
             tasks: Vec::new(),
             pending_restore: 0,
+            global_keys: Default::default(),
         };
         let rejected = |reason: String| {
             Outcome::Rejected(Rejection {
@@ -583,6 +584,7 @@ mod tests {
             last_agent: None,
             tasks: Vec::new(),
             pending_restore: 0,
+            global_keys: Default::default(),
         };
         for name in [
             "payment-tests",

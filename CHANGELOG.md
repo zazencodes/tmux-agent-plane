@@ -19,7 +19,7 @@ before 1.0, a breaking change bumps the minor version.
 - Claude's login is read from the macOS Keychain only after you allow it once: press `Enter` on its card in the quota view
 - Keep quota in sight: press `o`, then `u`, and every sidebar shows a quota panel below the agents, one line per plan with what is left and when it resets. It is off by default, and the sidebar footer offers `u quota` for the full view
 - Choose whether sidebars open with background tasks shown: `o`, then `t`. They are shown by default, and `t` in a sidebar still shows or hides them there
-- Press `prefix + g` to turn the global keys off when a program needs them, and again to turn them back on. While they are off, every one of them reaches the pane as usual and the status bar shows `keys off · prefix g`. Start with them off with `set -g @agent-plane-keys off`, and choose the toggle with `@agent-plane-keys-toggle-key`
+- Press `prefix + g` to turn the global keys off when a program needs them, and again to turn them back on. While they are off, every one of them reaches the pane as usual and the status bar shows `keys off · prefix g`, as does the bottom left of the sidebar and the agent picker. Start with them off with `set -g @agent-plane-keys off`, and choose the toggle with `@agent-plane-keys-toggle-key`
 - The global key options take several keys each, separated by spaces, such as `set -g @agent-plane-sidebar-in-key 'M-h S-Left'`; all of them turn off together
 - `l` and → open the selected agent in the sidebar and the agent picker, like `Enter`
 

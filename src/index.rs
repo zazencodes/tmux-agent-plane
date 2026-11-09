@@ -149,6 +149,9 @@ pub struct Index {
     /// Agents from before tmux restarted that a restore would bring back; zero when none wait.
     #[serde(default)]
     pub pending_restore: usize,
+    /// Whether the plugin's global keys are off, for the sidebar to say so.
+    #[serde(default)]
+    pub global_keys: crate::tmux::GlobalKeys,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

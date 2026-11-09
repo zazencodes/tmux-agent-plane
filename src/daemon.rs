@@ -154,6 +154,7 @@ fn run_inner() -> Result<()> {
             last_agent: last_agent.clone(),
             tasks: tasks.values,
             pending_restore: restore.pending,
+            global_keys: keys.clone(),
         })
         .context("writing agent index")?;
         // Last, so everything above saw one consistent placement of the agents.

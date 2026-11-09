@@ -199,6 +199,7 @@ mod tests {
             last_agent: Some("%1".into()),
             tasks: Vec::new(),
             pending_restore: 0,
+            global_keys: Default::default(),
         }
     }
 

@@ -187,7 +187,7 @@ fn parse_size(width: &str, height: &str) -> Result<Size> {
 /// The daemon's view of tmux each tick: panes and sizes from one tmux process, so reading the
 /// sizes costs no extra process.
 /// The plugin's global keys, from `@agent-plane-keys` and the prefix key bound to toggle them.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GlobalKeys {
     pub off: bool,
     pub toggle: Option<String>,
