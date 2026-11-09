@@ -45,6 +45,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
     (
         "Show",
         &[
+            ("p", "Who spawned whom"),
             ("t", "Background tasks"),
             ("u", "Quota left"),
             ("b", "Agents to restore"),
