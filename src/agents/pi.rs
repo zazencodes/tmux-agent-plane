@@ -128,6 +128,7 @@ fn scan_directory(
         };
         observations.push(Observation {
             pane_id: status.pane_id,
+            pid,
             state,
             detail: status.detail,
             title: status.title,

@@ -6,6 +6,7 @@ use crate::detect::{self, Detected};
 use crate::diagnostics::{self, Active, Batch, Issue};
 use crate::fit::Fit;
 use crate::index::{self, Agent, Index, RecentEvent, State, WindowView};
+use crate::links;
 use crate::popup::{self, Announcements};
 use crate::tmux;
 use anyhow::{Context, Result, bail};
@@ -111,14 +112,28 @@ fn run_inner() -> Result<()> {
         let before = prev.clone();
         // A shared process-table failure invalidates the whole scan and is fatal.
         let processes = ProcessTable::load().context("loading process table")?;
-        let batch = fold(
-            &mut prev,
-            detect::detect_with(&panes, &processes),
-            &panes,
-            now,
-        );
-        let agents = batch.values;
+        let detected = detect::detect_with(&panes, &processes);
+        let pids: HashMap<String, i32> = detected
+            .values
+            .iter()
+            .map(|d| (d.pane.id.clone(), d.pid))
+            .collect();
+        let batch = fold(&mut prev, detected, &panes, now);
+        let mut agents = batch.values;
         let mut issues = batch.issues;
+        issues.extend(links::resolve(&mut agents, &pids, &panes, |pane, link| {
+            match link {
+                Some(link) => tmux::run(&["set-option", "-p", "-t", pane, links::OPTION, link]),
+                None => tmux::run(&["set-option", "-pu", "-t", pane, links::OPTION]),
+            }
+            .map(drop)
+        }));
+        for agent in &agents {
+            if let Some(kept) = prev.get_mut(&agent.pane) {
+                kept.parent.clone_from(&agent.parent);
+                kept.parent_ended = agent.parent_ended;
+            }
+        }
         issues.extend(crate::autoname::tick(&mut auto_name, &agents, &panes, now));
         order = next_order(order, &agents, &panes);
         last_agent = last_used(last_agent, &before, &agents, &panes);
@@ -377,7 +392,9 @@ fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Result<Agent> {
         session: d.pane.session,
         window: d.pane.window,
         cwd: d.pane.cwd,
-        parent: Some(d.pane.parent).filter(|p| !p.is_empty()),
+        // Set from the pane's link by `links::resolve`, once the tick has every agent.
+        parent: None,
+        parent_ended: false,
         session_id: d.session_id,
         state_since: match before {
             Some(a) if a.state == state => a.state_since,
@@ -546,6 +563,7 @@ mod tests {
         };
         Detected {
             pane,
+            pid: 1,
             kind: Kind::Claude,
             state,
             detail: None,
@@ -957,6 +975,7 @@ mod tests {
     fn temporary_titles_preserve_previous_task_for_any_kind() {
         let before = tick(None, RawState::Working, false);
         let observation = || Detected {
+            pid: 1,
             pane: Pane {
                 id: before.pane.clone(),
                 pid: 1,

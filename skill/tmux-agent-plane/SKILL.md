@@ -36,7 +36,7 @@ Optional AI auto-naming is off by default and configured by the user with `o` in
 
 ## Caller identity
 
-Codex tool shells can inherit `TMUX_PANE` from a shared app-server. Their `CODEX_THREAD_ID`/`CODEX_SESSION_ID` identifies a thread, but current published files do not reliably associate that thread with its TUI pane. Never use `$TMUX_PANE` from a Codex tool shell. `list` works and marks no caller row for Codex. Use explicit agent names supplied in your task. If your own name is unknown, ask the lead to identify/name you. The CLI fails on Codex self references (including the inherited pane value) and `spawn --in pane`, since it cannot safely choose a caller pane. Use `spawn --in window` or `spawn --in session`; these work and record no parent (`parent: null`). Do not unset Codex identity variables to bypass this error. Other callers may use `self`.
+Codex tool shells can inherit `TMUX_PANE` from a shared app-server. Their `CODEX_THREAD_ID`/`CODEX_SESSION_ID` identifies a thread, but current published files do not reliably associate that thread with its TUI pane. Never use `$TMUX_PANE` from a Codex tool shell. `list` works and marks no caller row for Codex. Use explicit agent names supplied in your task. If your own name is unknown, ask the lead to identify/name you. The CLI fails on Codex self references (including the inherited pane value) and `spawn --in pane`, since it cannot safely choose a caller pane. Use `spawn --in window` or `spawn --in session` and name yourself as the parent with `--parent <your name>`; spawn refuses a Codex caller without it, or with a name that is not a Codex agent. Do not unset Codex identity variables to bypass this error. Other callers may use `self`.
 
 ## Rule: the CLI, never raw tmux
 
@@ -59,7 +59,7 @@ tmux-agent-plane focus <agent>            # bring it on screen for the user
 tmux-agent-plane toggle-sidebar self  # requires known caller identity; opens/closes every sidebar
 tmux-agent-plane kill <agent>             # close its pane, ending it
 tmux-agent-plane quota [--json]           # how much of each plan is left (Claude, Codex, agy, Grok), read fresh
-tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|window|session] [--session SESSION] [--cwd DIR] [--name NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]
+tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|window|session] [--session SESSION] [--cwd DIR] [--name NAME] [--parent NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]
 tmux-agent-plane task list [--json]       # background tasks: state, ports, cwd, starter, command
 tmux-agent-plane task start <name> [--cwd DIR] -- <command>...  # reuses a running task with the same command
 tmux-agent-plane task read <name> [--lines N]
@@ -86,7 +86,7 @@ tmux-agent-plane restore --tasks|--no-tasks|--discard  # bring them back (with t
 - Give the full task as the prompt: the new agent has none of your context. Say which files, what done looks like, and what to report back.
 - Always name agents you spawn (`--name reviewer`), following the naming rule above.
 - Pass agent CLI flags after `--`: `spawn codex "<task>" --in window --name reviewer -- -m <model>`. Each argument reaches the agent verbatim, ahead of the task; `spawn` adds none of its own.
-- `spawn` prints `<name> <pane> <location>`. The spawned agent records you as its parent when caller identity is known; Codex window/session spawns record `parent: null`.
+- `spawn` prints `<name> <pane> <location>`. The spawned agent records you as its parent: from your pane, or from `--parent` for Codex. The link lasts as long as the spawned agent; `list` shows `ended` once its parent has exited.
 - A folder the agent has not trusted yet stops at a trust prompt, and `spawn` reports that the agent did not start. `read <pane>`, then answer with `keys <pane> ...` only when the user asked for that folder.
 
 ## Launch requirements

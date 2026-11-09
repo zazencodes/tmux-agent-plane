@@ -128,6 +128,7 @@ fn scan_dir(context: &ScanContext<'_>, directory: &Path, now: u64) -> Result<Vec
         }
         found.push(Observation {
             pane_id: pane.id.clone(),
+            pid,
             state,
             detail: file.detail,
             title: file.title,

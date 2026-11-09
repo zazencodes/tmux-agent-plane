@@ -109,8 +109,11 @@ pub struct Agent {
     /// tmux window id, e.g. `@104`.
     pub window: String,
     pub cwd: String,
-    /// Pane id of the agent that spawned this one.
+    /// Pane id of the running agent that spawned this one.
     pub parent: Option<String>,
+    /// The agent that spawned this one has exited.
+    #[serde(default)]
+    pub parent_ended: bool,
     /// Session identifier published by the agent, when available.
     pub session_id: Option<String>,
     /// Unix ms when `state` last changed.

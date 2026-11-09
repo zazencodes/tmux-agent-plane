@@ -2019,6 +2019,7 @@ mod tests {
             window: "@1".into(),
             cwd: "/tmp/checkout".into(),
             parent: None,
+            parent_ended: false,
             session_id: None,
             state_since: 0,
             completions: 0,

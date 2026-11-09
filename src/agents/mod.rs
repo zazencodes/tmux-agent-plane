@@ -31,6 +31,8 @@ impl From<RawState> for State {
 
 pub struct Observation {
     pub pane_id: String,
+    /// The agent's own process. Parent links are bound to it, so they end with the agent.
+    pub pid: i32,
     pub state: RawState,
     pub detail: Option<String>,
     pub title: String,

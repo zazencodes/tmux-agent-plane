@@ -10,6 +10,7 @@ mod diagnostics;
 mod fit;
 mod index;
 mod lifecycle;
+mod links;
 mod navigation;
 mod popup;
 mod projects;
@@ -188,6 +189,9 @@ enum Cmd {
         /// Agent name (default: <kind>-<pane number>)
         #[arg(long)]
         name: Option<String>,
+        /// The calling Codex agent's own name, recorded as the parent (required from Codex)
+        #[arg(long)]
+        parent: Option<String>,
         /// Wait until the agent finishes its first turn or blocks
         #[arg(long)]
         wait: bool,
@@ -240,6 +244,7 @@ fn main() -> anyhow::Result<()> {
             session,
             cwd,
             name,
+            parent,
             wait,
             timeout,
             agent_args,
@@ -249,6 +254,7 @@ fn main() -> anyhow::Result<()> {
             session,
             cwd,
             name,
+            parent,
             task,
             agent_args,
             wait,

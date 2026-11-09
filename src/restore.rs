@@ -544,7 +544,7 @@ pub fn perform(with_tasks: bool) -> Result<Report> {
             // A parent that did not come back leaves no link.
             if let Some(parent) = builder.moved.get(parent)
                 && let Err(error) =
-                    tmux::run(&["set-option", "-p", "-t", new, "@agent-plane-parent", parent])
+                    tmux::run(&["set-option", "-p", "-t", new, crate::links::OPTION, parent])
             {
                 report
                     .failed
@@ -900,6 +900,7 @@ mod tests {
             window: "@1".into(),
             cwd: "/work/pro".into(),
             parent: None,
+            parent_ended: false,
             session_id: session_id.map(Into::into),
             state_since: 0,
             completions: 0,

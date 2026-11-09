@@ -31,6 +31,7 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
             let session = sessions.get(&pane.id)?;
             Some(Observation {
                 pane_id: pane.id.clone(),
+                pid: session.pid,
                 state: session.state,
                 detail: session.detail.clone(),
                 title: clean_title(&pane.title),
@@ -51,6 +52,7 @@ fn clean_title(title: &str) -> String {
 }
 
 struct ClaudeSession {
+    pid: i32,
     started_at: u64,
     session_id: String,
     state: RawState,
@@ -131,6 +133,7 @@ fn claude_sessions_in(
             ),
         };
         let session = ClaudeSession {
+            pid: file.pid,
             started_at: file.started_at,
             session_id: file.session_id,
             state,

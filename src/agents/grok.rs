@@ -102,6 +102,7 @@ struct ActiveFile {
 }
 struct Active {
     pane_id: String,
+    pid: i32,
     session_id: String,
 }
 
@@ -160,6 +161,7 @@ fn active_sessions_with_start(
         }
         active.push(Active {
             pane_id: pane.id.clone(),
+            pid,
             session_id: file.session_id,
         });
     }
@@ -248,6 +250,7 @@ fn observations(active: &[Active], roster: &Roster) -> Result<Vec<Observation>> 
         }
         found.push(Observation {
             pane_id: session.pane_id.clone(),
+            pid: session.pid,
             state,
             detail,
             title: entry.title.unwrap_or_default(),
@@ -434,6 +437,7 @@ mod tests {
     fn active() -> Vec<Active> {
         vec![Active {
             pane_id: "%1".into(),
+            pid: 11,
             session_id: "grok-live".into(),
         }]
     }
@@ -532,6 +536,7 @@ mod tests {
         let mut active = active();
         active.push(Active {
             pane_id: "%1".into(),
+            pid: 11,
             session_id: "second".into(),
         });
         assert!(observations(&active, &parse_response(&response).unwrap()).is_err());

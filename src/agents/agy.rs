@@ -149,6 +149,7 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
         );
         found.push(Observation {
             pane_id: pane.id.clone(),
+            pid: process.pid,
             state,
             detail,
             title,

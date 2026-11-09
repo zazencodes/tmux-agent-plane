@@ -9,6 +9,8 @@ use std::collections::HashMap;
 
 pub struct Detected {
     pub pane: Pane,
+    /// The agent's own process.
+    pub pid: i32,
     pub kind: Kind,
     pub state: RawState,
     pub detail: Option<String>,
@@ -69,6 +71,7 @@ fn scan_kinds(
             occupied.entry(pane.id.clone()).or_default().push(kind);
             batch.values.push(Detected {
                 pane: pane.clone(),
+                pid: observation.pid,
                 kind,
                 state: observation.state,
                 detail: observation.detail,
@@ -122,6 +125,7 @@ mod tests {
     fn observation(id: &str) -> Observation {
         Observation {
             pane_id: id.into(),
+            pid: 1,
             state: RawState::Working,
             detail: None,
             title: "task".into(),

@@ -14,12 +14,13 @@ pub fn launch(task: Option<&str>, agent_args: &[String]) -> Result<Launch> {
 pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
     let mut found = Vec::new();
     for pane in context.panes {
-        if agent_pid(context.processes, pane.pid).is_none() {
+        let Some(pid) = agent_pid(context.processes, pane.pid) else {
             continue;
-        }
+        };
         let (state, detail) = codex_state(&pane.title);
         found.push(Observation {
             pane_id: pane.id.clone(),
+            pid,
             state,
             detail,
             title: clean_title(&pane.title),

@@ -53,8 +53,9 @@ fn find_agent<'a>(index: &'a Index, target: &str) -> Result<&'a Agent> {
     index::find(index, &target_pane(target)?)
 }
 
-fn display_parent(index: &Index, parent: &Option<String>) -> String {
-    match parent {
+fn display_parent(index: &Index, agent: &Agent) -> String {
+    match &agent.parent {
+        None if agent.parent_ended => "ended".to_string(),
         None => "-".to_string(),
         Some(pane) => index
             .agents
@@ -112,7 +113,7 @@ pub fn list(json: bool) -> Result<()> {
                 a.kind.as_str().to_string(),
                 state_label(a),
                 a.location.clone(),
-                display_parent(&index, &a.parent),
+                display_parent(&index, a),
                 home_relative(&a.cwd),
                 a.title.clone(),
             ]
@@ -336,6 +337,8 @@ pub struct Spawn {
     pub session: Option<String>,
     pub cwd: Option<PathBuf>,
     pub name: Option<String>,
+    /// A Codex caller's own name. Other callers are identified by their pane.
+    pub parent: Option<String>,
     pub task: Option<String>,
     pub agent_args: Vec<String>,
     pub wait: bool,
@@ -366,6 +369,12 @@ pub fn spawn(s: Spawn) -> Result<()> {
     } else {
         self_pane()?
     };
+    let parent = spawn_parent(
+        codex_caller(),
+        me.as_deref(),
+        s.parent.as_deref(),
+        &index.agents,
+    )?;
 
     // Pass the command as argv to an interactive login shell. Shell startup finishes
     // before -c is evaluated; no terminal input can race startup or hit its line limit.
@@ -439,8 +448,15 @@ pub fn spawn(s: Spawn) -> Result<()> {
     if explicit_name {
         tmux::run(&["set-option", "-p", "-t", &pane, "@agent-plane-name", &name])?;
     }
-    if let Some(me) = &me {
-        tmux::run(&["set-option", "-p", "-t", &pane, "@agent-plane-parent", me])?;
+    if let Some(parent) = &parent {
+        tmux::run(&[
+            "set-option",
+            "-p",
+            "-t",
+            &pane,
+            crate::links::OPTION,
+            parent,
+        ])?;
     }
 
     let started = Instant::now();
@@ -450,7 +466,7 @@ pub fn spawn(s: Spawn) -> Result<()> {
         if let Some(agent) = index::read()?.agents.into_iter().find(|a| {
             a.pane == pane
                 && a.name == name
-                && me
+                && parent
                     .as_ref()
                     .is_none_or(|parent| a.parent.as_ref() == Some(parent))
         }) {
@@ -492,6 +508,39 @@ pub fn spawn(s: Spawn) -> Result<()> {
 
 /// Start an interactive agent in a new background window of an existing session, for a person to
 /// work in. Returns the window and pane ids.
+/// The pane of the agent a spawn records as its parent. A caller that is not an agent (a shell)
+/// records none. Codex cannot identify its own pane, so it names itself with `--parent`.
+fn spawn_parent(
+    codex: bool,
+    me: Option<&str>,
+    named: Option<&str>,
+    agents: &[Agent],
+) -> Result<Option<String>> {
+    match (codex, named) {
+        (true, None) => bail!(
+            "a Codex caller must name itself as the parent: spawn ... --parent <your agent name>. Ask your lead for your name if you do not know it"
+        ),
+        (true, Some(name)) => {
+            let Some(agent) = agents.iter().find(|a| a.name == name) else {
+                bail!("--parent {name}: no agent has that name");
+            };
+            if agent.kind != Kind::Codex {
+                bail!(
+                    "--parent {name} is a {} agent, but the caller is Codex",
+                    agent.kind.as_str()
+                );
+            }
+            Ok(Some(agent.pane.clone()))
+        }
+        (false, Some(_)) => {
+            bail!("--parent is only for Codex callers: this caller's pane already identifies it")
+        }
+        (false, None) => Ok(me
+            .filter(|me| agents.iter().any(|a| a.pane == *me))
+            .map(str::to_string)),
+    }
+}
+
 pub fn open_agent_window(kind: Kind, session: &str, cwd: &str) -> Result<(String, String)> {
     let launch = (kind.adapter().launch)(None, &[])?;
     let cwd = std::path::Path::new(cwd).canonicalize()?;
@@ -616,6 +665,32 @@ mod tests {
                 .collect();
             assert_eq!(output.stdout, expected);
         }
+    }
+
+    #[test]
+    fn spawn_records_an_agent_caller_and_codex_names_itself() {
+        let mut lead = crate::links::tests::agent("%1");
+        lead.name = "lead".into();
+        let mut reviewer = crate::links::tests::agent("%2");
+        reviewer.name = "reviewer".into();
+        reviewer.kind = Kind::Codex;
+        let agents = [lead, reviewer];
+        let parent = |codex, me, named| spawn_parent(codex, me, named, &agents);
+        assert_eq!(
+            parent(false, Some("%1"), None).unwrap().as_deref(),
+            Some("%1")
+        );
+        // A shell is not an agent, and outside tmux there is no caller.
+        assert_eq!(parent(false, Some("%9"), None).unwrap(), None);
+        assert_eq!(parent(false, None, None).unwrap(), None);
+        assert!(parent(false, Some("%1"), Some("lead")).is_err());
+        assert_eq!(
+            parent(true, None, Some("reviewer")).unwrap().as_deref(),
+            Some("%2")
+        );
+        assert!(parent(true, None, None).is_err());
+        assert!(parent(true, None, Some("lead")).is_err());
+        assert!(parent(true, None, Some("nobody")).is_err());
     }
 
     #[test]

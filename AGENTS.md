@@ -11,6 +11,7 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 - `src/fit.rs`: keeps hidden windows at the size they will be shown at, so arriving at one resizes nothing. Runs from the daemon's tick on its existing snapshot.
 - `src/diagnostics.rs`: persistent full-chain errors, deduplication, fault/recovery status and partial scan results.
 - `src/lifecycle.rs`: detached watcher start/restart/stop and private control socket.
+- `src/links.rs`: who spawned whom. `spawn`/`restore` write the parent's pane on the child's pane; the daemon binds the link to both agent processes, clears it when the child is gone and reports an ended parent.
 - `src/index.rs`: the index file (`~/.local/state/tmux-agent-plane/agents.json`) and its types. The daemon is its only writer.
 - `src/restore.rs`: the daemon's roster of agent windows and running tasks, the pending restore a new tmux server inherits, and `restore`'s rebuild. `src/restore/layout.rs` removes sidebars from recorded layouts.
 - `src/commands.rs`: `list`, `read`, `send`, `keys`, `focus`, `kill`, `wait`, `spawn`. Agents are told never to use raw tmux on agent panes, so every agent job needs a command here.

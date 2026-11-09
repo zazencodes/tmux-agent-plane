@@ -43,7 +43,7 @@ It reads this README, installs the pieces and asks you about the choices along t
 - **How much is left.** Press `u` in the sidebar, or turn on its quota panel with `o`, to see how much of your Claude, Codex, Antigravity and Grok Build plans is left, window by window, with a marker for where steady use would be and whether you will run out before the reset. `tmux-agent-plane quota` prints the same, and agents can check it before handing out work. See [Quota](#quota).
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
 - **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`. Optional AI naming can name the remaining default-named agents; press `c` in the sidebar to set it up.
-- **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. A spawned agent records its parent when caller identity is known.
+- **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. Every agent records the agent that spawned it, so helpers that spawn helpers form a tree.
 - **Sessions are projects.** Inspect and create named project sessions, start helpers directly in them, and move running agent panes between projects while their processes, names and parent links stay intact.
 - **Background tasks every agent can see.** Agents start dev servers, watchers and tunnels with `task start`, so there is one list of what runs, with its ports, and nobody starts a second copy. Tasks keep running after the agent that started them, and keep their output and exit status when they stop. See [Background tasks](#background-tasks).
 - **Agents come back after tmux dies.** When the tmux server stops (a crash, a reboot, `kill-server`), the agents it held wait to be brought back: the status bar shows `↺ 3`, and `restore` reopens each one's conversation in the session, window and layout it had, with its name. Nothing comes back until you ask. See [Restore](#restore).
@@ -399,6 +399,10 @@ Each agent reopens its own conversation through the same interactive login shell
 
 An agent whose conversation already runs again, or whose folder is gone, stays closed and is listed with the reason. Anything that fails is printed and written to `daemon.log`, and the rest still comes back; either way the pending restore is then forgotten. A later restart of tmux replaces a pending restore with the newer one. The roster leaves out sidebars, so a restored window gets one when the sidebar is open, and it changes only after a scan without faults has held for three seconds, so agents that exit while the machine shuts down are still remembered.
 
+### Parents
+
+An agent started with `spawn` records the agent that spawned it, and helpers that spawn helpers form a tree. A Codex caller cannot be identified from its shell, so it passes its own name: `spawn ... --parent <its name>`, and `spawn` refuses a Codex caller without it. `spawn` from a plain shell records no parent. The link belongs to the two agents, not their panes: it ends when the spawned agent exits, an agent started later in the same pane has no parent, and once the parent exits `list` shows `ended`. Restored agents get their links back once both have started.
+
 ### Agent launch syntax
 
 `spawn` starts a persistent interactive session in tmux’s configured `default-shell`. It passes the launch command directly to an interactive login shell, which loads your startup files before running the agent, so aliases and flags apply even with long or multi-line tasks. Each argument is quoted separately. When the agent exits, a fresh interactive login shell stays open. `spawn` supplies its own launch command, so tmux’s `default-command` is not used.
@@ -467,7 +471,7 @@ AI output must be two or three lowercase words joined by hyphens, each starting 
 | `cycle next\|previous --client CLIENT` | Direct key binding: focus the adjacent agent in global sidebar order for the exact invoking tmux client |
 | `kill <agent>` | Close the agent's pane |
 | `quota [--json]` | Read how much of each plan is left, fresh, through the daemon. `--json` adds each group's remaining percent, limiting window and runway, and each window's pace |
-| `spawn claude\|codex\|pi\|opencode\|agy\|grok ["<task>"] [--in pane\|window\|session] [--session SESSION] [--cwd DIR] [--name NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]` | Start an agent. Arguments after `--` go verbatim to the agent CLI. `--in pane` (default) splits the caller's pane; `--session` selects an existing project with `--in window`, or names a new one with `--in session` |
+| `spawn claude\|codex\|pi\|opencode\|agy\|grok ["<task>"] [--in pane\|window\|session] [--session SESSION] [--cwd DIR] [--name NAME] [--parent NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]` | Start an agent. Arguments after `--` go verbatim to the agent CLI. `--in pane` (default) splits the caller's pane; `--session` selects an existing project with `--in window`, or names a new one with `--in session` |
 | `task start <name> [--cwd DIR] -- <command>...` | Start a long-running command in the background, or reuse the running task of that name and command. Different work under a taken name fails |
 | `task list [--json]` | Background tasks: state (`running` or `exited <code>`), listening ports, cwd, starter, age and command |
 | `task read <name> [--lines N]` | The task's screen, plus N lines of scrollback |
@@ -503,7 +507,7 @@ Read a blocked question before replying: `tmux-agent-plane read reviewer`, then 
 
 - Pi and OpenCode are opt-in. Without their publisher status files, those kinds remain untracked and require no setup. A live opted-in publisher with malformed, unknown or stale status fails loudly; dead process files are ignored.
 - Pi and OpenCode publish durable completion counters, so waits observe turns that finish between daemon polls. Claude Code, Codex, agy and Grok are sampled: a turn entirely between polls can be missed by `send --wait` or `spawn --wait`.
-- Codex tool shells may inherit a stale `TMUX_PANE` from a shared app-server. `list` works and marks no caller; `spawn --in window` and `--in session` work with `parent: null`. Self references, inherited-pane targets and `spawn --in pane` fail with a clear error. Use explicit agent names and window/session spawning.
+- Codex tool shells may inherit a stale `TMUX_PANE` from a shared app-server. `list` works and marks no caller; `spawn --in window` and `--in session` work, with `--parent <its name>` so the new agent knows its parent. Self references, inherited-pane targets and `spawn --in pane` fail with a clear error. Use explicit agent names and window/session spawning.
 
 - Antigravity appears after its first message and native folder trust acceptance. Named projects (including resumed/forked projects) and `--settings` overlays excluding the cwd from `trustedWorkspaces` stay untracked because live trust cannot be proven.
 - A Claude Code session is detected once it writes its session file, after the folder trust prompt. When `spawn` reports that an agent did not start, read its pane and answer the prompt with `keys`.
