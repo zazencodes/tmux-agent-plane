@@ -60,7 +60,7 @@ It reads this README, installs the pieces and asks you about the choices along t
 
 - tmux 3.3 or newer
 - At least one supported agent CLI: Claude Code, Codex, Antigravity, Pi, OpenCode or Grok Build
-- `lsof` for Antigravity process/session association (included with macOS; install it on Linux when using agy)
+- `lsof` for Antigravity process/session association and background task ports (included with macOS; install it on Linux when using agy or tasks)
 - Rust and a C compiler, to build it (SQLite is bundled)
 - macOS or Linux. Desktop notifications use `osascript` on macOS and `notify-send` on Linux.
 
