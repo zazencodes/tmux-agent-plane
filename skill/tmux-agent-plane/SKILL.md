@@ -58,6 +58,7 @@ tmux-agent-plane wait <agent> [--timeout S]
 tmux-agent-plane focus <agent>            # bring it on screen for the user
 tmux-agent-plane toggle-sidebar self  # requires known caller identity; opens/closes every sidebar
 tmux-agent-plane kill <agent>             # close its pane, ending it
+tmux-agent-plane quota [--json]           # how much of each plan is left (Claude, Codex, agy, Grok), read fresh
 tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|window|session] [--session SESSION] [--cwd DIR] [--name NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]
 tmux-agent-plane task list [--json]       # background tasks: state, ports, cwd, starter, command
 tmux-agent-plane task start <name> [--cwd DIR] -- <command>...  # reuses a running task with the same command
@@ -126,6 +127,10 @@ Before **any status or escalation message**, inspect the target's current state 
 1. `read <agent>` to see the question or prompt.
 2. Only when the answer is clear from the user's instructions, answer it: `keys <agent> 2` to pick option 2, `keys <agent> Enter` to confirm, `send <agent> --answer "<text>"` for a deliberate textual reply. Use `keys` for menus and permissions.
 3. Otherwise, ask the user or escalate through a safe lead as above. Never guess credentials or approve a destructive or irreversible action on another agent's behalf without the user's say.
+
+## Checking capacity
+
+`quota` reads how much of each plan is left, fresh, and takes a few seconds. Run it before handing out a large batch of work, or when an agent reports a usage limit, then choose kinds with room left. In `--json`, each provider has `status` (`ok`, `stale`, `failed`, `not_set_up`, `needs_keychain`) and `groups`; each group has `percent_remaining` (the tightest window), `limiting_window` and `runway`: `on_pace` lasts to the reset, `empty_in` runs out first at `empty_at`, `exhausted_now`, or `unknown`. A failed provider says why in `error` and what to do in `remedy`; report it to the user rather than fixing logins yourself. Never press Enter for the user's Keychain consent.
 
 ## Working as a super agent
 

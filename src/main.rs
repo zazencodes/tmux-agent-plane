@@ -73,6 +73,11 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Read how much of each AI subscription is left (Claude, Codex, Antigravity, Grok Build)
+    Quota {
+        #[arg(long)]
+        json: bool,
+    },
     /// Inspect or create tmux sessions (each session is a project)
     Sessions {
         #[command(subcommand)]
@@ -192,6 +197,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::EnterSidebar { window } => sidebar::enter(&commands::target_pane(&window)?),
         Cmd::FollowSidebar { window } => sidebar::follow(&commands::target_pane(&window)?),
         Cmd::List { json } => commands::list(json),
+        Cmd::Quota { json } => quota::command(json),
         Cmd::Sessions { action } => sessions::run(action),
         Cmd::Move { target, session } => commands::move_agent(&target, &session),
         Cmd::Read { target, lines } => commands::read(&target, lines),

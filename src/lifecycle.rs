@@ -96,6 +96,11 @@ fn request(path: &Path, command: &str) -> Result<()> {
     request_within(path, command, TIMEOUT)
 }
 
+/// A control request from outside the lifecycle commands, waiting up to `timeout` for the reply.
+pub fn ask(command: &str, timeout: Duration) -> Result<()> {
+    request_within(&socket_path()?, command, timeout)
+}
+
 fn request_within(path: &Path, command: &str, timeout: Duration) -> Result<()> {
     let mut socket = UnixStream::connect(path).context(
         "connecting to the tmux-agent-plane daemon; is it running? (`tmux-agent-plane daemon start`)",

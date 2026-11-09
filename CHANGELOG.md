@@ -12,6 +12,7 @@ before 1.0, a breaking change bumps the minor version.
 - Background tasks: agents start dev servers, watchers and tunnels with `tmux-agent-plane task start <name> -- <command>`, so every agent sees one list (`task list`) with each task's state and listening ports, reuses a running one instead of starting a second copy, and can `task read`, `task restart` and `task stop` it. Tasks run in their own windows in an `agent-plane-tasks` session, outlive the agent that started them, and keep their output and exit status when their command ends. The skill tells agents to use them instead of backgrounding commands themselves
 - Press `t` in the sidebar to list background tasks below the agents, with each one's ports or exit code, project and age. Move onto a task to preview its window, `Enter` to open it, `x` to stop it after confirming, and `R` to restart it
 - Install by asking your coding agent to "install and configure tmux-agent-plane with me"; the README walks it through onboarding you, one choice at a time
+- `tmux-agent-plane quota [--json]` reads how much of your Claude, Codex, Antigravity and Grok Build plans is left, fresh, so agents can check capacity before handing out work
 
 ## 0.5.0 - 2026-11-07
 

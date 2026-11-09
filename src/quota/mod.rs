@@ -8,12 +8,15 @@ mod codex;
 pub mod fetch;
 mod grok;
 mod http;
+pub mod pace;
+pub mod render;
 
 use crate::index;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::time::Duration;
 
 pub type Time = DateTime<Utc>;
 
@@ -66,6 +69,12 @@ pub struct Window {
     pub resets_at: Option<Time>,
     pub starts_at: Option<Time>,
     pub window_seconds: Option<u64>,
+}
+
+impl Window {
+    pub fn remaining(&self) -> Option<f64> {
+        self.percent_used.map(|used| 100.0 - used)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -209,6 +218,18 @@ pub fn servable(previous: &Provider, now: Time) -> Vec<Window> {
         .collect()
 }
 
+/// The windows of a card that may be shown at `now`, and whether any had to be dropped: a
+/// number is never shown past its reset.
+pub fn live(provider: &Provider, now: Time) -> (Vec<&Window>, bool) {
+    let shown: Vec<_> = provider
+        .windows
+        .iter()
+        .filter(|w| w.resets_at.is_none_or(|reset| reset > now))
+        .collect();
+    let dropped = shown.len() != provider.windows.len();
+    (shown, dropped)
+}
+
 pub fn state_path() -> Result<PathBuf> {
     Ok(index::state_dir()?.join("quota.json"))
 }
@@ -237,6 +258,29 @@ pub fn write(snapshot: &Snapshot) -> Result<()> {
     std::fs::write(&tmp, serde_json::to_vec_pretty(snapshot)?)
         .with_context(|| format!("writing {}", tmp.display()))?;
     std::fs::rename(&tmp, &path).with_context(|| format!("replacing {}", path.display()))
+}
+
+/// The longest a refresh may take: providers run in parallel, and a Keychain consent dialog may
+/// wait up to a minute.
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// `tmux-agent-plane quota [--json]`: always a fresh read through the daemon.
+pub fn command(json: bool) -> Result<()> {
+    crate::lifecycle::ask("quota-refresh", REQUEST_TIMEOUT)?;
+    let snapshot =
+        read()?.context("the daemon finished a quota refresh but wrote no quota.json")?;
+    let now = Utc::now();
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&render::report(&snapshot, now))?
+        );
+    } else {
+        for line in render::text(&snapshot, now, 60) {
+            println!("{line}");
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -328,5 +372,21 @@ pub(crate) mod tests {
     fn a_clock_that_moved_backwards_serves_nothing_stale() {
         let previous = ok(vec![window("seven_day", 40.0, Some(9_000), None)], 5_000);
         assert!(servable(&previous, at(4_000)).is_empty());
+    }
+
+    #[test]
+    fn live_never_shows_a_number_past_its_reset() {
+        let card = ok(
+            vec![
+                window("old", 90.0, Some(100), None),
+                window("new", 10.0, Some(900), None),
+            ],
+            0,
+        );
+        let (shown, dropped) = live(&card, at(500));
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].id, "new");
+        assert!(dropped);
+        assert!(!live(&card, at(50)).1);
     }
 }
