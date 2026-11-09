@@ -93,8 +93,14 @@ fn socket_path() -> Result<PathBuf> {
 }
 
 fn request(path: &Path, command: &str) -> Result<()> {
-    let mut socket = UnixStream::connect(path).context("connecting to the managed daemon")?;
-    socket.set_read_timeout(Some(TIMEOUT))?;
+    request_within(path, command, TIMEOUT)
+}
+
+fn request_within(path: &Path, command: &str, timeout: Duration) -> Result<()> {
+    let mut socket = UnixStream::connect(path).context(
+        "connecting to the tmux-agent-plane daemon; is it running? (`tmux-agent-plane daemon start`)",
+    )?;
+    socket.set_read_timeout(Some(timeout))?;
     socket.set_write_timeout(Some(TIMEOUT))?;
     socket.write_all(command.as_bytes())?;
     socket.shutdown(std::net::Shutdown::Write)?;
@@ -301,6 +307,19 @@ fn serve() -> Result<()> {
     result
 }
 
+fn quota_reply(mut socket: UnixStream, allow_keychain: bool) {
+    let reply = match crate::quota::fetch::refresh(allow_keychain) {
+        Ok(()) => "ok".to_string(),
+        Err(error) => {
+            let message = format!("{error:#}");
+            let _ = diagnostics::record("quota", &format!("refresh failed: {message}"));
+            message
+        }
+    };
+    // The asker may have given up; there is no one else to tell.
+    let _ = socket.write_all(reply.as_bytes());
+}
+
 fn control_loop(listener: UnixListener, done: &AtomicBool) -> Result<()> {
     while !done.load(Ordering::Relaxed) {
         match listener.accept() {
@@ -313,6 +332,12 @@ fn control_loop(listener: UnixListener, done: &AtomicBool) -> Result<()> {
                     .read_to_string(&mut command)?;
                 match command.as_str() {
                     "ping" => {}
+                    // A quota fetch takes seconds: it answers from its own thread.
+                    "quota-refresh" | "quota-allow-keychain" => {
+                        let allow = command == "quota-allow-keychain";
+                        std::thread::spawn(move || quota_reply(socket, allow));
+                        continue;
+                    }
                     "stop" => {
                         diagnostics::record("lifecycle", "graceful stop requested")?;
                         daemon::request_shutdown();

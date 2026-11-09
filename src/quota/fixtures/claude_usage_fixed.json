@@ -1,0 +1,7 @@
+{
+  "five_hour": {"utilization": 28.0, "resets_at": "2026-11-08T18:40:00.512000+00:00"},
+  "seven_day": {"utilization": 61.0, "resets_at": "2026-11-12T09:00:00+00:00"},
+  "seven_day_opus": {"utilization": 104.2, "resets_at": "2026-11-12T09:00:00+00:00"},
+  "seven_day_oauth_apps": null,
+  "extra_usage": {"is_enabled": true, "monthly_limit": 5000, "used_credits": 1200}
+}

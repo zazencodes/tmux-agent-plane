@@ -1,0 +1,12 @@
+{
+  "five_hour": {"utilization": 99.0, "resets_at": "2026-11-08T18:40:00.512000+00:00"},
+  "limits": [
+    {"kind": "session", "group": "session", "percent": 3, "resets_at": "2026-11-08T18:40:00.512000+00:00", "scope": null},
+    {"kind": "weekly", "group": "weekly", "percent": 20.5, "resets_at": null},
+    {"kind": "weekly_model", "group": "weekly", "percent": 41, "resets_at": "2026-11-12T09:00:00+00:00", "scope": {"model": {"id": "claude-opus-4", "display_name": "Opus"}}},
+    {"kind": "weekly_model", "group": "weekly", "percent": 7, "resets_at": "2026-11-12T09:00:00+00:00", "scope": {"model": {"display_name": "Fable"}}},
+    {"kind": "mystery", "group": "other", "percent": 12, "resets_at": "2026-11-09T00:00:00Z"},
+    {"kind": "no_percent", "group": "session"}
+  ],
+  "extra_usage": {"is_enabled": false}
+}

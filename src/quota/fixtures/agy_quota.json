@@ -1,0 +1,33 @@
+{
+  "command": {
+    "name": "/quota",
+    "data": {
+      "response": {
+        "groups": [
+          {
+            "displayName": "Gemini Argon",
+            "buckets": [
+              {"bucketId": "argon-daily", "displayName": "Argon", "remainingFraction": 0.4, "resetTime": "2026-11-09T00:00:00Z"}
+            ]
+          },
+          {
+            "displayName": "Claude and GPT models",
+            "buckets": [
+              {"bucketId": "3p-weekly", "window": "weekly", "remaining": {"case": "remainingFraction", "value": 0.5}, "resetTime": "2026-11-12T00:00:00Z"},
+              {"bucketId": "3p-5h", "displayName": "5-hour limit", "resetTime": "2026-11-08T21:00:00Z"},
+              {"bucketId": "3p-disabled", "disabled": true, "remainingFraction": 1}
+            ]
+          },
+          {
+            "displayName": "Gemini",
+            "buckets": [
+              {"bucketId": "gemini-weekly", "remainingFraction": 0, "resetTime": "2026-11-12T00:00:00Z", "description": "Resets weekly"},
+              {"bucketId": "gemini-5h", "remainingFraction": 0.75, "resetTime": "2026-11-08T20:00:00Z"},
+              {"displayName": "no id", "remainingFraction": 0.1}
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
