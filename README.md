@@ -90,7 +90,7 @@ The plugin starts the daemon once the first session exists, binds `prefix + S` t
 set -g @agent-plane-sidebar-key Space   # replaces tmux's next-layout binding
 ```
 
-**Keys.** Without the prefix, Alt + K / J move to the previous / next agent and Alt + H / L go into and out of the sidebar. `prefix + K` turns them all off and on again, for when a program needs them. Ask whether these suit them, or whether they also want Shift + arrows, which are easier to reach but which some programs use for selecting text. Set keys only with these options, before the plugin loads, so `prefix + K` covers every one; a `bind -n` line of their own would not turn off. For Shift + arrows as well:
+**Keys.** Without the prefix, Alt + K / J move to the previous / next agent and Alt + H / L go into and out of the sidebar. `prefix + g` turns them all off and on again, for when a program needs them. Ask whether these suit them, or whether they also want Shift + arrows, which are easier to reach but which some programs use for selecting text. Set keys only with these options, before the plugin loads, so `prefix + g` covers every one; a `bind -n` line of their own would not turn off. For Shift + arrows as well:
 
 ```tmux
 set -g @agent-plane-previous-key 'M-k S-Up'
@@ -195,12 +195,12 @@ set -g @agent-plane-sidebar-in-key 'M-h S-Left'
 
 #### Turning the global keys off
 
-The keys above work without the prefix, so a program in tmux never sees them. When you need them in a program, such as Shift + arrows to select text, press **prefix + K** to turn them all off: each key then reaches the pane as usual. The status bar shows `keys off · prefix K` until you press prefix + K again. Inside the sidebar, its own keys keep working.
+The keys above work without the prefix, so a program in tmux never sees them. When you need them in a program, such as Shift + arrows to select text, press **prefix + g** to turn them all off: each key then reaches the pane as usual. The status bar shows `keys off · prefix g` until you press it again. Inside the sidebar, its own keys keep working.
 
 To start with them off, add `set -g @agent-plane-keys off` to `tmux.conf`. To toggle with another key, set `@agent-plane-keys-toggle-key` before the plugin loads:
 
 ```tmux
-set -g @agent-plane-keys-toggle-key N
+set -g @agent-plane-keys-toggle-key e
 ```
 
 ### Sidebar and agent list
@@ -211,7 +211,7 @@ set -g @agent-plane-keys-toggle-key N
 | `prefix + a` | Open the agent picker: the sidebar's list and actions, with a live screen preview |
 | `prefix + f` | Open the agent picker already filtering, so you can start typing |
 | `Alt + K` / `Alt + J` | Focus previous/next agent directly, across sessions; no prefix or sidebar focus needed |
-| `prefix + K` | Turn the global keys (these four and any you add) off, so programs get them, and on again; see [Turning the global keys off](#turning-the-global-keys-off) |
+| `prefix + g` | Turn the global keys (these four and any you add) off, so programs get them, and on again; see [Turning the global keys off](#turning-the-global-keys-off) |
 | `Alt + H` / `Alt + L` | Move into the sidebar and stay / leave it for the selected agent; no prefix needed |
 | `↓` `↑` | Move selection. In the sidebar, moving previews the selected agent's window/session while keyboard input stays in the sidebar; the popup previews inside itself. Both also accept `j` / `k` |
 | `gg` / `G` | Move to the first / last agent in the list, previewing it like any other move |

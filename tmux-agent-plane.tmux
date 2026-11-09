@@ -32,7 +32,7 @@ if [ -n "$repeated" ]; then
   tmux display-message "tmux-agent-plane: each global key needs one action; repeated: $repeated"
   exit 1
 fi
-# @agent-plane-keys off turns every global key off, so it reaches the pane as usual. prefix + K
+# @agent-plane-keys off turns every global key off, so it reaches the pane as usual. prefix + g
 # (or @agent-plane-keys-toggle-key) turns them on and off; the status bar says when they are off.
 case "$(tmux show-option -gqv @agent-plane-keys)" in
   ''|on|off) ;;
@@ -40,7 +40,7 @@ case "$(tmux show-option -gqv @agent-plane-keys)" in
     tmux display-message "tmux-agent-plane: @agent-plane-keys must be on or off"
     exit 1 ;;
 esac
-toggle_key="$(key_option keys-toggle K)"
+toggle_key="$(key_option keys-toggle g)"
 # Reloading after a key change removes only bindings this plugin still owns. tmux pads its
 # columns, so squeeze the spaces before matching.
 bindings="$(tmux list-keys | tr -s ' ')"
