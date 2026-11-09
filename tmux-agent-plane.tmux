@@ -82,9 +82,10 @@ for key in $out_keys; do
   tmux bind-key -n "$key" if-shell -F "#{&&:#{!=:#{@agent-plane-keys},off},#{==:#{@agent-plane-sidebar},1}}" \
     'send-keys S-Right' "send-keys $key"
 done
+# No display-message: tmux freezes the screen while one shows, for display-time or until a key.
 tmux bind-key "$toggle_key" if-shell -F "$off" \
-  "set-option -g @agent-plane-keys on ; display-message 'tmux-agent-plane: global keys on'" \
-  "set-option -g @agent-plane-keys off ; display-message 'tmux-agent-plane: global keys off; prefix + $toggle_key turns them on'"
+  "set-option -g @agent-plane-keys on" \
+  "set-option -g @agent-plane-keys off"
 tmux set-option -g @agent-plane-bound-previous-key "$previous_keys"
 tmux set-option -g @agent-plane-bound-next-key "$next_keys"
 tmux set-option -g @agent-plane-bound-sidebar-in-key "$in_keys"
