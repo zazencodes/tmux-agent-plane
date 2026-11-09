@@ -14,6 +14,14 @@ pub fn launch(task: Option<&str>, agent_args: &[String]) -> Result<Launch> {
     })
 }
 
+/// Claude Code resumes a conversation in place, keeping its session id.
+pub fn resume(session_id: &str) -> Launch {
+    Launch {
+        command: "claude",
+        args: vec!["--resume".into(), session_id.into()],
+    }
+}
+
 pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
     let sessions = claude_sessions(context)?;
     Ok(context

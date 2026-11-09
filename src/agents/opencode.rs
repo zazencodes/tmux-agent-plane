@@ -28,6 +28,14 @@ struct Published {
     completion_epoch: String,
 }
 
+/// OpenCode continues a session by id.
+pub fn resume(session_id: &str) -> Launch {
+    Launch {
+        command: "opencode",
+        args: vec!["--session".into(), session_id.into()],
+    }
+}
+
 pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
     scan_dir(
         context,

@@ -143,6 +143,8 @@ mod tests {
             size: Size { width, height: 24 },
             zoomed: false,
             sizing: LATEST.into(),
+            name: "zsh".into(),
+            layout: String::new(),
         }
     }
 

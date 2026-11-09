@@ -18,6 +18,14 @@ pub fn launch(task: Option<&str>, agent_args: &[String]) -> Result<Launch> {
     })
 }
 
+/// Pi reopens a session by id.
+pub fn resume(session_id: &str) -> Launch {
+    Launch {
+        command: "pi",
+        args: vec!["--session".into(), session_id.into()],
+    }
+}
+
 pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
     scan_directory(
         context,

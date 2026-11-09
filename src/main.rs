@@ -14,6 +14,7 @@ mod navigation;
 mod popup;
 mod projects;
 mod quota;
+mod restore;
 mod sessions;
 mod sidebar;
 mod sidebar_help;
@@ -159,6 +160,18 @@ enum Cmd {
         #[command(subcommand)]
         action: tasks::Action,
     },
+    /// Bring back agents from before tmux restarted: lists them; --tasks or --no-tasks restores
+    Restore {
+        /// Restore the agents and the tasks that were running
+        #[arg(long, group = "restore")]
+        tasks: bool,
+        /// Restore the agents only
+        #[arg(long, group = "restore")]
+        no_tasks: bool,
+        /// Forget them without restoring
+        #[arg(long, group = "restore")]
+        discard: bool,
+    },
     /// Start an agent in a new pane, window or session
     Spawn {
         kind: index::Kind,
@@ -215,6 +228,11 @@ fn main() -> anyhow::Result<()> {
         Cmd::Kill { target } => commands::kill(&target),
         Cmd::Wait { target, timeout } => commands::wait(&target, timeout),
         Cmd::Task { action } => tasks::run(action),
+        Cmd::Restore {
+            tasks,
+            no_tasks,
+            discard,
+        } => restore::run_cli(tasks, no_tasks, discard),
         Cmd::Spawn {
             kind,
             task,

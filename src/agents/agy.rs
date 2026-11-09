@@ -19,6 +19,14 @@ pub fn launch(task: Option<&str>, agent_args: &[String]) -> Result<Launch> {
     })
 }
 
+/// Antigravity reopens a conversation by id.
+pub fn resume(session_id: &str) -> Launch {
+    Launch {
+        command: "agy",
+        args: vec!["--conversation".into(), session_id.into()],
+    }
+}
+
 pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
     let candidates: Vec<_> = context
         .panes

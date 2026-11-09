@@ -163,6 +163,9 @@ pub struct WindowSize {
     pub zoomed: bool,
     /// The window's `window-size` option.
     pub sizing: String,
+    pub name: String,
+    /// `#{window_layout}`: the unzoomed layout, which `select-layout` takes back.
+    pub layout: String,
 }
 
 #[derive(Default)]
@@ -172,7 +175,7 @@ pub struct Geometry {
 }
 
 const CLIENT_ROW: &str = "client\x1f#{window_width}\x1f#{window_height}\x1f#{window-size}";
-const WINDOW_ROW: &str = "window\x1f#{window_id}\x1f#{window_width}\x1f#{window_height}\x1f#{window_zoomed_flag}\x1f#{window-size}";
+const WINDOW_ROW: &str = "window\x1f#{window_id}\x1f#{window_width}\x1f#{window_height}\x1f#{window_zoomed_flag}\x1f#{window-size}\x1f#{window_layout}\x1f#{window_name}";
 
 fn parse_size(width: &str, height: &str) -> Result<Size> {
     Ok(Size {
@@ -208,12 +211,16 @@ pub fn snapshot() -> Result<(Vec<Pane>, Geometry)> {
                 size: parse_size(width, height)?,
                 sizing: sizing.to_string(),
             }),
-            ["window", id, width, height, zoomed, sizing] => geometry.windows.push(WindowSize {
-                id: id.to_string(),
-                size: parse_size(width, height)?,
-                zoomed: *zoomed == "1",
-                sizing: sizing.to_string(),
-            }),
+            ["window", id, width, height, zoomed, sizing, layout, name] => {
+                geometry.windows.push(WindowSize {
+                    id: id.to_string(),
+                    size: parse_size(width, height)?,
+                    zoomed: *zoomed == "1",
+                    sizing: sizing.to_string(),
+                    name: name.to_string(),
+                    layout: layout.to_string(),
+                })
+            }
             _ => panes.push(parse_pane(line)?),
         }
     }

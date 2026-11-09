@@ -1102,6 +1102,7 @@ mod tests {
             order: Vec::new(),
             last_agent: Some("%3".into()),
             tasks: Vec::new(),
+            pending_restore: 0,
         };
         let client = |pane: &str| Client {
             name: "client".into(),

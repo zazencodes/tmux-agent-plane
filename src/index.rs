@@ -26,26 +26,32 @@ impl Kind {
             Self::Claude => Adapter {
                 scan: claude::scan,
                 launch: claude::launch,
+                resume: Some(claude::resume),
             },
             Self::Codex => Adapter {
                 scan: codex::scan,
                 launch: codex::launch,
+                resume: None,
             },
             Self::Pi => Adapter {
                 scan: pi::scan,
                 launch: pi::launch,
+                resume: Some(pi::resume),
             },
             Self::Opencode => Adapter {
                 scan: opencode::scan,
                 launch: opencode::launch,
+                resume: Some(opencode::resume),
             },
             Self::Agy => Adapter {
                 scan: agy::scan,
                 launch: agy::launch,
+                resume: Some(agy::resume),
             },
             Self::Grok => Adapter {
                 scan: grok::scan,
                 launch: grok::launch,
+                resume: Some(grok::resume),
             },
         }
     }
@@ -140,6 +146,9 @@ pub struct Index {
     /// Background tasks, by name.
     #[serde(default)]
     pub tasks: Vec<crate::tasks::Task>,
+    /// Agents from before tmux restarted that a restore would bring back; zero when none wait.
+    #[serde(default)]
+    pub pending_restore: usize,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

@@ -43,6 +43,7 @@ pub struct Observation {
 }
 
 /// An interactive agent command line: `args` holds the agent arguments and then the task.
+#[derive(Debug)]
 pub struct Launch {
     pub command: &'static str,
     pub args: Vec<String>,
@@ -51,6 +52,9 @@ pub struct Adapter {
     pub scan: fn(&ScanContext<'_>) -> Result<Vec<Observation>>,
     /// Builds the command from an optional task and verbatim agent arguments.
     pub launch: fn(Option<&str>, &[String]) -> Result<Launch>,
+    /// Reopens a recorded session by the id the agent published. None when the kind publishes no
+    /// session id to resume.
+    pub resume: Option<fn(&str) -> Launch>,
 }
 pub struct ScanContext<'a> {
     pub panes: &'a [Pane],

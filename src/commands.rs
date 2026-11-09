@@ -534,7 +534,7 @@ fn validate_session_placement(placement: Placement, session: Option<&str>) -> Re
 
 /// Keep the command name literal so interactive aliases/functions apply. Arguments
 /// are shell data, and after the agent returns a fresh login shell owns the terminal.
-fn shell_launch(shell: &str, command: &str, args: &[String]) -> String {
+pub(crate) fn shell_launch(shell: &str, command: &str, args: &[String]) -> String {
     let mut script = command_line(command, args);
     script.push_str("\nexec ");
     script.push_str(&shell_quote(shell));

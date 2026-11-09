@@ -22,6 +22,14 @@ pub fn launch(task: Option<&str>, agent_args: &[String]) -> Result<Launch> {
     })
 }
 
+/// Grok Build resumes a session by id.
+pub fn resume(session_id: &str) -> Launch {
+    Launch {
+        command: "grok",
+        args: vec!["--resume".into(), session_id.into()],
+    }
+}
+
 pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
     let home = grok_home()?;
     let socket = std::env::var_os("GROK_LEADER_SOCKET")

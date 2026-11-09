@@ -65,6 +65,8 @@ tmux-agent-plane task start <name> [--cwd DIR] -- <command>...  # reuses a runni
 tmux-agent-plane task read <name> [--lines N]
 tmux-agent-plane task restart <name>      # rerun its command in the same window
 tmux-agent-plane task stop <name>         # end it; it leaves the list
+tmux-agent-plane restore                  # agents from before tmux restarted; lists only
+tmux-agent-plane restore --tasks|--no-tasks|--discard  # bring them back (with tasks or not), or forget them
 ```
 
 `<agent>` is a name, pane id, or `self` when caller identity is reliable. `read` and `keys` also take any pane id, including a pane whose agent has not started yet.
@@ -115,6 +117,10 @@ Use `task start` for anything that must keep running after the command that star
 5. Tasks outlive you. Stop only tasks you started (`started_by` is your name) and no longer need, or that the user asks you to stop: `task stop <name>`.
 
 Tasks are never agents: they do not appear in `list`, and agent commands do not take task names. Never `move` agents into the `agent-plane-tasks` session or reorganize it; it holds tasks only.
+
+## Restore after tmux restarts
+
+When the tmux server dies, its agents can be brought back. `↺ N` in the status bar, or `restore` listing agents, means some wait. Restoring reopens their conversations and windows, so do it only when the user asks: run `restore` to show them the list, then `restore --tasks` (agents and the tasks that were running) or `restore --no-tasks` as they choose, or `restore --discard` if they want them gone. Report what it printed, including agents that stay closed and why (Codex cannot be resumed).
 
 ## Daemon diagnostics
 

@@ -46,6 +46,7 @@ It reads this README, installs the pieces and asks you about the choices along t
 - **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. A spawned agent records its parent when caller identity is known.
 - **Sessions are projects.** Inspect and create named project sessions, start helpers directly in them, and move running agent panes between projects while their processes, names and parent links stay intact.
 - **Background tasks every agent can see.** Agents start dev servers, watchers and tunnels with `task start`, so there is one list of what runs, with its ports, and nobody starts a second copy. Tasks keep running after the agent that started them, and keep their output and exit status when they stop. See [Background tasks](#background-tasks).
+- **Agents come back after tmux dies.** When the tmux server stops (a crash, a reboot, `kill-server`), the agents it held wait to be brought back: the status bar shows `↺ 3`, and `restore` reopens each one's conversation in the session, window and layout it had, with its name. Nothing comes back until you ask. See [Restore](#restore).
 - **Your agents, unchanged.** Spawned agents start in a normal shell, so your aliases and flags apply, and the shell stays when the agent exits.
 
 ## States
@@ -344,6 +345,21 @@ A task keeps running when the agent that started it exits; only `task stop` (or 
 
 `task list` shows each task's state, the TCP ports its processes listen on, folder, the agent that started it, how long ago it started, and its command; `--json` gives every field. The daemon looks up ports with `lsof` at most every five seconds, only while tasks run. A task is never an agent, even when its command is an agent CLI, and projects and automatic placement leave the tasks session alone. The definition lives on the task's tmux pane, so tasks and their state survive a daemon restart.
 
+### Restore
+
+The daemon keeps a roster of every window that holds an agent: its session, index, name and layout, and each pane's folder, with the agent's kind, session id, name and parent. It also records every running background task. When the tmux server dies and a new one starts, the daemon turns that roster into a pending restore, and the status bar shows `↺ N`, the number of agents that can come back. Nothing is restored until you ask:
+
+```bash
+tmux-agent-plane restore              # list what would come back; changes nothing
+tmux-agent-plane restore --tasks      # bring back the agents and the tasks that were running
+tmux-agent-plane restore --no-tasks   # the agents only
+tmux-agent-plane restore --discard    # forget them
+```
+
+Each agent reopens its own conversation through the same interactive login shell as `spawn`, so your aliases apply: `claude --resume <id>`, `opencode --session <id>`, `grok --resume <id>`, `agy --conversation <id>` and `pi --session <id>`. Codex publishes no session id, so a Codex agent is listed as one that cannot come back, with its project and folder; its pane comes back as a shell there. A session that is missing is created, each window comes back at its index (or the next free one) with its name and every pane, then its recorded layout. Other panes come back as login shells in their folders. An agent gets its name back when it had been given one (by `spawn --name`, `rename`, `r` or AI naming), and a default name otherwise; parent links point at the restored parents. Restored agents stay where they are rather than moving to the session named after their folder. Tasks start again under their names, with the agent that started them.
+
+An agent whose conversation already runs again, or whose folder is gone, stays closed and is listed with the reason. Anything that fails is printed and written to `daemon.log`, and the rest still comes back; either way the pending restore is then forgotten. A later restart of tmux replaces a pending restore with the newer one. The roster leaves out sidebars, so a restored window gets one when the sidebar is open, and it changes only after a scan without faults has held for three seconds, so agents that exit while the machine shuts down are still remembered.
+
 ### Agent launch syntax
 
 `spawn` starts a persistent interactive session in tmux’s configured `default-shell`. It passes the launch command directly to an interactive login shell, which loads your startup files before running the agent, so aliases and flags apply even with long or multi-line tasks. Each argument is quoted separately. When the agent exits, a fresh interactive login shell stays open. `spawn` supplies its own launch command, so tmux’s `default-command` is not used.
@@ -418,6 +434,7 @@ AI output must be two or three lowercase words joined by hyphens, each starting 
 | `task read <name> [--lines N]` | The task's screen, plus N lines of scrollback |
 | `task restart <name>` | Run the task's command again in its window |
 | `task stop <name>` | End the task; it leaves the list |
+| `restore [--tasks\|--no-tasks\|--discard]` | Agents from before tmux restarted: list them (no flag), bring them back with or without the tasks that were running, or forget them |
 | `toggle-sidebar <window>` | What the sidebar key does, from a window (a window or pane id) |
 | `follow-sidebar <window>` | Add the sidebar to a window while it is open. The plugin runs it when a window is created |
 | `sidebar` | The sidebar's agent list, run in the sidebar pane |

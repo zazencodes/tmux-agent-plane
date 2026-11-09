@@ -164,10 +164,10 @@ fn close() -> Result<()> {
 }
 
 /// An exclusive lock on a file in the state directory, released on drop.
-struct Lock(std::fs::File);
+pub(crate) struct Lock(std::fs::File);
 
 impl Lock {
-    fn take() -> Result<Lock> {
+    pub(crate) fn take() -> Result<Lock> {
         let dir = index::state_dir()?;
         std::fs::create_dir_all(&dir)?;
         let file = std::fs::File::create(dir.join("sidebar.lock"))?;
@@ -2145,6 +2145,7 @@ mod tests {
             order: order.iter().map(|pane| pane.to_string()).collect(),
             last_agent: None,
             tasks: Vec::new(),
+            pending_restore: 0,
         }
     }
 

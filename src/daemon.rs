@@ -98,6 +98,7 @@ fn run_inner() -> Result<()> {
     let mut fit = Fit::default();
     let mut placer = crate::projects::Placer::default();
     let mut tasks = crate::tasks::Tracker::default();
+    let mut roster = crate::restore::Recorder::start()?;
 
     loop {
         if SHUTDOWN.load(Ordering::Relaxed) {
@@ -136,6 +137,11 @@ fn run_inner() -> Result<()> {
         issues.extend(announcements.deliver());
         let tasks = tasks.tick(&panes, &processes, now);
         issues.extend(tasks.issues);
+        let clean = !issues
+            .iter()
+            .any(|i| i.component.starts_with("scan:") || i.component.starts_with("advance:"));
+        let restore = roster.tick(&agents, &panes, &geometry, &tasks.values, clean, now);
+        issues.extend(restore.issues);
         let views = windows(&panes);
         issues.extend(fit.tick(&views, &geometry));
         // Index persistence remains fatal and independent of status presentation.
@@ -147,13 +153,15 @@ fn run_inner() -> Result<()> {
             order: order.clone(),
             last_agent: last_agent.clone(),
             tasks: tasks.values,
+            pending_restore: restore.pending,
         })
         .context("writing agent index")?;
         // Last, so everything above saw one consistent placement of the agents.
         issues.extend(placer.tick(&agents, &panes)?);
         // Use the last diagnostic snapshot for presentation, then fold this attempt's issues
         // exactly once. A new fault/recovery reaches the status on the next tick.
-        let segment = active.status() + &status_segment(&agents);
+        let segment =
+            active.status() + &crate::restore::status(restore.pending) + &status_segment(&agents);
         issues.extend(presentation.update(&segment));
         let changes = active.update(&issues)?;
         let changes: Vec<_> = changes
