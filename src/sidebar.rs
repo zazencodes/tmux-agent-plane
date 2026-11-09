@@ -9,10 +9,11 @@ use crate::index::{self, Agent, Index, Kind, RecentEvent, State, WindowView};
 use crate::lifecycle;
 use crate::navigation::{CLIENT_FORMAT, Client, guard_destination, parse_client};
 use crate::tmux;
+use crate::ui::family;
 use crate::ui::{
     LAVENDER, NO_AGENTS, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, daemon_down,
     fill_viewport, group_colour, hints, icon, marked, message, name_style, panel, rank,
-    search_matches, state_style, task, tree, truncate,
+    search_matches, state_style, task, truncate,
 };
 use anyhow::{Context, Result, bail};
 use nucleo_matcher::Matcher;
@@ -210,8 +211,8 @@ pub(crate) struct Navigation {
     /// The search while it is being typed.
     pub(crate) jump: Option<SearchEdit>,
     pub(crate) order: Vec<String>,
-    /// `p`: rows as a tree of who spawned whom.
-    pub(crate) tree: bool,
+    /// `p`: the selected agent's family, drawn below the list or in place of the preview.
+    pub(crate) family: bool,
 }
 
 /// What Esc restores: the text and selection from before the edit.
@@ -579,9 +580,6 @@ impl Sidebar {
         // Sessions by name: a stable sort keeps the list's order within each.
         listed.sort_by(|a, b| a.session.cmp(&b.session));
         self.agents = rank(&mut self.matcher, &self.navigation.query, &listed);
-        if self.navigation.tree {
-            self.agents = tree::order(&self.agents, &self.all_agents);
-        }
         let selected = self
             .navigation
             .pane
@@ -1084,10 +1082,7 @@ impl Sidebar {
             }
             KeyCode::Char('f') => self.start_search(),
             KeyCode::Char('/') => self.start_jump(),
-            KeyCode::Char('p') => {
-                self.navigation.tree = !self.navigation.tree;
-                self.rebuild();
-            }
+            KeyCode::Char('p') => self.navigation.family = !self.navigation.family,
             // The search first, then every filter, back to the whole list.
             _ if cancels(key) && !self.navigation.pattern.is_empty() => {
                 self.navigation.pattern.clear()
@@ -1481,17 +1476,32 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     } else {
         0
     };
-    let [list_area, quota_area, help_area] = Layout::vertical([
+    let family = sidebar
+        .selected()
+        .filter(|_| sidebar.navigation.family && sidebar.error.is_none())
+        .map(|selected| family::family(&sidebar.all_agents, selected));
+    // The family takes at most half the height, so the list stays in view.
+    let family_height = family.as_ref().map_or(0, |family| {
+        (family.height() + 2).min(f.area().height.saturating_sub(quota_height) / 2)
+    });
+    let [list_area, family_area, quota_area, help_area] = Layout::vertical([
         Constraint::Min(3),
+        Constraint::Length(family_height),
         Constraint::Length(quota_height),
         Constraint::Length(footer_height),
     ])
     .areas(f.area());
+    if let Some(family) = &family {
+        let block = panel(Line::from(" family "));
+        let inner = block.inner(family_area);
+        f.render_widget(block, family_area);
+        family.render(inner, f.buffer_mut());
+    }
     if sidebar.quota.pinned {
         sidebar.quota.draw_panel(f, quota_area);
     }
     let inner = list_area.width.saturating_sub(2) as usize;
-    let block = panel(Line::from(list_title(&sidebar.navigation)));
+    let block = panel(Line::from(" agents "));
     let content = block.inner(list_area);
     f.render_widget(block, list_area);
     let restore = restore::top_lines(sidebar.restore.pending, inner);
@@ -1533,12 +1543,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         );
     } else {
         let selected = sidebar.list.selected();
-        let draw_items = if sidebar.navigation.tree {
-            tree_items
-        } else {
-            items
-        };
-        let mut items = draw_items(
+        let mut items = items(
             &sidebar.agents,
             &sidebar.all_agents,
             selected,
@@ -1774,7 +1779,20 @@ fn items<'a>(
             let status = format!("{} {} ", a.state.as_str(), age(a.state_since));
             let name_width = width.saturating_sub(status.len() + 4);
             let name = match renaming {
-                Some(typed) => vec![typing(typed, name_width)],
+                // Keep the end of a long name in view, where the cursor is.
+                Some(typed) => {
+                    let shown: String = typed
+                        .chars()
+                        .rev()
+                        .take(name_width.saturating_sub(1))
+                        .collect();
+                    vec![Span::styled(
+                        shown.chars().rev().collect::<String>() + "▏",
+                        Style::default()
+                            .fg(colour(State::Done))
+                            .add_modifier(Modifier::UNDERLINED),
+                    )]
+                }
                 None => marked(
                     &a.name,
                     name_width,
@@ -1812,120 +1830,6 @@ fn items<'a>(
             ListItem::new(lines)
         })
         .collect()
-}
-
-/// A name being typed: its end stays in view, where the cursor is.
-fn typing(typed: &str, width: usize) -> Span<'static> {
-    let shown: String = typed.chars().rev().take(width.saturating_sub(1)).collect();
-    Span::styled(
-        shown.chars().rev().collect::<String>() + "▏",
-        Style::default()
-            .fg(colour(State::Done))
-            .add_modifier(Modifier::UNDERLINED),
-    )
-}
-
-/// The list's title, which says when it is the tree.
-pub(crate) fn list_title(navigation: &Navigation) -> String {
-    if navigation.tree {
-        " agents · tree ".into()
-    } else {
-        " agents ".into()
-    }
-}
-
-/// `p`: who spawned whom. A family's root sits in a box in its session's colour, and its
-/// descendants hang below it, one line each.
-fn tree_items<'a>(
-    agents: &'a [Agent],
-    all: &[Agent],
-    selected: Option<usize>,
-    editing: Option<&String>,
-    in_use: Option<&str>,
-    search: &str,
-    width: usize,
-) -> Vec<ListItem<'a>> {
-    tree::build(agents, all)
-        .into_iter()
-        .enumerate()
-        .map(|(i, (a, shape))| {
-            let is_selected = selected == Some(i);
-            let mut lines = Vec::new();
-            if i > 0 && shape.depth == 0 {
-                lines.push(Line::default());
-            }
-            let boxed = shape.depth == 0 && shape.parent_of && width >= 4;
-            let room = if boxed { width - 2 } else { width };
-            let mut row = tree_row(
-                a,
-                &shape,
-                is_selected,
-                editing.filter(|_| is_selected),
-                in_use,
-                search,
-                room,
-            );
-            if is_selected {
-                for span in &mut row.spans {
-                    span.style = span.style.bg(SURFACE0);
-                }
-            }
-            if boxed {
-                let border = Style::default().fg(group_colour(all, &a.session));
-                lines.push(Line::styled(format!("╭{}╮", "─".repeat(width - 2)), border));
-                row.spans.insert(0, Span::styled("│", border));
-                row.spans.push(Span::styled("│", border));
-                lines.push(row);
-                lines.push(Line::styled(
-                    format!("╰┬{}╯", "─".repeat(width - 3)),
-                    border,
-                ));
-            } else {
-                lines.push(row);
-            }
-            ListItem::new(lines)
-        })
-        .collect()
-}
-
-/// One agent in the tree: its connectors, state, name and age.
-fn tree_row(
-    a: &Agent,
-    shape: &tree::Shape,
-    is_selected: bool,
-    renaming: Option<&String>,
-    in_use: Option<&str>,
-    search: &str,
-    width: usize,
-) -> Line<'static> {
-    let mut spans = vec![Span::styled(
-        if is_selected { "▌" } else { " " },
-        colour(a.state),
-    )];
-    spans.extend(tree::connectors(shape, a.state));
-    spans.push(Span::styled(format!("{} ", icon(a.state)), colour(a.state)));
-    let status = format!(" {} {} ", a.state.as_str(), age(a.state_since));
-    let used: usize = spans.iter().map(Span::width).sum::<usize>() + status.len();
-    let room = width.saturating_sub(used);
-    let away = tree::away(shape).map(|away| truncate(&away, room / 2));
-    let name_width = room.saturating_sub(away.as_ref().map_or(0, |a| a.chars().count()));
-    match renaming {
-        Some(typed) => spans.push(typing(typed, name_width)),
-        None => spans.extend(marked(
-            &a.name,
-            name_width,
-            search,
-            name_style(a, in_use == Some(a.pane.as_str())),
-        )),
-    }
-    if let Some(away) = away {
-        spans.push(Span::styled(away, OVERLAY));
-    }
-    right(
-        Line::from(spans),
-        Span::styled(status, state_style(a.state)),
-        width,
-    )
 }
 
 /// `line` with `end` pushed to the right edge of `width` columns.
@@ -2961,9 +2865,6 @@ mod tests {
             sidebar.navigation.order = vec!["%1".into()];
             sidebar.rebuild();
             terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
-            let mut tree = showing(family());
-            press(&mut tree, KeyCode::Char('p'));
-            terminal.draw(|frame| draw(frame, &mut tree)).unwrap();
         }
     }
 
@@ -3140,68 +3041,29 @@ mod tests {
             .join("\n")
     }
 
-    pub(super) fn family() -> Vec<Agent> {
-        let now = index::now_ms();
-        let member = |pane: &str, name: &str, state, parent: Option<&str>| {
-            let mut a = agent(pane, state);
-            a.name = name.into();
-            a.parent = parent.map(Into::into);
-            a.state_since = now;
-            a
-        };
-        let mut orphan = member("%6", "reviewer", State::Idle, None);
-        orphan.parent_ended = true;
-        orphan.session = "zeta".into();
-        vec![
-            member("%1", "site-lead", State::Working, None),
-            member("%2", "hero-copy", State::Working, Some("%1")),
-            member("%3", "api-review", State::Done, Some("%1")),
-            member("%4", "api-tests", State::Blocked, Some("%3")),
-            member("%5", "docs-pass", State::Idle, Some("%1")),
-            orphan,
-        ]
-    }
-
     #[test]
-    fn p_shows_who_spawned_whom_and_keeps_rows_selectable() {
-        let mut sidebar = showing(family());
+    fn p_draws_the_selected_agents_family_below_the_list() {
+        let mut sidebar = showing(crate::ui::family::tests::family_agents());
+        sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%2"));
+        assert!(!rendered(&mut sidebar).contains(" family "));
         press(&mut sidebar, KeyCode::Char('p'));
-        assert_eq!(order(&sidebar), ["%1", "%2", "%3", "%4", "%5", "%6"]);
         let screen = rendered(&mut sidebar);
         let rows: Vec<&str> = screen.lines().collect();
-        assert!(rows[0].contains(" agents · tree "), "{screen}");
-        let at = |text: &str| rows.iter().position(|r| r.contains(text)).expect(text);
-        let lead = at("site-lead");
+        let top = rows
+            .iter()
+            .position(|r| r.contains(" family "))
+            .expect(&screen);
         assert!(
-            rows[lead - 1].contains("╭────") && rows[lead + 1].contains("╰┬───"),
+            rows[top + 2].contains("│ ● site-lead │─┬╌│ ● hero-copy"),
             "{screen}"
         );
+        // The list keeps the rest, and j moves the family with the selection.
         assert!(
-            rows[lead].contains("│ ● site-lead") && rows[lead].contains("working 0s │"),
+            rows[..top].iter().any(|r| r.contains("hero-copy")),
             "{screen}"
         );
-        assert!(rows[at("hero-copy")].contains(" ├╌● hero-copy"), "{screen}");
-        assert!(
-            rows[at("api-review")].contains(" ├─✓ api-review"),
-            "{screen}"
-        );
-        assert!(
-            rows[at("api-tests")].contains("▌│ ╰─◆ api-tests"),
-            "{screen}"
-        );
-        assert!(rows[at("docs-pass")].contains(" ╰─○ docs-pass"), "{screen}");
-        assert!(
-            rows[at("reviewer")].contains("○ reviewer ↑ ended"),
-            "{screen}"
-        );
-        assert!(rows.iter().all(|r| r.chars().count() == 38));
-        // The sidebar opens on what wants attention; j and k walk the tree.
-        assert_eq!(sidebar.selected().unwrap().pane, "%4");
-        press(&mut sidebar, KeyCode::Char('j'));
-        assert_eq!(sidebar.selected().unwrap().pane, "%5");
         press(&mut sidebar, KeyCode::Char('p'));
-        assert!(!rendered(&mut sidebar).contains("│╭"));
-        assert_eq!(sidebar.selected().unwrap().pane, "%5");
+        assert!(!rendered(&mut sidebar).contains(" family "));
     }
 
     #[test]

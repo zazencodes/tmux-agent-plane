@@ -1,6 +1,6 @@
 //! The agent list: every agent with its state, and a live preview of the selected one.
 
-pub(crate) mod tree;
+pub(crate) mod family;
 
 use crate::index::{self, Agent, Index, State};
 use crate::navigation::Client;
@@ -585,35 +585,8 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
             .max()
             .unwrap_or(0)
     };
-    // `p`: connectors before the icon, and a root's absent parent after its name.
-    let shapes: Vec<Option<tree::Shape>> = if sidebar.navigation.tree {
-        tree::build(&sidebar.agents, &sidebar.all_agents)
-            .into_iter()
-            .map(|(_, shape)| Some(shape))
-            .collect()
-    } else {
-        sidebar.agents.iter().map(|_| None).collect()
-    };
-    let connectors: Vec<Vec<Span>> = sidebar
-        .agents
-        .iter()
-        .zip(&shapes)
-        .map(|(a, shape)| {
-            shape
-                .as_ref()
-                .map_or_else(Vec::new, |shape| tree::connectors(shape, a.state))
-        })
-        .collect();
-    let aways: Vec<String> = shapes
-        .iter()
-        .map(|shape| shape.as_ref().and_then(tree::away).unwrap_or_default())
-        .collect();
-    let lead = |i: usize| connectors[i].iter().map(Span::width).sum::<usize>();
-    let name_width = (0..sidebar.agents.len())
-        .map(|i| lead(i) + sidebar.agents[i].name.chars().count() + aways[i].chars().count())
-        .chain(renaming.as_ref().map(|typed| typed.chars().count()))
-        .max()
-        .unwrap_or(0);
+    let name_width =
+        column(|a| &a.name).max(renaming.as_ref().map_or(0, |typed| typed.chars().count()));
     let group_width = column(|a| &a.session);
     let place_width = column(place);
     let row_width = list_area.width.saturating_sub(2) as usize;
@@ -625,18 +598,13 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
             let is_selected = selected == Some(i);
             let search = &sidebar.navigation.pattern;
             let (task, task_style) = task(a);
-            let mut spans = vec![Span::styled(
-                if is_selected { "▌" } else { " " },
-                colour(a.state),
-            )];
-            spans.extend(connectors[i].clone());
-            spans.push(Span::styled(format!("{} ", icon(a.state)), colour(a.state)));
+            let mut spans = vec![
+                Span::styled(if is_selected { "▌" } else { " " }, colour(a.state)),
+                Span::styled(format!("{} ", icon(a.state)), colour(a.state)),
+            ];
             match renaming.as_ref().filter(|_| is_selected) {
                 Some(typed) => spans.push(Span::styled(
-                    format!(
-                        "{typed:<width$}  ",
-                        width = name_width.saturating_sub(lead(i))
-                    ),
+                    format!("{typed:<name_width$}  "),
                     Style::default()
                         .fg(colour(State::Done))
                         .add_modifier(Modifier::UNDERLINED),
@@ -648,10 +616,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                         search,
                         name_style(a, a.visible),
                     ));
-                    spans.push(Span::styled(aways[i].clone(), OVERLAY));
-                    let pad = name_width.saturating_sub(
-                        lead(i) + a.name.chars().count() + aways[i].chars().count(),
-                    ) + 2;
+                    let pad = name_width.saturating_sub(a.name.chars().count()) + 2;
                     spans.push(Span::raw(" ".repeat(pad)));
                 }
             }
@@ -675,9 +640,6 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
         })
         .collect();
     let mut title = " agents".to_string();
-    if sidebar.navigation.tree {
-        title += " · tree";
-    }
     if let Some(state) = sidebar.navigation.filter {
         title += &format!(" · {}", state.as_str());
     }
@@ -728,6 +690,13 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                 ["no matching agents", "d changes state · f edits filter"]
             },
         ),
+        (None, Some(selected)) if app.sidebar.navigation.family => {
+            let family = family::family(&app.sidebar.all_agents, selected);
+            let block = panel(Line::from(" family "));
+            let inner = block.inner(preview_area).inner(Margin::new(1, 0));
+            f.render_widget(block, preview_area);
+            family.render(inner, f.buffer_mut());
+        }
         (None, Some(_)) => {
             // Show the bottom of the screen, where the agent's prompt and status live.
             let mut lines = app.preview.lines.clone();
@@ -1623,24 +1592,19 @@ mod tests {
     }
 
     #[test]
-    fn p_draws_the_tree_in_the_picker_with_the_sidebars_connectors() {
+    fn p_shows_the_selected_agents_family_in_place_of_the_preview() {
         let mut app = App::new("client");
-        let member = |name: &str, pane: &str, parent: Option<&str>| {
-            let mut a = agent(name, pane, "Task");
-            a.parent = parent.map(Into::into);
-            a
-        };
-        let mut gone = member("reviewer", "%5", None);
-        gone.parent_ended = true;
-        app.sidebar.all_agents = vec![
-            member("site-lead", "%1", None),
-            member("api-review", "%2", Some("%1")),
-            member("api-tests", "%3", Some("%2")),
-            member("docs-pass", "%4", Some("%1")),
-            gone,
-        ];
-        app.sidebar.navigation.order = ["%5", "%3", "%1", "%2", "%4"].map(Into::into).to_vec();
+        app.sidebar.all_agents = crate::ui::family::tests::family_agents();
+        app.sidebar.navigation.order = app
+            .sidebar
+            .all_agents
+            .iter()
+            .map(|a| a.pane.clone())
+            .collect();
         app.sidebar.rebuild();
+        while app.sidebar.selected().unwrap().pane != "%4" {
+            assert!(press(&mut app, KeyCode::Char('j')).is_continue());
+        }
         assert!(press(&mut app, KeyCode::Char('p')).is_continue());
         let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
@@ -1652,28 +1616,14 @@ mod tests {
             .map(|row| row.iter().map(|c| c.symbol()).collect())
             .collect();
         let shown = rows.join("\n");
-        assert!(shown.contains(" agents · tree "), "{shown}");
-        let names: Vec<&str> = [
-            "reviewer",
-            "site-lead",
-            "api-review",
-            "api-tests",
-            "docs-pass",
-        ]
-        .into_iter()
-        .filter(|name| shown.contains(name))
-        .collect();
-        assert_eq!(names.len(), 5, "{shown}");
-        let row = |name: &str| rows.iter().find(|r| r.contains(name)).unwrap().as_str();
-        assert!(row("reviewer ↑ ended").contains("● reviewer"), "{shown}");
-        assert!(row("api-review").contains("├╌● api-review"), "{shown}");
-        assert!(row("api-tests").contains("│ ╰╌● api-tests"), "{shown}");
-        assert!(row("docs-pass").contains("╰╌● docs-pass"), "{shown}");
-        // The state column still lines up across depths.
-        let column = |name: &str| row(name).split("working").next().unwrap().chars().count();
-        assert_eq!(column("site-lead"), column("api-tests"));
-        let order: Vec<&str> = app.sidebar.agents.iter().map(|a| a.pane.as_str()).collect();
-        assert_eq!(order, ["%5", "%1", "%2", "%3", "%4"]);
+        assert!(shown.contains(" family "), "{shown}");
+        // api-tests is a child: its parent api-review on the left, site-lead above, ages shown.
+        assert!(shown.contains("↑ site-lead"), "{shown}");
+        let row = rows.iter().find(|r| r.contains("│───│")).expect(&shown);
+        assert!(
+            row.contains("✓ api-review 0s │───│ ◆ api-tests 0s │"),
+            "{shown}"
+        );
     }
 
     #[test]

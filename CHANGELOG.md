@@ -22,7 +22,7 @@ before 1.0, a breaking change bumps the minor version.
 - Press `prefix + g` to turn the global keys off when a program needs them, and again to turn them back on. While they are off, every one of them reaches the pane as usual and the status bar shows `keys off · prefix g`, as does the bottom left of the sidebar and the agent picker. Start with them off with `set -g @agent-plane-keys off`, and choose the toggle with `@agent-plane-keys-toggle-key`
 - The global key options take several keys each, separated by spaces, such as `set -g @agent-plane-sidebar-in-key 'M-h S-Left'`; all of them turn off together
 - `l` and → open the selected agent in the sidebar and the agent picker, like `Enter`
-- Press `p` in the sidebar or the agent picker to see your agents as a tree of who spawned whom: each family's root in a box in its project's colour, the agents it spawned below it on lines that are dashed while they work and red while they are blocked, and `↑ ended` on an agent whose parent has exited. Every key works on the tree as on the list, and `p` goes back
+- Press `p` in the sidebar or the agent picker to see the selected agent's family as a diagram: its parent in a box on the left, the agents that parent spawned down the right, joined by lines that are dashed while a child works and red while it is blocked, with the selected agent lit. It follows the selection, in a panel below the sidebar's list and in place of the picker's preview
 - Codex agents record themselves as the parent of the agents they spawn with `spawn ... --parent <their name>`, which `spawn` requires from Codex
 
 ### Changed
