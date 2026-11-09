@@ -196,6 +196,9 @@ bind -n S-Left run-shell "tmux-agent-plane enter-sidebar '#{window_id}'"
 | `Esc` / `Ctrl-C` | Cancel a search or filter being typed. Outside editing, clear the search, then the text and state filters together, back to the whole list; then close the popup |
 | `Enter` | Jump to the agent. The sidebar stays open; the popup closes. When the list says the daemon is not running, `Enter` restarts it and shows the reason if it cannot start |
 | `x` | Ask to kill the selected agent’s pane. The footer pins its name/state; `Enter` or lowercase `y` confirms; `?` temporarily shows help; other keys cancel without replay. Refuses to end your attached session; warns if a remote session would end |
+| `t` | Show or hide background tasks below the agents, in the sidebar, under a `── tasks ──` rule. Each sidebar keeps its own choice, and the footer offers `t tasks` while any task exists. A row reads `▸ web-dev  :5173  site  3h` while running (its listening ports, project folder and age) or `✕ worker  exit 1  site  2m` once its command has ended. `j`/`k`, `gg` and `G` move through the agents and then the tasks, previewing a task's window like an agent's; `Enter` opens it |
+| `x` on a task | Ask to stop the task, in the same style as a kill: `Enter` or lowercase `y` stops it and it leaves the list, other keys cancel. The sidebar moves to the next row first |
+| `R` | Restart the selected task: run its command again in its window |
 | `r` | Rename the agent (sidebar), starting from its current name. `Ctrl-W` deletes a word, `Ctrl-U` clears, `Enter` saves, `Esc` cancels |
 | `o` | Configure, in the sidebar. AI naming: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `d` disables naming, `Esc` goes back or closes |
 | `c` | Start a new agent in the selected agent's project. Pick the kind with arrows or `j`/`k`, then `Enter`: it opens in a new window of that session, in that agent's directory, and takes you there. `Esc` or `c` cancels |
@@ -295,7 +298,7 @@ tmux-agent-plane task restart web
 tmux-agent-plane task stop web
 ```
 
-Each task runs in its own window, named after it, in a detached session called `agent-plane-tasks` that is created on first use. Its command runs the way `spawn` runs an agent, through an interactive login shell in tmux's `default-shell`, so your PATH and aliases apply. The first word after `--` is the program, one plain word such as `npm`; every later word reaches it verbatim. For pipes or other shell syntax, run `sh -c '...'`.
+In the sidebar, `t` lists tasks below the agents, where `Enter` opens one, `x` asks to stop it and `R` restarts it; see [Sidebar and agent list](#sidebar-and-agent-list). Each task runs in its own window, named after it, in a detached session called `agent-plane-tasks` that is created on first use. Its command runs the way `spawn` runs an agent, through an interactive login shell in tmux's `default-shell`, so your PATH and aliases apply. The first word after `--` is the program, one plain word such as `npm`; every later word reaches it verbatim. For pipes or other shell syntax, run `sh -c '...'`.
 
 Names are one word of letters, digits, `-`, `_` and `.`, unique across tmux. `task start` with a name that is already running the same command in the same folder reuses it and prints `(already running)`; if that task has exited, it runs it again. The same name with a different command or folder fails and shows what the existing task runs, where and who started it. `task start` returns at once and prints `<name> <pane> <state>`.
 

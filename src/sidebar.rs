@@ -1,5 +1,7 @@
 //! A narrow, always-on agent list in a pane down the side of a window.
 
+mod tasks;
+
 use crate::agents::{ProcessTable, RawState, ScanContext};
 use crate::commands;
 use crate::index::{self, Agent, Index, Kind, RecentEvent, State, WindowView};
@@ -440,6 +442,8 @@ pub(crate) struct Sidebar {
     pressed_at: u64,
     /// The last key was the first `g` of `gg`.
     pending_g: bool,
+    /// Background tasks below the agents (sidebar only).
+    pub(crate) tasks: tasks::Section,
 }
 
 impl Navigation {
@@ -473,15 +477,25 @@ impl Sidebar {
             .filter(|active| *active != own && self.all_agents.iter().any(|a| a.pane == *active));
         self.in_use = in_use.map(str::to_string);
         let steering = window.is_some_and(|w| w.viewed && w.active_pane == own);
+        let task = window
+            .map(|w| w.active_pane.as_str())
+            .filter(|active| self.task_row(active).is_some());
         let target = if in_use.is_some() {
             in_use
+        } else if task.is_some() {
+            task
         } else if steering && self.steering {
             None
         } else {
             last_agent
         };
         self.steering = steering;
-        let position = target.and_then(|pane| self.agents.iter().position(|a| a.pane == pane));
+        let position = target.and_then(|pane| {
+            self.agents
+                .iter()
+                .position(|a| a.pane == pane)
+                .or_else(|| self.task_row(pane))
+        });
         if position.is_some() {
             self.select(position);
         }
@@ -507,6 +521,7 @@ impl Sidebar {
             Ok(index) => self.apply(index, origin),
             Err(e) => {
                 self.all_agents.clear();
+                self.tasks.clear();
                 self.recent_event = None;
                 self.error = Some(e.to_string());
                 self.rebuild();
@@ -523,6 +538,7 @@ impl Sidebar {
             .filter(|a| !self.closed.contains(&a.pane))
             .collect();
         self.recent_event = index.recent_event;
+        self.tasks.apply(index.tasks);
         self.error = None;
         self.restart_failure = None;
         self.navigation.order = index.order;
@@ -555,7 +571,12 @@ impl Sidebar {
             .navigation
             .pane
             .as_ref()
-            .and_then(|pane| self.agents.iter().position(|a| &a.pane == pane))
+            .and_then(|pane| {
+                self.agents
+                    .iter()
+                    .position(|a| &a.pane == pane)
+                    .or_else(|| self.task_row(pane))
+            })
             // Search results put the best match on the top row.
             .or_else(|| {
                 [State::Blocked, State::Done]
@@ -563,7 +584,7 @@ impl Sidebar {
                     .filter(|_| !self.opens_on_top && self.navigation.query.is_empty())
                     .find_map(|state| self.agents.iter().position(|a| a.state == state))
             })
-            .or_else(|| (!self.agents.is_empty()).then_some(0));
+            .or_else(|| (self.row_count() > 0).then_some(0));
         self.select(selected);
         if self
             .editing
@@ -577,7 +598,10 @@ impl Sidebar {
 
     fn select(&mut self, selected: Option<usize>) {
         self.list.select(selected);
-        self.navigation.pane = self.selected().map(|a| a.pane.clone());
+        self.navigation.pane = self
+            .selected()
+            .map(|a| a.pane.clone())
+            .or_else(|| self.selected_task().map(|t| t.pane.clone()));
     }
 
     pub(crate) fn selected(&self) -> Option<&Agent> {
@@ -756,10 +780,10 @@ impl Sidebar {
     }
 
     fn step(&mut self, delta: isize) {
-        if self.agents.is_empty() {
+        if self.row_count() == 0 {
             return;
         }
-        let len = self.agents.len() as isize;
+        let len = self.row_count() as isize;
         let i = self.list.selected().unwrap_or(0) as isize;
         self.select(Some((i + delta).rem_euclid(len) as usize));
     }
@@ -938,6 +962,7 @@ impl Sidebar {
                 && !self.typing_query()
                 && self.auto_name.key(key))
             || self.new_agent_key(key, origin)
+            || self.task_key(key, origin)
             || self.kill_key(key, origin)
             || self.restart_key(key);
         self.pending_g &= !consumed;
@@ -998,9 +1023,9 @@ impl Sidebar {
             }
             KeyCode::Char('j') | KeyCode::Down => self.step(1),
             KeyCode::Char('k') | KeyCode::Up => self.step(-1),
-            KeyCode::Char('g') if pending_g => self.select((!self.agents.is_empty()).then_some(0)),
+            KeyCode::Char('g') if pending_g => self.select((self.row_count() > 0).then_some(0)),
             KeyCode::Char('g') => self.pending_g = true,
-            KeyCode::Char('G') => self.select(self.agents.len().checked_sub(1)),
+            KeyCode::Char('G') => self.select(self.row_count().checked_sub(1)),
             KeyCode::Char('n') => self.next_match(1),
             KeyCode::Char('N') => self.next_match(-1),
             KeyCode::Char('d') => {
@@ -1101,6 +1126,9 @@ fn carry_command(
 
 /// The tmux command for a preview or Enter jump, or None when the client is already there.
 fn switch_command(sidebar: &Sidebar, own: &str, focus: bool) -> Result<Option<Vec<String>>> {
+    if let Some(task) = sidebar.selected_task() {
+        return switch_to(own, &task.session, &task.window, &task.pane, focus);
+    }
     let Some(agent) = sidebar.selected() else {
         return Ok(None);
     };
@@ -1267,7 +1295,9 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
                 let before = sidebar.navigation.pane.clone();
                 // Enter while typing a search keeps it, so `n` can go on from there.
                 let opens = (key.code == KeyCode::Enter && !jumping) || leaves_sidebar(key);
-                focus = opens && sidebar.editing.is_none() && sidebar.open_selected().is_some();
+                focus = opens
+                    && sidebar.editing.is_none()
+                    && (sidebar.selected_task().is_some() || sidebar.open_selected().is_some());
                 if sidebar.key(key) {
                     return Ok(());
                 }
@@ -1398,7 +1428,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
             sidebar,
             e,
         );
-    } else if sidebar.agents.is_empty() {
+    } else if sidebar.agents.is_empty() && sidebar.tasks.rows().is_empty() {
         let text = if sidebar.all_agents.is_empty() {
             NO_AGENTS
         } else {
@@ -1413,7 +1443,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         );
     } else {
         let selected = sidebar.list.selected();
-        let items = items(
+        let mut items = items(
             &sidebar.agents,
             &sidebar.all_agents,
             selected,
@@ -1422,8 +1452,29 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
             &sidebar.navigation.pattern,
             inner,
         );
-        fill_viewport(&mut sidebar.list, &items, agents_area.height);
-        f.render_stateful_widget(List::new(items), agents_area, &mut sidebar.list);
+        items.extend(tasks::items(
+            sidebar.tasks.rows(),
+            selected.and_then(|row| row.checked_sub(sidebar.agents.len())),
+            sidebar.in_use.as_deref(),
+            inner,
+        ));
+        let mut list_area = agents_area;
+        if sidebar.agents.is_empty() {
+            // Tasks only: the agent message above them.
+            let rows = sidebar.tasks.rows().len() as u16 + 2;
+            let [message_area, tasks_area] =
+                Layout::vertical([Constraint::Min(0), Constraint::Length(rows)]).areas(agents_area);
+            let text = if sidebar.all_agents.is_empty() {
+                NO_AGENTS
+            } else {
+                ["no matching agents", "d changes state · esc clears filter"]
+            };
+            let block = ratatui::widgets::Block::default();
+            message(f, message_area, block, TEXT, &text);
+            list_area = tasks_area;
+        }
+        fill_viewport(&mut sidebar.list, &items, list_area.height);
+        f.render_stateful_widget(List::new(items), list_area, &mut sidebar.list);
     }
 
     let footer = confirmation.map_or_else(
@@ -1433,6 +1484,8 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
                     hints(&[("^j/^k", "browse"), ("^w ^u", "clear")])
                 } else if sidebar.navigation.jump.is_some() {
                     hints(&[("type", "find a row"), ("^w ^u", "clear")])
+                } else if sidebar.tasks.exist() {
+                    hints(&[("c", "new"), ("o", "configure"), ("t", "tasks")])
                 } else {
                     hints(&[("c", "new"), ("o", "configure")])
                 },
@@ -1455,6 +1508,13 @@ pub(crate) fn confirmation_footer(sidebar: &Sidebar, width: usize) -> Option<Vec
                 .new_agent
                 .as_ref()
                 .map(|picker| new_agent_footer(picker, width))
+        })
+        .or_else(|| {
+            sidebar
+                .tasks
+                .stopping
+                .as_ref()
+                .map(|task| tasks::stop_footer(task, width))
         })
 }
 
@@ -1534,6 +1594,9 @@ fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
                     ),
                     colour(state),
                 )
+            }
+            None if sidebar.selected_task().is_some() => {
+                hints(&[("⏎", "open"), ("x", "stop"), ("R", "restart")])
             }
             None => hints(&[("⏎", "jump"), ("x", "kill"), ("?", "keys")]),
         }
@@ -1820,7 +1883,7 @@ mod tests {
         assert_eq!(footer(&sidebar, 8, 100).to_string(), " rename…");
     }
 
-    fn agent(pane: &str, state: State) -> Agent {
+    pub(super) fn agent(pane: &str, state: State) -> Agent {
         Agent {
             name: format!("agent-{pane}"),
             pane: pane.into(),
@@ -1843,7 +1906,7 @@ mod tests {
     }
 
     /// A sidebar showing `agents` in the order given.
-    fn showing(agents: Vec<Agent>) -> Sidebar {
+    pub(super) fn showing(agents: Vec<Agent>) -> Sidebar {
         let mut sidebar = Sidebar {
             navigation: Navigation {
                 order: agents.iter().map(|a| a.pane.clone()).collect(),
@@ -2822,7 +2885,7 @@ mod tests {
         assert!(!rows.iter().any(|row| row.contains("rename error")));
     }
 
-    fn rendered(sidebar: &mut Sidebar) -> String {
+    pub(super) fn rendered(sidebar: &mut Sidebar) -> String {
         use ratatui::{Terminal, backend::TestBackend};
         let mut terminal = Terminal::new(TestBackend::new(38, 20)).unwrap();
         terminal.draw(|frame| draw(frame, sidebar)).unwrap();

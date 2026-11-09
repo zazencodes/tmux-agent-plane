@@ -25,6 +25,9 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("^c", "In lists, same as esc"),
     ("r", "Rename selected agent"),
     ("x", "Confirm kill of agent"),
+    ("t", "Show or hide background tasks"),
+    ("x", "Task row: confirm its stop"),
+    ("R", "Restart selected task"),
     ("c", "New agent in this project"),
     ("o", "Configure"),
     ("tab", "Picker: type to the agent"),
@@ -34,7 +37,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("ctrl-u", "Clear text in an edit"),
     ("bksp", "Delete character in an edit"),
     ("space", "Rename: insert hyphen"),
-    ("enter y", "Kill: confirm (esc cancels)"),
+    ("enter y", "Kill or stop: confirm it"),
     ("1-7", "Configure: choose AI command"),
     ("d", "Configure: turn AI names off"),
 ];
@@ -128,8 +131,15 @@ impl Help {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    pub(crate) fn labels() -> Vec<&'static str> {
+        SHORTCUTS
+            .iter()
+            .flat_map(|(keys, _)| keys.split_whitespace())
+            .collect()
+    }
     #[test]
     fn every_key_handled_by_sidebar_key_has_a_help_entry() {
         // Read the method itself: adding a command without a help entry fails this test.

@@ -1,21 +1,32 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyte==0.8.2"]
+# ///
 """Private background-task proof on an isolated tmux server: no agent CLI or model calls.
 
-Usage: tests/tasks_live.py target/debug/tmux-agent-plane
+Usage: uv run tests/tasks_live.py target/debug/tmux-agent-plane
 
 Starts real long-running commands as tasks and checks list/ports, reuse, clashes, read, crash
 states, restart, stop, that a task running an agent CLI is never an agent, and that a task
 outlives the agent that started it. The sidebar part drives a real sidebar in a PTY.
 """
+import fcntl
 import json
 import os
+import pty
 import re
+import select
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
+import termios
 import time
 from pathlib import Path
+
+import pyte
 
 ROOT = Path(tempfile.mkdtemp(prefix="tap-task-", dir="/tmp"))
 SOURCE = Path(__file__).resolve().parent
@@ -49,6 +60,7 @@ subprocess.run(["cc", "-Wall", "-Wextra", "-Werror", str(SOURCE / "fixtures/side
                 "-o", str(fixture)], check=True)
 (BIN / "pi").symlink_to(fixture)
 RESULTS = {}
+CLIENTS = []
 
 
 def tmux(*args, check=True):
@@ -71,6 +83,10 @@ def eventually(label, predicate, timeout=15):
         if value:
             return value
         time.sleep(0.2)
+    for client in CLIENTS:
+        print(client.text(), client.where(), tmux("list-panes", "-a", "-F",
+              "#{session_name} #{window_id} #{pane_id} #{@agent-plane-sidebar} #{pane_active}"),
+              sep="\n", file=sys.stderr)
     raise AssertionError(f"timed out: {label}")
 
 
@@ -80,6 +96,39 @@ def index():
 
 def task(name):
     return next((t for t in index()["tasks"] if t["name"] == name), None)
+
+
+class Screen(pyte.Screen):
+    def report_device_status(self, mode, **kwargs):
+        pass
+
+
+class Client:
+    """A real attached client in a PTY, decoded with pyte. The sidebar is the left 38 columns."""
+
+    def __init__(self, session):
+        self.screen = Screen(110, 30)
+        self.stream = pyte.ByteStream(self.screen)
+        self.master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 110, 0, 0))
+        self.process = subprocess.Popen([str(WRAPPER), "attach-session", "-t", session], env=ENV,
+                                        stdin=slave, stdout=slave, stderr=slave)
+
+    def text(self):
+        while select.select([self.master], [], [], 0.05)[0]:
+            self.stream.feed(os.read(self.master, 65536))
+        return "\n".join(line[:38] for line in self.screen.display)
+
+    def selected(self):
+        return next((line for line in self.text().splitlines() if line[1:2] == "▌"), "")
+
+    def where(self):
+        rows = tmux("list-clients", "-F", "#{client_pid} #{window_id} #{pane_id}")
+        return next(r.split()[1:] for r in rows.splitlines() if r.split()[0] == str(self.process.pid))
+
+    def key(self, data):
+        os.write(self.master, data)
+        time.sleep(0.4)
 
 
 def check(label, condition):
@@ -192,6 +241,73 @@ try:
     check("unknown task fails loudly", plane("task", "read", "web", check=False).returncode != 0)
     log = (STATE / "daemon.log").read_text()
     check("daemon log has no task faults", "[tasks" not in log and "[scan:" not in log)
+
+    # Sidebar: t shows tasks below the agents; j/k/G preview them, Enter opens, R restarts and
+    # x asks to stop. The plugin's hooks run as they would for a user.
+    subprocess.run(["bash", str(SOURCE.parent / "tmux-agent-plane.tmux")], env=ENV, check=True)
+    plane("spawn", "pi", "--in", "window", "--session", "harness", "--cwd", str(WORK),
+          "--name", "watcher")
+    watcher = eventually("watcher", lambda: next(
+        (a for a in index()["agents"] if a["name"] == "watcher"), None))
+    plane("task", "start", "web2", "--cwd", str(WORK), "--", "python3", "-m", "http.server", "0",
+          "--bind", "127.0.0.1")
+    plane("task", "start", "flaky", "--cwd", str(WORK), "--", "sh", "-c",
+          "echo flaky-$$; sleep 3; exit 2")
+    web2 = eventually("web2 port", lambda: (t := task("web2")) and t["ports"] and t, 15)
+    eventually("flaky exits", lambda: task("flaky")["state"] == "exited")
+    client = Client("harness")
+    CLIENTS.append(client)
+    eventually("client attached", lambda: tmux("list-clients"))
+    plane("toggle-sidebar", eventually("client window", lambda: client.where())[0])
+    eventually("sidebar footer hint", lambda: "t tasks" in client.text())
+    check("sidebar hides tasks until t", "── tasks" not in client.text())
+    client.key(b"t")
+    text = eventually("tasks section", lambda: "── tasks" in (t := client.text()) and t)
+    web_row = next(line for line in text.splitlines() if "web2" in line)
+    flaky_row = next(line for line in text.splitlines() if "flaky" in line)
+    check("sidebar rows show port, exit code and project",
+          f":{web2['ports'][0]}" in web_row and "▸" in web_row and "work" in web_row
+          and "✕" in flaky_row and "exit 2" in flaky_row)
+    check("tasks come after the agents", text.index("── tasks") > text.index("watcher"))
+    client.key(b"G")
+    eventually("G selects the last task", lambda: "web2" in client.selected())
+    eventually("moving onto a task previews its window",
+               lambda: client.where()[0] == web2["window"])
+    check("task footer offers stop and restart", "x stop" in client.text())
+    client.key(b"k")
+    eventually("k selects flaky", lambda: "flaky" in client.selected())
+    flaky = task("flaky")
+    client.key(b"R")
+    eventually("R restarts flaky", lambda: task("flaky")["started_at"] > flaky["started_at"])
+    check("R restarts the selected task", True)
+    client.key(b"\r")
+    eventually("Enter opens the task", lambda: client.where()[1] == flaky["pane"])
+    check("Enter puts the keyboard in the task", True)
+    plane("enter-sidebar", flaky["window"])
+    eventually("back in the sidebar", lambda: client.where()[1] != flaky["pane"])
+    client.key(b"j")
+    eventually("j moves to web2", lambda: "web2" in client.selected())
+    client.key(b"x")
+    eventually("stop asks", lambda: "stop web2" in client.text() and "[Y/n]" in client.text())
+    client.key(b"n")
+    eventually("any other key cancels", lambda: "[Y/n]" not in client.text())
+    time.sleep(1)
+    check("a cancelled stop leaves the task", task("web2") is not None)
+    client.key(b"x")
+    eventually("stop asks again", lambda: "[Y/n]" in client.text())
+    client.key(b"y")
+    eventually("y stops web2", lambda: task("web2") is None)
+    check("the sidebar moves to the next row before stopping",
+          client.where()[0] == flaky["window"] and "flaky" in client.selected())
+    client.key(b"t")
+    eventually("t hides tasks", lambda: "── tasks" not in client.text())
+    check("the hint stays while tasks exist", "t tasks" in client.text())
+    typed = (ROOT / (watcher["pane"] + ".input"))
+    keys = typed.read_bytes().replace(b"\x1b[I", b"").replace(b"\x1b[O", b"") if typed.exists() else b""
+    check("no sidebar key reached an agent", keys == b"")
+    check("still no tracking faults", "⚠" not in tmux("show-option", "-gqv", "@agent_plane_status"))
+    plane("task", "stop", "flaky")
+    client.process.terminate()
     print(json.dumps({"passed": True, "checks": len(RESULTS), "root": str(ROOT)}))
 finally:
     plane("daemon", "stop", check=False)
