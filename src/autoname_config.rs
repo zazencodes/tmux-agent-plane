@@ -19,6 +19,8 @@ pub struct Sidebar {
     pub tasks: bool,
     /// The quota panel below the list; `u` opens the full view either way.
     pub quota: bool,
+    /// The selected agent's family below the list; `p` still shows or hides it in one sidebar.
+    pub family: bool,
 }
 
 impl Default for Sidebar {
@@ -26,6 +28,7 @@ impl Default for Sidebar {
         Self {
             tasks: true,
             quota: false,
+            family: true,
         }
     }
 }
@@ -384,7 +387,9 @@ mod tests {
     #[test]
     fn sidebars_show_tasks_and_hide_the_quota_panel_unless_configured() {
         let config = parse(b"{}").unwrap();
-        assert!(config.sidebar.tasks && !config.sidebar.quota);
+        assert!(config.sidebar.tasks && !config.sidebar.quota && config.sidebar.family);
+        let config = parse(br#"{"sidebar":{"family":false}}"#).unwrap();
+        assert!(!config.sidebar.family && config.sidebar.tasks);
         let config = parse(br#"{"sidebar":{"quota":true}}"#).unwrap();
         assert!(config.sidebar.tasks && config.sidebar.quota);
         let config = parse(br#"{"sidebar":{"tasks":false}}"#).unwrap();

@@ -59,12 +59,14 @@ pub(crate) fn family<'a>(all: &'a [Agent], selected: &'a Agent) -> Family<'a> {
 }
 
 impl Family<'_> {
+    /// No parent, running or ended, and no children.
+    pub(crate) fn alone(&self) -> bool {
+        self.above.is_none() && self.right.is_empty()
+    }
+
     /// Rows the whole drawing takes.
     pub(crate) fn height(&self) -> u16 {
-        let above = u16::from(self.above.is_some());
-        let boxes = 3 * (self.right.len().max(1) as u16);
-        // A lone agent says why it stands alone.
-        above + boxes + u16::from(self.right.is_empty())
+        u16::from(self.above.is_some()) + 3 * (self.right.len().max(1) as u16)
     }
 
     pub(crate) fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -91,14 +93,6 @@ impl Family<'_> {
                 self.left,
                 width >= need(self.left),
             );
-            if y + 3 < bottom {
-                buf.set_string(
-                    x,
-                    y + 3,
-                    truncate("no parent or children", area.width as usize),
-                    OVERLAY,
-                );
-            }
             return;
         }
         let room = area.width.saturating_sub(LINK);
@@ -362,12 +356,18 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_lone_agent_says_so_and_an_ended_parent_is_named() {
+    fn an_ended_parent_is_named_and_only_a_lone_agent_is_alone() {
         let all = family_agents();
         let rows = drawn(&all, "%6", 36, 6);
         assert_eq!(rows[0], "↑ parent ended");
         assert!(rows[2].contains("○ reviewer"));
-        assert_eq!(rows[4], "no parent or children");
+        assert!(rows[4].is_empty());
+        let selected = |pane: &str| all.iter().find(|a| a.pane == pane).unwrap();
+        assert!(!family(&all, selected("%6")).alone());
+        assert!(!family(&all, selected("%5")).alone());
+        let mut solo = all[5].clone();
+        solo.parent_ended = false;
+        assert!(family(std::slice::from_ref(&solo), &solo).alone());
     }
 
     #[test]

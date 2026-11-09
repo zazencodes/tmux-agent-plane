@@ -1002,6 +1002,7 @@ impl Sidebar {
     pub(crate) fn show(&mut self, config: &crate::autoname_config::Sidebar) {
         self.tasks.shown = config.tasks;
         self.quota.pinned = config.quota;
+        self.navigation.family = config.family;
         self.rebuild();
     }
 
@@ -1476,10 +1477,12 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     } else {
         0
     };
+    // An agent with no parent and no children has nothing to draw.
     let family = sidebar
         .selected()
         .filter(|_| sidebar.navigation.family && sidebar.error.is_none())
-        .map(|selected| family::family(&sidebar.all_agents, selected));
+        .map(|selected| family::family(&sidebar.all_agents, selected))
+        .filter(|family| !family.alone());
     // The family takes at most half the height, so the list stays in view.
     let family_height = family.as_ref().map_or(0, |family| {
         (family.height() + 2).min(f.area().height.saturating_sub(quota_height) / 2)
@@ -3064,6 +3067,22 @@ mod tests {
         );
         press(&mut sidebar, KeyCode::Char('p'));
         assert!(!rendered(&mut sidebar).contains(" family "));
+    }
+
+    #[test]
+    fn sidebars_open_with_the_family_panel_and_a_lone_agent_shows_none() {
+        let mut agents = crate::ui::family::tests::family_agents();
+        agents[5].parent_ended = false;
+        let mut sidebar = showing(agents);
+        sidebar.show(&crate::autoname_config::Sidebar::default());
+        sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%2"));
+        assert!(rendered(&mut sidebar).contains(" family "));
+        sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%6"));
+        let screen = rendered(&mut sidebar);
+        assert!(
+            !screen.contains(" family ") && !screen.contains("no parent"),
+            "{screen}"
+        );
     }
 
     #[test]

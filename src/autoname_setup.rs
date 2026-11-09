@@ -139,13 +139,13 @@ impl Setup {
                     self.custom = Some(String::new());
                     self.error = None;
                 }
-                KeyCode::Char(key @ ('t' | 'u')) => {
+                KeyCode::Char(key @ ('t' | 'u' | 'p')) => {
                     // Read afresh to keep whatever another sidebar saved meanwhile.
                     let result = config::read().and_then(|mut config| {
-                        let shown = if key == 't' {
-                            &mut config.sidebar.tasks
-                        } else {
-                            &mut config.sidebar.quota
+                        let shown = match key {
+                            't' => &mut config.sidebar.tasks,
+                            'u' => &mut config.sidebar.quota,
+                            _ => &mut config.sidebar.family,
                         };
                         *shown = !*shown;
                         config::write(&config)?;
@@ -246,6 +246,7 @@ impl Setup {
         let sidebar = &self.config.sidebar;
         lines.push(toggle_line('t', "Background tasks", sidebar.tasks, width));
         lines.push(toggle_line('u', "Quota panel", sidebar.quota, width));
+        lines.push(toggle_line('p', "Family panel", sidebar.family, width));
         lines.push(muted("What every sidebar shows when it opens."));
         lines
     }
