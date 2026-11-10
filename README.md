@@ -37,11 +37,11 @@ Claude Code, Codex and Antigravity use native signals. Add Pi, OpenCode or Grok 
 - **Know what needs you.** The status bar counts agents by state. Off-screen completions and blocked prompts send desktop notifications and a five-second sidebar notice. Off-screen completions stay `done` until you look at them.
 - **A sidebar of agents.** One live list down the left of every window, grouped by session. Browse to preview an agent, then `Enter` to focus it. Open or close the sidebar everywhere with your sidebar key.
 - **Flip through your agents.** Alt + k / j (Option + k / j on macOS) focuses the previous or next agent across sessions, without a prefix. See [Direct agent navigation](#direct-agent-navigation).
-- **Search and peek before you jump.** `prefix + a` opens the agent picker with a live preview; `prefix + f` starts filtering. Search names and tasks with `/`, or fuzzy-filter names, projects and descriptions with `f`.
+- **Search and peek before you jump.** `prefix + a` opens the agent picker with a live preview; `prefix + f` starts filtering. Search names, projects and tasks with `/`, or fuzzy-filter names, projects and descriptions with `f`.
 - **How much is left.** Press `u` in the sidebar to expand plan quota while agents stay visible above it. The CLI and your agents can read it too. See [Quota](#quota).
 - **Agents that know about each other.** The CLI and skill let agents list, read, message, answer, wait for, focus, close and spawn other agents. One agent can coordinate helpers and review their results.
 - **Names you can read.** Rename agents with `r`, name helpers when you spawn them, or enable [optional AI naming](#optional-ai-naming) through `o` → Configure.
-- **See who spawned whom.** Press `g` for the selected agent's parent and children, with their current states.
+- **See who spawned whom.** Press `p` for the selected agent's parent and children, with their current states.
 - **Sessions are projects.** Agents started by hand join a session named after their folder. Create project sessions, launch helpers into them, and move running agents between projects. See [Project sessions](#project-sessions).
 - **Stay in tmux when a session closes.** Closing its last pane switches you to the most recently active remaining session. Closing the final session exits tmux.
 - **Background tasks every agent can see.** Keep dev servers, watchers and tunnels in a shared list with their ports, output and exit status. Tasks outlive their agents and can be restarted after they stop. See [Background tasks](#background-tasks).
@@ -196,8 +196,10 @@ set -g @agent-plane-keys-toggle-key e
 | `Alt + h` / `Alt + l` | Enter the sidebar / leave for the selected agent |
 | `prefix + g` | Turn global keys off or on |
 | `j` / `k`, `↓` / `↑`, `Ctrl-J` / `Ctrl-K` | Select and preview; Ctrl-J/K and arrows also work while editing a filter |
-| `Home` / `G` | First / last row |
-| `/` | Search names and tasks without hiding rows; `Enter` keeps the search |
+| `gg` / `Home` | First agent |
+| `G` | Last agent |
+| `{` / `}` | First agent in the previous / next project |
+| `/` | Search names, projects and tasks without hiding rows; `Enter` keeps the search |
 | `n` / `N` | Next / previous match in a kept search |
 | `f` | Fuzzy-filter names, projects, tasks and blocked details; `/` freezes matches so keys become commands, `f` resumes editing |
 | `d` | Cycle the state filter: All → Blocked → Done → Working → Idle |
@@ -206,7 +208,7 @@ set -g @agent-plane-keys-toggle-key e
 | `r` | Rename the selected agent; `Enter` saves, `Esc` cancels |
 | `x` | Confirm killing an agent or stopping a task; `Enter` or lowercase `y` accepts, other keys cancel |
 | `c` | Start a new agent in the selected agent's project and folder |
-| `g` | Show or hide the selected agent's [graph](#parents) |
+| `p` | Show or hide the selected agent's [graph](#parents) |
 | `t` | Sidebar: show or hide [background tasks](#background-tasks) |
 | `R` | Restart the selected task |
 | `b` | Review agents waiting to be [restored](#restore) after tmux restarted |
@@ -238,9 +240,9 @@ The state filter, text filter and search stay visible above the list. They combi
 
 Press `prefix + a` from any pane. It opens over a dimmed copy of your screen, on the list, grouped by session: each row names its session in a colour of its own, next to the window and pane. The agent you are looking at is selected, including from a sidebar beside it, so you browse from where you are; with no agent in view, the top row is. `j`/`k`, Up/Down or Ctrl-J/Ctrl-K browse, and the screen preview updates inside the popup. Periodic state updates preserve the selected pane. Enter focuses that exact pane in the client that opened the picker, across sessions; `q`, Esc or Ctrl-C closes and leaves your original pane and session selected. Browsing never switches sessions.
 
-Press `/` to search as in the sidebar: the selection and preview move to the next row whose name or task contains your text, and after `Enter`, `n` and `N` go through the matches. Press `f` to filter, or open the picker with `prefix + f` to start there. The filter box appears and letters become text: a case-insensitive fuzzy query across agent names, projects, task titles and blocked details, where each word can match any of them. Stronger matches appear first; Ctrl-J/Ctrl-K or Up/Down browse them. Backspace edits, Ctrl-W deletes a word and Ctrl-U clears. Press `/` to freeze the filter: its matches and selection stay, and your keys are commands again, so `c` or `x` act on the selected match. `f` resumes editing. Enter opens the selected match right away; Esc cancels the edit. A `/` cannot be part of a filter. On the list, Esc or Ctrl-C clears a kept search, then the text and state filters, then closes.
+Press `/` to search as in the sidebar: the selection and preview move to the next row whose name or task contains your text, or the first visible agent in a project whose name matches, and after `Enter`, `n` and `N` go through the matches. Press `f` to filter, or open the picker with `prefix + f` to start there. The filter box appears and letters become text: a case-insensitive fuzzy query across agent names, projects, task titles and blocked details, where each word can match any of them. Stronger matches appear first; Ctrl-J/Ctrl-K or Up/Down browse them. Backspace edits, Ctrl-W deletes a word and Ctrl-U clears. Press `/` to freeze the filter: its matches and selection stay, and your keys are commands again, so `c` or `x` act on the selected match. `f` resumes editing. Enter opens the selected match right away; Esc cancels the edit. A `/` cannot be part of a filter. On the list, Esc or Ctrl-C clears a kept search, then the text and state filters, then closes.
 
-The sidebar's actions work on the selected agent, with the same prompts and checks: `c` new agent, `x` kill, `r` rename, `d` state filter, `g` graph, `o` configure and `?` shortcuts. `c` closes the picker and takes you to the new agent.
+The sidebar's actions work on the selected agent, with the same prompts and checks: `c` new agent, `x` kill, `r` rename, `d` state filter, `p` graph, `o` configure and `?` shortcuts. `c` closes the picker and takes you to the new agent.
 
 Press `Tab` to type to the selected agent without leaving the picker. The preview gets a coloured border and follows the agent live, with its cursor, and every key goes to that agent: Enter, Esc, Ctrl-C and letters included, so you can give it a task or answer a prompt. `Tab` again returns to the menu or search you came from. The agent stays pinned: if it exits or leaves the list, the picker returns to the menu and sends nothing elsewhere. `Tab` itself never reaches the agent, and Shift-Tab does. The preview shows the agent's screen at its own size, so a pane wider than the popup is cut off on the right. Ctrl-J sends a newline. Each newline in a multi-line paste arrives as Enter, so it submits; to paste several lines, press `Enter` from the menu to jump to the agent's pane.
 
@@ -365,7 +367,7 @@ An agent whose conversation already runs again, or whose folder is gone, stays c
 
 ### Parents
 
-An agent started with `spawn` records the agent that spawned it, and helpers that spawn helpers form a tree: press `g` in the sidebar or the popup to see the selected agent's graph. A Codex caller cannot be identified from its shell, so it passes its own name: `spawn ... --parent <its name>`, and `spawn` refuses a Codex caller without it. `spawn` from a plain shell records no parent. The link belongs to the two agents, not their panes: it ends when the spawned agent exits, an agent started later in the same pane has no parent, and once the parent exits `list` shows `ended`. Restored agents get their links back once both have started.
+An agent started with `spawn` records the agent that spawned it, and helpers that spawn helpers form a tree: press `p` in the sidebar or the popup to see the selected agent's graph. A Codex caller cannot be identified from its shell, so it passes its own name: `spawn ... --parent <its name>`, and `spawn` refuses a Codex caller without it. `spawn` from a plain shell records no parent. The link belongs to the two agents, not their panes: it ends when the spawned agent exits, an agent started later in the same pane has no parent, and once the parent exits `list` shows `ended`. Restored agents get their links back once both have started.
 
 ### Agent launch syntax
 

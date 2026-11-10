@@ -5,6 +5,15 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Changed
+
+- Restore `gg` to jump to the first agent and move the graph toggle back to `p` in the sidebar, picker and configuration.
+
+### Added
+
+- Jump to the first agent in the previous or next project with `{` and `}` in the sidebar and picker.
+- Search project names with `/`: each matching project selects its first visible agent, alongside agent-name and task matches.
+
 ## 0.6.1 - 2026-11-09
 
 ### Fixed

@@ -236,6 +236,17 @@ try:
     wait('G', lambda: client.selected() != 'cedar-review')
     client.key(b'\x1b[H')
     wait('Home', lambda: client.selected() == 'cedar-review')
+    client.key(b'}')
+    wait('next project', lambda: client.selected() == 'quartz-build')
+    client.key(b'}')
+    wait('third project', lambda: client.selected() == 'quartz-helper')
+    client.key(b'{')
+    wait('previous project', lambda: client.selected() == 'quartz-build')
+    client.key(b'g')
+    time.sleep(.2)
+    assert client.selected() == 'quartz-build'
+    client.key(b'g')
+    wait('gg', lambda: client.selected() == 'cedar-review')
     # Search appears on / only; its letters are text, and Ctrl-J/K still browse.
     query(client, 'CDRRV', 'cedar-review')
     query(client, 'qrtzbldnativepay', 'quartz-build')
@@ -444,7 +455,7 @@ try:
     for row in rows.values():
         path = ROOT / (row['pane'] + '.input')
         assert not path.exists() or path.read_bytes().replace(b'\x1b[I', b'').replace(b'\x1b[O', b'') == b''
-    print('PASS: prefix a and prefix f; command mode by default; opens on the agent in view, from its pane or a sidebar, else the top row; j/k, Ctrl-J/K and arrows; / search only; empty/no-match Enter; fuzzy name/title/detail and spanning queries; refresh selection; Esc/Ctrl-C/q; group column; help, filter, rename, kill and new from the popup; Tab typing to the pinned agent with exact bytes, cursor and exit; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
+    print('PASS: gg and project jumps; prefix a and prefix f; command mode by default; opens on the agent in view, from its pane or a sidebar, else the top row; j/k, Ctrl-J/K and arrows; / search only; empty/no-match Enter; fuzzy name/title/detail and spanning queries; refresh selection; Esc/Ctrl-C/q; group column; help, filter, rename, kill and new from the popup; Tab typing to the pinned agent with exact bytes, cursor and exit; terminal background; exact originating-client cross-session focus; no leaked agent input', flush=True)
     print('Evidence:', ROOT, flush=True)
 finally:
     for name in SPAWNED:

@@ -621,15 +621,18 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                     spans.push(Span::raw(" ".repeat(pad)));
                 }
             }
+            spans.push(Span::styled(
+                format!("{:<7} {:>4}  ", a.state.as_str(), age(a.state_since)),
+                state_style(a.state),
+            ));
+            spans.extend(marked(
+                &a.session,
+                usize::MAX,
+                search,
+                Style::default().fg(group_colour(&sidebar.all_agents, &a.session)),
+            ));
             spans.extend([
-                Span::styled(
-                    format!("{:<7} {:>4}  ", a.state.as_str(), age(a.state_since)),
-                    state_style(a.state),
-                ),
-                Span::styled(
-                    format!("{:<group_width$} ", a.session),
-                    group_colour(&sidebar.all_agents, &a.session),
-                ),
+                Span::raw(" ".repeat(group_width.saturating_sub(a.session.chars().count()) + 1)),
                 Span::styled(format!("{:<place_width$}  ", place(a)), OVERLAY),
             ]);
             spans.extend(marked(task, usize::MAX, search, task_style));
@@ -1490,6 +1493,49 @@ mod tests {
     }
 
     #[test]
+    fn project_navigation_and_search_select_project_tops_in_the_picker() {
+        let mut app = app();
+        app.sidebar
+            .all_agents
+            .push(agent("helper", "%12", "Review output"));
+        app.sidebar.navigation.order.push("%12".into());
+        app.sidebar.all_agents[0].session = "agent-signals".into();
+        for agent in &mut app.sidebar.all_agents[1..] {
+            agent.session = "tools".into();
+        }
+        app.sidebar.rebuild();
+        let first = app.sidebar.agents[0].pane.clone();
+        let second = app.sidebar.agents[1].pane.clone();
+        let _ = press(&mut app, KeyCode::Char('}'));
+        assert_eq!(app.sidebar.selected().unwrap().pane, second);
+        let _ = press(&mut app, KeyCode::Char('{'));
+        assert_eq!(app.sidebar.selected().unwrap().pane, first);
+        let _ = press(&mut app, KeyCode::Char('j'));
+        let _ = press(&mut app, KeyCode::Char('g'));
+        assert_ne!(app.sidebar.selected().unwrap().pane, first);
+        let _ = press(&mut app, KeyCode::Char('g'));
+        assert_eq!(app.sidebar.selected().unwrap().pane, first);
+        let _ = press(&mut app, KeyCode::Char('/'));
+        for c in "tools".chars() {
+            let _ = press(&mut app, KeyCode::Char(c));
+        }
+        assert_eq!(app.sidebar.selected().unwrap().pane, second);
+        assert!(press(&mut app, KeyCode::Enter).is_continue());
+        let _ = press(&mut app, KeyCode::Char('n'));
+        assert_eq!(app.sidebar.selected().unwrap().pane, second);
+        let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let highlighted = buffer
+            .content
+            .iter()
+            .filter(|cell| cell.bg == SEARCH_MATCH.bg.unwrap())
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert_eq!(highlighted, "toolstools");
+    }
+
+    #[test]
     fn every_search_match_lights_up_as_it_is_typed() {
         let mut app = app();
         let _ = press(&mut app, KeyCode::Char('/'));
@@ -1605,7 +1651,7 @@ mod tests {
     }
 
     #[test]
-    fn g_shows_the_selected_agents_family_in_place_of_the_preview() {
+    fn p_shows_the_selected_agents_family_in_place_of_the_preview() {
         let mut app = App::new("client");
         app.sidebar.all_agents = crate::ui::family::tests::family_agents();
         app.sidebar.navigation.order = app
@@ -1618,7 +1664,7 @@ mod tests {
         while app.sidebar.selected().unwrap().pane != "%4" {
             assert!(press(&mut app, KeyCode::Char('j')).is_continue());
         }
-        assert!(press(&mut app, KeyCode::Char('g')).is_continue());
+        assert!(press(&mut app, KeyCode::Char('p')).is_continue());
         let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let rows: Vec<String> = terminal
@@ -1637,7 +1683,7 @@ mod tests {
             row.contains("✓ api-review 0s │───│ ◆ api-tests 0s │"),
             "{shown}"
         );
-        assert!(press(&mut app, KeyCode::Char('g')).is_continue());
+        assert!(press(&mut app, KeyCode::Char('p')).is_continue());
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let hidden: String = terminal
             .backend()

@@ -7,6 +7,7 @@
 
 uv run tests/sidebar_navigation_live.py target/debug/tmux-agent-plane
 uv run tests/sidebar_navigation_live.py target/debug/tmux-agent-plane --search-only
+uv run tests/sidebar_navigation_live.py target/debug/tmux-agent-plane --projects-only
 uv run tests/sidebar_navigation_live.py target/debug/tmux-agent-plane --bold-only
 PTY decoding asserts UI only. Agent state comes exclusively from native fixtures/index.
 Filter and search editing pause preview; / freezes the filter and previews; Enter opens.
@@ -230,6 +231,51 @@ def previewed(client, name):
         return (context[1] == target and context[2] == agent(name)["window"] and
                 client.selected() == name)
     wait("preview " + name, arrived)
+
+
+def assert_project_navigation(client):
+    names = shown_names(client)
+    rows = {a["name"]: a for a in index()["agents"]}
+    tops = []
+    for name in names:
+        if not any(rows[top]["session"] == rows[name]["session"] for top in tops):
+            tops.append(name)
+    assert len(tops) == 2, (tops, names)
+    client.key(b"gg")
+    wait("gg selects first agent", lambda: client.selected() == names[0])
+    client.key(b"}")
+    wait("next project top", lambda: client.selected() == tops[1])
+    previewed(client, tops[1])
+    client.key(b"}")
+    time.sleep(.2)
+    assert client.selected() == tops[1]
+    client.key(b"{")
+    wait("previous project top", lambda: client.selected() == tops[0])
+    previewed(client, tops[0])
+    client.key(b"{")
+    time.sleep(.2)
+    assert client.selected() == tops[0]
+    # A project name does not occur in these agents' names or descriptions.
+    client.key(b"/ScRaTcH")
+    wait("project search selects its first agent", lambda:
+         client.selected() == tops[1] and "/ ScRaTcH▏" in client.text())
+    assert shown_names(client) == names
+    client.key(b"\r")
+    wait("project search retained", lambda: "▏" not in client.text() and "/ ScRaTcH" in client.text())
+    for key in (b"n", b"N"):
+        client.key(key)
+        time.sleep(.2)
+        assert client.selected() == tops[1], "project matches once, on its first agent"
+    client.key(b"\x1b")
+    wait("project search cleared", lambda: "/ search" in client.text())
+    client.key(b"j")
+    wait("inside project", lambda: client.selected() != tops[1])
+    client.key(b"g")
+    time.sleep(.2)
+    assert client.selected() != names[0], "one g waits for the second"
+    client.key(b"g")
+    wait("second g jumps", lambda: client.selected() == names[0])
+    return {"gg": True, "project_jumps": True, "project_search_once_per_project": True}
 
 
 def assert_vim_search(client):
@@ -1081,7 +1127,13 @@ try:
     plane("toggle-sidebar", agent("nav-work")["window"])
     wait("sidebar controls", lambda: "d all" in client.text())
     selected(client, "nav-work")  # the agent it was opened from
-    vim_results = assert_vim_search(client)
+    project_results = assert_project_navigation(client)
+    if "--projects-only" in sys.argv[2:]:
+        RESULTS = {"passed": True, **project_results}
+        sys.exit(0)
+    select_row(client, "nav-work")
+    previewed(client, "nav-work")
+    vim_results = {**assert_vim_search(client), **project_results}
     selected(client, "nav-work")
     fuzzy_results = {**assert_fuzzy_search(client), **vim_results}
     if "--search-only" in sys.argv[2:]:

@@ -19,7 +19,8 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
         "Move",
         &[
             ("j k ↑ ↓", "Select and preview"),
-            ("home G", "First / last agent"),
+            ("gg home G", "First / last agent"),
+            ("{ }", "Previous / next project"),
             ("enter l →", "Go to the selected row"),
         ],
     ),
@@ -45,7 +46,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
     (
         "Show",
         &[
-            ("g", "Graph: who spawned whom"),
+            ("p", "Graph: who spawned whom"),
             ("t", "Background tasks"),
             ("u", "Sidebar: expand quota"),
             ("b", "Agents to restore"),
@@ -260,7 +261,10 @@ pub(crate) mod tests {
         let labels = labels();
         for token in source.split("KeyCode::").skip(1) {
             let label = if let Some(value) = token.strip_prefix("Char('") {
-                value.chars().next().unwrap().to_string()
+                match value.chars().next().unwrap() {
+                    'g' => "gg".into(),
+                    c => c.to_string(),
+                }
             } else {
                 let name: String = token
                     .chars()

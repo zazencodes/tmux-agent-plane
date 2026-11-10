@@ -498,7 +498,7 @@ mod tests {
         sidebar.rebuild();
         sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%2"));
         key(&mut sidebar, KeyCode::Char('t'));
-        key(&mut sidebar, KeyCode::Char('g'));
+        key(&mut sidebar, KeyCode::Char('p'));
         let screen = rendered(&mut sidebar);
         let family = screen.find(" graph ").expect(&screen);
         let tasks = screen.find("── tasks").expect(&screen);
@@ -524,7 +524,7 @@ mod tests {
         sidebar.rebuild();
         sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%2"));
         key(&mut sidebar, KeyCode::Char('t'));
-        key(&mut sidebar, KeyCode::Char('g'));
+        key(&mut sidebar, KeyCode::Char('p'));
         let u = KeyEvent::from(KeyCode::Char('u'));
         assert!(sidebar.quota_key(u));
         let screen = rendered(&mut sidebar);

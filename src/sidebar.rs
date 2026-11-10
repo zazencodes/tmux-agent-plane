@@ -211,8 +211,10 @@ pub(crate) struct Navigation {
     /// The search while it is being typed.
     pub(crate) jump: Option<SearchEdit>,
     pub(crate) order: Vec<String>,
-    /// `g`: the selected agent's family, drawn below the list or in place of the preview.
+    /// `p`: the selected agent's family, drawn below the list or in place of the preview.
     pub(crate) family: bool,
+    /// The first `g` of a `gg` jump. Any other command cancels it.
+    first_g: bool,
 }
 
 /// What Esc restores: the text and selection from before the edit.
@@ -225,12 +227,6 @@ pub(crate) struct SearchEdit {
 fn cancels(key: KeyEvent) -> bool {
     key.code == KeyCode::Esc
         || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
-}
-
-/// Whether `/` finds this row: the text shown on it.
-fn jump_matches(agent: &Agent, pattern: &str) -> bool {
-    !search_matches(&agent.name, pattern).is_empty()
-        || !search_matches(task(agent).0, pattern).is_empty()
 }
 
 pub(crate) struct Rename {
@@ -714,8 +710,7 @@ impl Sidebar {
             }
             KeyCode::Enter => {
                 self.navigation.jump = None;
-                let pattern = &self.navigation.pattern;
-                if !self.agents.iter().any(|a| jump_matches(a, pattern)) {
+                if !(0..self.agents.len()).any(|row| self.jump_matches(row)) {
                     self.navigation.pattern.clear();
                 }
                 return;
@@ -738,15 +733,47 @@ impl Sidebar {
         if self.navigation.pattern.is_empty() || self.agents.is_empty() {
             return;
         }
-        let pattern = &self.navigation.pattern;
         let len = self.agents.len() as isize;
         let from = self.list.selected().unwrap_or(0) as isize;
         let found = (1..=len)
             .map(|step| (from + delta * step).rem_euclid(len) as usize)
-            .find(|row| jump_matches(&self.agents[*row], pattern));
+            .find(|row| self.jump_matches(*row));
         match found {
             Some(row) => self.select(Some(row)),
             None => self.notice = Some("no match".into()),
+        }
+    }
+
+    /// A project heading contributes its first visible agent, alongside name/task matches.
+    fn jump_matches(&self, row: usize) -> bool {
+        let agent = &self.agents[row];
+        let pattern = &self.navigation.pattern;
+        !search_matches(&agent.name, pattern).is_empty()
+            || !search_matches(task(agent).0, pattern).is_empty()
+            || (self.project_start(row) && !search_matches(&agent.session, pattern).is_empty())
+    }
+
+    fn project_start(&self, row: usize) -> bool {
+        !self.agents[..row]
+            .iter()
+            .any(|agent| agent.session == self.agents[row].session)
+    }
+
+    /// Skip to the first agent of the adjacent visible project, stopping at either end.
+    fn step_project(&mut self, forward: bool) {
+        let Some(from) = self.list.selected() else {
+            return;
+        };
+        let current = self.agents.get(from).map(|agent| &agent.session);
+        let mut starts = (0..self.agents.len())
+            .filter(|row| self.project_start(*row) && Some(&self.agents[*row].session) != current);
+        let target = if forward {
+            starts.find(|row| *row > from)
+        } else {
+            starts.rev().find(|row| *row < from)
+        };
+        if let Some(row) = target {
+            self.select(Some(row));
         }
     }
 
@@ -973,6 +1000,9 @@ impl Sidebar {
     /// Help, setup, new agent and kill, in priority order. True when one consumed
     /// the key.
     pub(crate) fn action_key(&mut self, key: KeyEvent, origin: Origin<'_>) -> bool {
+        if key.code != KeyCode::Char('g') || !key.modifiers.is_empty() {
+            self.navigation.first_g = false;
+        }
         // The restore view consumes every key while it is open.
         let consumed = self.restore_key(key, origin)
             || self.help_key(key)
@@ -991,6 +1021,9 @@ impl Sidebar {
             && matches!(origin, Origin::Sidebar(_))
         {
             self.show(&saved);
+        }
+        if consumed {
+            self.navigation.first_g = false;
         }
         consumed
     }
@@ -1012,7 +1045,11 @@ impl Sidebar {
             && self.killing.is_none()
             && self.tasks.stopping.is_none()
             && !self.restore.is_open();
-        !self.help.open && self.quota.key(key, can_open)
+        let consumed = !self.help.open && self.quota.key(key, can_open);
+        if consumed {
+            self.navigation.first_g = false;
+        }
+        consumed
     }
 
     /// With the daemon down the list has no rows, so Enter has nothing else to open.
@@ -1042,6 +1079,7 @@ impl Sidebar {
     }
 
     pub(crate) fn key(&mut self, key: KeyEvent) -> bool {
+        let first_g = std::mem::take(&mut self.navigation.first_g);
         if self.help_key(key) {
             return false;
         }
@@ -1079,7 +1117,16 @@ impl Sidebar {
             }
             KeyCode::Char('f') => self.start_search(),
             KeyCode::Char('/') => self.start_jump(),
-            KeyCode::Char('g') => self.navigation.family = !self.navigation.family,
+            KeyCode::Char('g') if key.modifiers.is_empty() => {
+                if first_g {
+                    self.select((!self.agents.is_empty()).then_some(0));
+                } else {
+                    self.navigation.first_g = true;
+                }
+            }
+            KeyCode::Char('{') => self.step_project(false),
+            KeyCode::Char('}') => self.step_project(true),
+            KeyCode::Char('p') => self.navigation.family = !self.navigation.family,
             // The search first, then every filter, back to the whole list.
             _ if cancels(key) && !self.navigation.pattern.is_empty() => {
                 self.navigation.pattern.clear()
@@ -1793,13 +1840,15 @@ fn items<'a>(
                 session = Some(&a.session);
                 let name = truncate(&a.session, width.saturating_sub(4));
                 let rule = "─".repeat(width.saturating_sub(name.chars().count() + 3));
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!(" {name} "),
-                        Style::default().fg(group_colour(all, &a.session)).bold(),
-                    ),
-                    Span::styled(rule, SURFACE2),
-                ]));
+                let mut heading = vec![Span::raw(" ")];
+                heading.extend(marked(
+                    &a.session,
+                    width.saturating_sub(4),
+                    search,
+                    Style::default().fg(group_colour(all, &a.session)).bold(),
+                ));
+                heading.push(Span::styled(format!(" {rule}"), SURFACE2));
+                lines.push(Line::from(heading));
             }
             let is_selected = selected == Some(i);
             let renaming = editing.filter(|_| is_selected);
@@ -2234,6 +2283,115 @@ mod tests {
     }
 
     #[test]
+    fn gg_needs_two_consecutive_keys_and_leaves_the_graph_alone() {
+        let mut sidebar = searchable();
+        sidebar.select(Some(3));
+        let graph = sidebar.navigation.family;
+        press(&mut sidebar, KeyCode::Char('g'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%4");
+        press(&mut sidebar, KeyCode::Char('j'));
+        press(&mut sidebar, KeyCode::Char('j'));
+        press(&mut sidebar, KeyCode::Char('g'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
+        sidebar.rebuild(); // An index refresh keeps the pending g.
+        press(&mut sidebar, KeyCode::Char('g'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        assert_eq!(sidebar.navigation.family, graph);
+        // Actions that consume their own keys also interrupt the sequence.
+        sidebar.select(Some(3));
+        press(&mut sidebar, KeyCode::Char('g'));
+        assert!(sidebar.action_key(KeyEvent::from(KeyCode::Char('c')), Origin::Popup("client")));
+        assert!(sidebar.action_key(KeyEvent::from(KeyCode::Esc), Origin::Popup("client")));
+        press(&mut sidebar, KeyCode::Char('g'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%4");
+        press(&mut sidebar, KeyCode::Char('g'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        let mut empty = showing(vec![]);
+        press(&mut empty, KeyCode::Char('g'));
+        press(&mut empty, KeyCode::Char('g'));
+        assert!(empty.selected().is_none());
+    }
+
+    fn projects() -> Sidebar {
+        let mut agents: Vec<_> = (1..=6)
+            .map(|i| agent(&format!("%{i}"), State::Idle))
+            .collect();
+        for (agent, project) in agents.iter_mut().zip([
+            "agent-signals",
+            "agent-signals",
+            "agent-tools",
+            "agent-tools",
+            "work",
+            "work",
+        ]) {
+            agent.session = project.into();
+            agent.name = format!("worker-{}", agent.pane);
+        }
+        showing(agents)
+    }
+
+    #[test]
+    fn braces_skip_to_adjacent_project_tops_and_stop_at_the_edges() {
+        let mut sidebar = projects();
+        sidebar.select(Some(1));
+        for (key, pane) in [
+            ('}', "%3"),
+            ('}', "%5"),
+            ('}', "%5"),
+            ('{', "%3"),
+            ('{', "%1"),
+            ('{', "%1"),
+        ] {
+            press(&mut sidebar, KeyCode::Char(key));
+            assert_eq!(sidebar.selected().unwrap().pane, pane);
+        }
+        sidebar.select(Some(3));
+        press(&mut sidebar, KeyCode::Char('{'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        // The project top is the first agent that survives the current filters.
+        sidebar.all_agents[1].state = State::Blocked;
+        sidebar.all_agents[3].state = State::Blocked;
+        sidebar.navigation.filter = Some(State::Blocked);
+        sidebar.rebuild();
+        press(&mut sidebar, KeyCode::Char('}'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%4");
+        press(&mut sidebar, KeyCode::Char('{'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
+        let mut empty = showing(vec![]);
+        for c in ['{', '}'] {
+            press(&mut empty, KeyCode::Char(c));
+            assert!(empty.selected().is_none());
+        }
+    }
+
+    #[test]
+    fn project_search_cycles_project_tops_and_agent_matches_together() {
+        let mut sidebar = projects();
+        sidebar.all_agents[3].title = "review agent integration".into();
+        sidebar.rebuild();
+        sidebar.select(Some(5));
+        type_jump(&mut sidebar, "AgEnT");
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        press(&mut sidebar, KeyCode::Enter);
+        for pane in ["%3", "%4", "%1"] {
+            press(&mut sidebar, KeyCode::Char('n'));
+            assert_eq!(sidebar.selected().unwrap().pane, pane);
+        }
+        press(&mut sidebar, KeyCode::Char('N'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%4");
+        press(&mut sidebar, KeyCode::Esc);
+        sidebar.all_agents[1].state = State::Blocked;
+        sidebar.navigation.filter = Some(State::Blocked);
+        sidebar.rebuild();
+        type_jump(&mut sidebar, "signals");
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
+        press(&mut sidebar, KeyCode::Enter);
+        assert_eq!(sidebar.navigation.pattern, "signals");
+        press(&mut sidebar, KeyCode::Char('n'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
+    }
+
+    #[test]
     fn filters_compose_with_query_and_never_change_on_refresh() {
         let mut sidebar = showing(vec![
             agent("%1", State::Working),
@@ -2567,12 +2725,16 @@ mod tests {
         type_jump(&mut sidebar, "cEd");
         assert_eq!(sidebar.selected().unwrap().pane, "%2");
         assert_eq!(sidebar.agents.len(), 4);
-        // Project names are not searched.
+        // Project names select their first visible agent.
         assert!(sidebar.agents.iter().all(|a| a.session == "work"));
         press(&mut sidebar, KeyCode::Esc);
         type_jump(&mut sidebar, "work");
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
-        assert_eq!(sidebar.notice.as_deref(), Some("no match"));
+        assert!(sidebar.notice.is_none());
+        press(&mut sidebar, KeyCode::Enter);
+        assert_eq!(sidebar.navigation.pattern, "work");
+        press(&mut sidebar, KeyCode::Char('n'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
     }
 
     #[test]
@@ -3059,11 +3221,11 @@ mod tests {
     }
 
     #[test]
-    fn g_draws_the_selected_agents_family_below_the_list() {
+    fn p_draws_the_selected_agents_family_below_the_list() {
         let mut sidebar = showing(crate::ui::family::tests::family_agents());
         sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%2"));
         assert!(!rendered(&mut sidebar).contains(" graph "));
-        press(&mut sidebar, KeyCode::Char('g'));
+        press(&mut sidebar, KeyCode::Char('p'));
         let screen = rendered(&mut sidebar);
         let rows: Vec<&str> = screen.lines().collect();
         let top = rows
@@ -3079,7 +3241,7 @@ mod tests {
             rows[..top].iter().any(|r| r.contains("hero-copy")),
             "{screen}"
         );
-        press(&mut sidebar, KeyCode::Char('g'));
+        press(&mut sidebar, KeyCode::Char('p'));
         assert!(!rendered(&mut sidebar).contains(" graph "));
     }
 
