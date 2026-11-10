@@ -464,7 +464,7 @@ mod tests {
         key(&mut sidebar, KeyCode::Char('t'));
         key(&mut sidebar, KeyCode::Char('p'));
         let screen = rendered(&mut sidebar);
-        let family = screen.find(" family ").expect(&screen);
+        let family = screen.find(" graph ").expect(&screen);
         let tasks = screen.find("── tasks").expect(&screen);
         assert!(family < tasks, "{screen}");
         assert!(

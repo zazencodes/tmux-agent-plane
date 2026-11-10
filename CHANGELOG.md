@@ -22,13 +22,14 @@ before 1.0, a breaking change bumps the minor version.
 - Press `prefix + g` to turn the global keys off when a program needs them, and again to turn them back on. While they are off, every one of them reaches the pane as usual and the status bar shows `keys off · prefix g`, as does the bottom left of the sidebar and the agent picker. Start with them off with `set -g @agent-plane-keys off`, and choose the toggle with `@agent-plane-keys-toggle-key`
 - The global key options take several keys each, separated by spaces, such as `set -g @agent-plane-sidebar-in-key 'M-h S-Left'`; all of them turn off together
 - `l` and → open the selected agent in the sidebar and the agent picker, like `Enter`
-- Press `p` in the sidebar or the agent picker to see the selected agent's family as a diagram: its parent in a box on the left, the agents that parent spawned down the right, joined by lines that are dashed while a child works and red while it is blocked, with the selected agent lit. It follows the selection, in a panel below the sidebar's list and in place of the picker's preview. Sidebars show it by default, and only for an agent with a parent or children; `o`, then `p` turns that off
+- Press `p` in the sidebar or the agent picker to see the selected agent's graph: its parent in a box on the left, the agents that parent spawned down the right, joined by lines that are dashed while a child works and red while it is blocked, with the selected agent lit. It follows the selection, in a panel below the sidebar's list and in place of the picker's preview. Sidebars show it by default, and only for an agent with a parent or children; `o`, then `p` turns that off
 - Codex agents record themselves as the parent of the agents they spawn with `spawn ... --parent <their name>`, which `spawn` requires from Codex
 
 ### Changed
 
+- The parent/child diagram is called Graph in configuration, panel headings and help
 - Closing a session switches you to the most recently active remaining session, with or without the sidebar; closing the final session exits tmux
-- Shown background tasks stay at the bottom of the sidebar, below the family graph, while the agent list scrolls
+- Shown background tasks stay at the bottom of the sidebar, below the graph, while the agent list scrolls
 
 - A parent link now belongs to the agents, not their panes: it ends when the spawned agent exits, so an agent started later in the same pane no longer inherits it, and `list` shows `ended` once the parent has exited. `spawn` from a plain shell records no parent
 - `?` in the sidebar and agent picker is shorter: your tmux keys for moving between agents and in and out of the sidebar, as you have them bound, then one line per key under Move, Find, Act and Show. Keys for confirming and editing text stay in the footer while you use them

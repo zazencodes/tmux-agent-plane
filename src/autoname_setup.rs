@@ -246,7 +246,7 @@ impl Setup {
         let sidebar = &self.config.sidebar;
         lines.push(toggle_line('t', "Background tasks", sidebar.tasks, width));
         lines.push(toggle_line('u', "Quota panel", sidebar.quota, width));
-        lines.push(toggle_line('p', "Family panel", sidebar.family, width));
+        lines.push(toggle_line('p', "Graph", sidebar.family, width));
         lines.push(muted("What every sidebar shows when it opens."));
         lines
     }

@@ -692,7 +692,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
         ),
         (None, Some(selected)) if app.sidebar.navigation.family => {
             let family = family::family(&app.sidebar.all_agents, selected);
-            let block = panel(Line::from(" family "));
+            let block = panel(Line::from(" graph "));
             let inner = block.inner(preview_area).inner(Margin::new(1, 0));
             f.render_widget(block, preview_area);
             family.render(inner, f.buffer_mut());
@@ -1616,7 +1616,7 @@ mod tests {
             .map(|row| row.iter().map(|c| c.symbol()).collect())
             .collect();
         let shown = rows.join("\n");
-        assert!(shown.contains(" family "), "{shown}");
+        assert!(shown.contains(" graph "), "{shown}");
         // api-tests is a child: its parent api-review on the left, site-lead above, ages shown.
         assert!(shown.contains("↑ site-lead"), "{shown}");
         let row = rows.iter().find(|r| r.contains("│───│")).expect(&shown);

@@ -1514,7 +1514,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     ])
     .areas(f.area());
     if let Some(family) = &family {
-        let block = panel(Line::from(" family "));
+        let block = panel(Line::from(" graph "));
         let inner = block.inner(family_area);
         f.render_widget(block, family_area);
         family.render(inner, f.buffer_mut());
@@ -3060,13 +3060,13 @@ mod tests {
     fn p_draws_the_selected_agents_family_below_the_list() {
         let mut sidebar = showing(crate::ui::family::tests::family_agents());
         sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%2"));
-        assert!(!rendered(&mut sidebar).contains(" family "));
+        assert!(!rendered(&mut sidebar).contains(" graph "));
         press(&mut sidebar, KeyCode::Char('p'));
         let screen = rendered(&mut sidebar);
         let rows: Vec<&str> = screen.lines().collect();
         let top = rows
             .iter()
-            .position(|r| r.contains(" family "))
+            .position(|r| r.contains(" graph "))
             .expect(&screen);
         assert!(
             rows[top + 2].contains("│ ● site-lead │─┬╌│ ● hero-copy"),
@@ -3078,7 +3078,7 @@ mod tests {
             "{screen}"
         );
         press(&mut sidebar, KeyCode::Char('p'));
-        assert!(!rendered(&mut sidebar).contains(" family "));
+        assert!(!rendered(&mut sidebar).contains(" graph "));
     }
 
     #[test]
@@ -3088,11 +3088,11 @@ mod tests {
         let mut sidebar = showing(agents);
         sidebar.show(&crate::autoname_config::Sidebar::default());
         sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%2"));
-        assert!(rendered(&mut sidebar).contains(" family "));
+        assert!(rendered(&mut sidebar).contains(" graph "));
         sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%6"));
         let screen = rendered(&mut sidebar);
         assert!(
-            !screen.contains(" family ") && !screen.contains("no parent"),
+            !screen.contains(" graph ") && !screen.contains("no parent"),
             "{screen}"
         );
     }
