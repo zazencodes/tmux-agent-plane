@@ -12,6 +12,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- `g` shows or hides the graph in the sidebar and agent picker, and toggles its configuration default. `Home` jumps to the first agent.
+
 - Simplify the README, put Quick start first, update configuration and restore guidance, and credit quota-axi and T3 Code for their inspiration.
 
 ## 0.6.0 - 2026-11-09

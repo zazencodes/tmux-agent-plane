@@ -211,7 +211,7 @@ pub(crate) struct Navigation {
     /// The search while it is being typed.
     pub(crate) jump: Option<SearchEdit>,
     pub(crate) order: Vec<String>,
-    /// `p`: the selected agent's family, drawn below the list or in place of the preview.
+    /// `g`: the selected agent's family, drawn below the list or in place of the preview.
     pub(crate) family: bool,
 }
 
@@ -446,8 +446,6 @@ pub(crate) struct Sidebar {
     in_use: Option<String>,
     /// When a key last reached this sidebar, which proves the keyboard is here.
     pressed_at: u64,
-    /// The last key was the first `g` of `gg`.
-    pending_g: bool,
     /// Background tasks below the agents (sidebar only).
     pub(crate) tasks: tasks::Section,
     /// Agents from before tmux restarted, and `b` (sidebar only).
@@ -988,7 +986,6 @@ impl Sidebar {
             || self.task_key(key, origin)
             || self.kill_key(key, origin)
             || self.restart_key(key);
-        self.pending_g &= !consumed;
         // Only a sidebar takes up its own settings; the picker shows neither.
         if let Some(saved) = self.auto_name.saved_sidebar.take()
             && matches!(origin, Origin::Sidebar(_))
@@ -1061,7 +1058,6 @@ impl Sidebar {
             self.jump_key(key);
             return false;
         }
-        let pending_g = std::mem::take(&mut self.pending_g);
         match key.code {
             KeyCode::Char('q') => return true,
             KeyCode::Char('r') => {
@@ -1072,8 +1068,7 @@ impl Sidebar {
             }
             KeyCode::Char('j') | KeyCode::Down => self.step(1),
             KeyCode::Char('k') | KeyCode::Up => self.step(-1),
-            KeyCode::Char('g') if pending_g => self.select((!self.agents.is_empty()).then_some(0)),
-            KeyCode::Char('g') => self.pending_g = true,
+            KeyCode::Home => self.select((!self.agents.is_empty()).then_some(0)),
             KeyCode::Char('G') => self.select(self.agents.len().checked_sub(1)),
             KeyCode::Char('n') => self.next_match(1),
             KeyCode::Char('N') => self.next_match(-1),
@@ -1084,7 +1079,7 @@ impl Sidebar {
             }
             KeyCode::Char('f') => self.start_search(),
             KeyCode::Char('/') => self.start_jump(),
-            KeyCode::Char('p') => self.navigation.family = !self.navigation.family,
+            KeyCode::Char('g') => self.navigation.family = !self.navigation.family,
             // The search first, then every filter, back to the whole list.
             _ if cancels(key) && !self.navigation.pattern.is_empty() => {
                 self.navigation.pattern.clear()
@@ -2220,39 +2215,21 @@ mod tests {
     }
 
     #[test]
-    fn gg_goes_to_the_top_and_capital_g_to_the_bottom() {
+    fn home_goes_to_the_first_agent() {
         let mut sidebar = showing(vec![
             agent("%1", State::Idle),
             agent("%2", State::Idle),
             agent("%3", State::Idle),
         ]);
-        sidebar.select(Some(1));
-        press(&mut sidebar, KeyCode::Char('G'));
-        assert_eq!(sidebar.navigation.pane.as_deref(), Some("%3"));
-        press(&mut sidebar, KeyCode::Char('g'));
-        assert_eq!(sidebar.navigation.pane.as_deref(), Some("%3"));
-        press(&mut sidebar, KeyCode::Char('g'));
+        sidebar.select(Some(2));
+        press(&mut sidebar, KeyCode::Home);
         assert_eq!(sidebar.navigation.pane.as_deref(), Some("%1"));
-        // Another key between the two is no gg, whether it reaches the list or an action.
-        press(&mut sidebar, KeyCode::Char('G'));
-        press(&mut sidebar, KeyCode::Char('g'));
-        press(&mut sidebar, KeyCode::Char('k'));
-        press(&mut sidebar, KeyCode::Char('g'));
-        assert_eq!(sidebar.navigation.pane.as_deref(), Some("%2"));
-        assert!(sidebar.action_key(KeyEvent::from(KeyCode::Char('?')), Origin::Sidebar("%9")));
-        press(&mut sidebar, KeyCode::Char('q'));
-        press(&mut sidebar, KeyCode::Char('g'));
-        assert_eq!(sidebar.navigation.pane.as_deref(), Some("%2"));
         // In a search, g is text.
         press(&mut sidebar, KeyCode::Char('f'));
         press(&mut sidebar, KeyCode::Char('g'));
-        press(&mut sidebar, KeyCode::Char('g'));
-        assert_eq!(sidebar.navigation.query, "gg");
-        // An empty list has nowhere to go.
+        assert_eq!(sidebar.navigation.query, "g");
         let mut empty = showing(vec![]);
-        for code in [KeyCode::Char('G'), KeyCode::Char('g'), KeyCode::Char('g')] {
-            press(&mut empty, code);
-        }
+        press(&mut empty, KeyCode::Home);
         assert!(empty.selected().is_none());
     }
 
@@ -3082,11 +3059,11 @@ mod tests {
     }
 
     #[test]
-    fn p_draws_the_selected_agents_family_below_the_list() {
+    fn g_draws_the_selected_agents_family_below_the_list() {
         let mut sidebar = showing(crate::ui::family::tests::family_agents());
         sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%2"));
         assert!(!rendered(&mut sidebar).contains(" graph "));
-        press(&mut sidebar, KeyCode::Char('p'));
+        press(&mut sidebar, KeyCode::Char('g'));
         let screen = rendered(&mut sidebar);
         let rows: Vec<&str> = screen.lines().collect();
         let top = rows
@@ -3102,7 +3079,7 @@ mod tests {
             rows[..top].iter().any(|r| r.contains("hero-copy")),
             "{screen}"
         );
-        press(&mut sidebar, KeyCode::Char('p'));
+        press(&mut sidebar, KeyCode::Char('g'));
         assert!(!rendered(&mut sidebar).contains(" graph "));
     }
 

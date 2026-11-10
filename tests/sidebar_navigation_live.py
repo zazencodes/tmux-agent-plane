@@ -1205,14 +1205,11 @@ try:
     wait("back in sidebar", lambda: "d all" in client.text() and client.context()[1] == sidebar_pane(agent("nav-done")["window"]))
     client.key(b"\x1b")
     wait("frozen search cleared", lambda: "f filter" in client.text())
-    # gg and G move like any other key: the selection is previewed.
+    # Home and G move like any other key: the selection is previewed.
     names = shown_names(client)
     client.key(b"G")
     previewed(client, names[-1])
-    client.key(b"g")
-    settle(0.3)
-    assert client.selected() == names[-1]
-    client.key(b"g")
+    client.key(b"\x1b[H")
     previewed(client, names[0])
     # Enter from a search opens at once, ends the search and carries this sidebar, so the new
     # window never shows a stale row.
@@ -1365,7 +1362,7 @@ try:
     RESULTS = {**extended_results, **fuzzy_results, "passed": True, "native_fixtures": len(FIXTURES), "models_used": 0,
         "quick_hop_screens": hop_screens, "idle_commands_in_10s": idle_calls, "lone_sidebar_closes": True,
         "left_windows_restored_without_input": True,
-        "same_window": True, "cross_window_and_session": True, "gg_and_G_preview": True, "Enter_opens_from_search": True,
+        "same_window": True, "cross_window_and_session": True, "home_and_G_preview": True, "Enter_opens_from_search": True,
         "burst_jjj_exact_net_movement": True, "timed_stream_seven_j_exact_net_movement": True,
         "arrow_selection_identity": True, "timed_mixed_text_arrows_backspace_order": True,
         "active_pane_client_flag": True, "search_edit_and_arrows_stay_local_until_frozen": True,

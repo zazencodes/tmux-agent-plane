@@ -234,8 +234,8 @@ try:
     assert browse['k'] == browse['ctrl-k'] == browse['up'] == 'cedar-review', browse
     client.key(b'G')
     wait('G', lambda: client.selected() != 'cedar-review')
-    client.key(b'gg')
-    wait('gg', lambda: client.selected() == 'cedar-review')
+    client.key(b'\x1b[H')
+    wait('Home', lambda: client.selected() == 'cedar-review')
     # Search appears on / only; its letters are text, and Ctrl-J/K still browse.
     query(client, 'CDRRV', 'cedar-review')
     query(client, 'qrtzbldnativepay', 'quartz-build')

@@ -19,7 +19,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
         "Move",
         &[
             ("j k ↑ ↓", "Select and preview"),
-            ("gg G", "First / last agent"),
+            ("home G", "First / last agent"),
             ("enter l →", "Go to the selected row"),
         ],
     ),
@@ -45,7 +45,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
     (
         "Show",
         &[
-            ("p", "Graph: who spawned whom"),
+            ("g", "Graph: who spawned whom"),
             ("t", "Background tasks"),
             ("u", "Sidebar: expand quota"),
             ("b", "Agents to restore"),
@@ -244,13 +244,6 @@ pub(crate) mod tests {
             .iter()
             .flat_map(|(_, keys)| keys.iter())
             .flat_map(|(keys, _)| keys.split_whitespace())
-            .flat_map(|label| {
-                if label == "gg" {
-                    vec!["g", label]
-                } else {
-                    vec![label]
-                }
-            })
             .collect()
     }
 

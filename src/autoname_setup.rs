@@ -153,7 +153,7 @@ impl Setup {
                         }
                         8 => KeyCode::Char('t'),
                         9 => KeyCode::Char('u'),
-                        10 => KeyCode::Char('p'),
+                        10 => KeyCode::Char('g'),
                         11..=22 => {
                             let i = self.selected - 11;
                             let kind = ["claude", "codex", "pi", "opencode", "agy", "grok"][i / 2]
@@ -257,7 +257,7 @@ impl Setup {
                     self.custom = Some(String::new());
                     self.error = None;
                 }
-                KeyCode::Char(key @ ('t' | 'u' | 'p')) => {
+                KeyCode::Char(key @ ('t' | 'u' | 'g')) => {
                     // Read afresh to keep whatever another sidebar saved meanwhile.
                     let result = config::read().and_then(|mut config| {
                         let shown = match key {
@@ -394,7 +394,7 @@ impl Setup {
             width.saturating_sub(2),
         ));
         rows.push(toggle_line(
-            'p',
+            'g',
             "Graph",
             self.config.sidebar.family,
             width.saturating_sub(2),

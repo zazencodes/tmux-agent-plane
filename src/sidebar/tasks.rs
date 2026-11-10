@@ -414,13 +414,12 @@ mod tests {
         // Tasks remain reachable one row below the last agent.
         key(&mut sidebar, KeyCode::Char('j'));
         assert_eq!(sidebar.selected_task().unwrap().definition.name, "web-dev");
-        key(&mut sidebar, KeyCode::Char('g'));
-        key(&mut sidebar, KeyCode::Char('g'));
+        key(&mut sidebar, KeyCode::Home);
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
         // With no agents, boundary jumps cannot select a task.
         sidebar.all_agents.clear();
         sidebar.rebuild();
-        for code in [KeyCode::Char('G'), KeyCode::Char('g'), KeyCode::Char('g')] {
+        for code in [KeyCode::Char('G'), KeyCode::Home] {
             key(&mut sidebar, code);
         }
         assert!(sidebar.list.selected().is_none());
@@ -499,7 +498,7 @@ mod tests {
         sidebar.rebuild();
         sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%2"));
         key(&mut sidebar, KeyCode::Char('t'));
-        key(&mut sidebar, KeyCode::Char('p'));
+        key(&mut sidebar, KeyCode::Char('g'));
         let screen = rendered(&mut sidebar);
         let family = screen.find(" graph ").expect(&screen);
         let tasks = screen.find("── tasks").expect(&screen);
@@ -525,7 +524,7 @@ mod tests {
         sidebar.rebuild();
         sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%2"));
         key(&mut sidebar, KeyCode::Char('t'));
-        key(&mut sidebar, KeyCode::Char('p'));
+        key(&mut sidebar, KeyCode::Char('g'));
         let u = KeyEvent::from(KeyCode::Char('u'));
         assert!(sidebar.quota_key(u));
         let screen = rendered(&mut sidebar);

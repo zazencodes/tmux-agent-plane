@@ -1605,7 +1605,7 @@ mod tests {
     }
 
     #[test]
-    fn p_shows_the_selected_agents_family_in_place_of_the_preview() {
+    fn g_shows_the_selected_agents_family_in_place_of_the_preview() {
         let mut app = App::new("client");
         app.sidebar.all_agents = crate::ui::family::tests::family_agents();
         app.sidebar.navigation.order = app
@@ -1618,7 +1618,7 @@ mod tests {
         while app.sidebar.selected().unwrap().pane != "%4" {
             assert!(press(&mut app, KeyCode::Char('j')).is_continue());
         }
-        assert!(press(&mut app, KeyCode::Char('p')).is_continue());
+        assert!(press(&mut app, KeyCode::Char('g')).is_continue());
         let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let rows: Vec<String> = terminal
@@ -1637,6 +1637,16 @@ mod tests {
             row.contains("✓ api-review 0s │───│ ◆ api-tests 0s │"),
             "{shown}"
         );
+        assert!(press(&mut app, KeyCode::Char('g')).is_continue());
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let hidden: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(!hidden.contains(" graph "), "{hidden}");
     }
 
     #[test]

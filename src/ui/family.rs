@@ -1,4 +1,4 @@
-//! `p`: the selected agent's family, drawn as a diagram the sidebar and the picker share. The
+//! `g`: the selected agent's family, drawn as a diagram the sidebar and the picker share. The
 //! parent sits in a box on the left and its children in boxes down the right, joined by lines
 //! that are dashed while a child works and red while it is blocked. The selected agent is lit.
 use crate::index::{Agent, State};
