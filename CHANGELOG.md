@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Fixed
+
+- Configuration shows whether automatic naming is on or off, labels the background command as saved, and selects the naming switch after you save a command.
+
 ### Changed
 
 - Use lowercase `prefix + o` to turn global navigation keys off or on, so you can pass them through to Codex and other programs.

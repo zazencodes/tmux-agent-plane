@@ -256,7 +256,6 @@ try:
     for closing in [b'q', b'x', b'\r', b'j']:
         client.key(b'?')
         wait('help opens', lambda: 'Keyboard shortcuts' in client.text())
-        assert 'Configure' in client.text()
         assert 'o configure' not in client.text()
         client.snapshot('shortcuts-full-' + closing.hex())
         client.key(closing)
@@ -290,30 +289,38 @@ try:
     original_height = tmux('display-message', '-p', '-t', window, '#{window_height}')
     tmux('resize-window', '-t', window, '-y', '10')
     seen_help = ''
-    for page in range(4):
+    for page in range(8):
         client.key(b'?')
         wait('short help page', lambda: 'Keyboard shortcuts' in client.text())
         seen_help += client.text()
         client.snapshot('shortcuts-short-' + str(page))
         client.key(b'q')
         wait('short help close', lambda: 'd all' in client.text())
-    assert 'Move selection' in seen_help and 'Configure: turn AI names off' in seen_help
-    assert 'Configure' in seen_help
+    assert 'Select and preview' in seen_help and 'Configure' in seen_help
     tmux('resize-window', '-t', window, '-y', original_height)
     wait('full height restored', lambda: '? keys' in client.footer())
     RESULTS.update(help_real_keypress=True, help_closing_keys_consumed=True,
                    help_literal_during_edits=True, help_preserves_confirmation=True,
                    help_short_height_all_pages_reachable=True)
+    # Saving a provider is distinct from enabling automatic naming.
     client.key(b'o')
     wait('configure menu', lambda: '5 Antigravity (agy)' in client.text())
     client.key(b'\x1b')
     wait('configure closes', lambda: 'd all' in client.text())
     # The supported agy preset resolves to our private fake binary, never the real CLI.
     client.key(b'o5')
-    wait('disclosure before enable', lambda: '⏎ enable' in client.text() and 'What is sent' in client.text() and 'Model     gemini-3.8-flash' in client.text() and 'Thinking  low' in client.text())
+    wait('disclosure before saving', lambda: 'accept' in client.text() and 'What is sent' in client.text() and 'Model     gemini-3.8-flash' in client.text() and 'Thinking  low' in client.text())
     client.snapshot('agy-consent-38-columns')
     assert not calls()
     client.key(b'\r')
+    wait('provider saved with naming still off', lambda: 'naming off' in client.text() and 'Name agents automatically' in client.text())
+    assert not json.loads(CONFIG.read_text())['auto_name']['enabled']
+    assert not calls()
+    client.snapshot('provider-saved-naming-off')
+    # The switch is selected after saving: one Enter enables naming explicitly.
+    client.key(b'\r')
+    wait('naming enabled', lambda: json.loads(CONFIG.read_text())['auto_name']['enabled'])
+    client.key(b'\x1b')
     wait('default renamed', lambda: by_pane(default)['name'] == 'auto-p' + default[1:])
     assert by_pane(preserved)['name'] == 'keep-name'
     assert by_pane(explicit_default)['name'] == 'pi-999'
@@ -321,11 +328,11 @@ try:
     call = calls()[0]
     assert Path(call['cwd']).resolve() == (STATE / 'auto-name-work').resolve() and call['tmux'] is None and call['pane'] is None and call['stdin'] == ''
     assert set(call['data']) == {'title', 'cwd', 'detail'}
-    RESULTS.update(setup_by_real_keypress=True, agy_preset_fixture_only=True, consent_before_execution=True,
+    RESULTS.update(setup_by_real_keypress=True, agy_preset_fixture_only=True, provider_save_does_not_enable=True, explicit_enable_by_keypress=True,
                    default_renamed=True, explicit_names_preserved=True, detached_no_input=True)
     # The button stays once naming is on: there is always a way back to configuration.
     wait('configure stays after enabling', lambda: 'o configure' in client.text())
-    assert not (set(json.loads(CONFIG.read_text())) - {'auto_name'})
+    assert not (set(json.loads(CONFIG.read_text())) - {'auto_name', 'sidebar', 'defaults'})
     assert 'hide_hint' not in json.loads(CONFIG.read_text())['auto_name']
     RESULTS['configure_always_available'] = True
     # Exercise custom configuration in the actual sidebar as well.
@@ -333,10 +340,12 @@ try:
     wait('custom editor', lambda: 'Custom command' in client.text())
     command = [str(NAMER), '{prompt}']
     client.key(json.dumps(command).encode() + b'\r')
-    wait('custom review', lambda: '⏎ enable' in client.text() and str(NAMER)[:12] in client.text())
+    wait('custom review', lambda: 'accept' in client.text() and str(NAMER)[:12] in client.text())
     client.key(b'\r')
     wait('custom saved', lambda: json.loads(CONFIG.read_text())['auto_name']['command'] == command)
-    RESULTS['custom_setup_by_keypress'] = True
+    assert json.loads(CONFIG.read_text())['auto_name']['enabled'], 'changing provider disabled naming'
+    client.key(b'\x1b')
+    RESULTS.update(custom_setup_by_keypress=True, changing_provider_preserves_enablement=True)
     # Hold the background worker: the daemon must continue updating its index.
     (ROOT / 'namer.hold').touch()
     racing = spawn()
@@ -425,8 +434,9 @@ try:
     client.key(b'\x1b')
     RESULTS['missing_command_visible_tracking_healthy'] = True
     # Explicit disabling is also persisted by the sidebar flow.
-    client.key(b'od')
+    client.key(b'o' + b'j' * 7 + b'\r')
     wait('disabled saved', lambda: not json.loads(CONFIG.read_text())['auto_name']['enabled'])
+    client.key(b'\x1b')
     wait('configure stays after disabling', lambda: 'o configure' in client.text())
     RESULTS['explicit_disable'] = True
     before = len(calls())

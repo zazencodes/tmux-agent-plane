@@ -198,7 +198,7 @@ impl Setup {
                             self.output = Output::Text;
                             self.custom = None;
                             self.error = None;
-                            self.notice = Some("Saved".into());
+                            self.notice = None;
                         }
                         Err(error) => self.error = Some(format!("{error:#}")),
                     }
@@ -228,9 +228,17 @@ impl Setup {
                 })();
                 match result {
                     Ok(config) => {
+                        self.notice = Some(format!(
+                            "Background agent saved · naming {}",
+                            if config.auto_name.enabled {
+                                "on"
+                            } else {
+                                "off"
+                            }
+                        ));
                         self.config = config;
-                        self.notice = Some("Background agent saved".into());
                         self.command = None;
+                        self.selected = 7;
                     }
                     Err(error) => self.error = Some(format!("{error:#}")),
                 }
@@ -248,7 +256,7 @@ impl Setup {
                                 Output::Text
                             };
                             self.error = None;
-                            self.notice = Some("Saved".into());
+                            self.notice = None;
                         }
                         Err(error) => self.error = Some(format!("{error:#}")),
                     }
@@ -363,7 +371,14 @@ impl Setup {
     }
 
     fn menu_lines(&self, width: usize) -> Vec<Line<'static>> {
-        let mut lines = vec![heading("Background agent", width)];
+        let mut lines = vec![heading(
+            if self.config.auto_name.enabled {
+                "Background agent · naming on"
+            } else {
+                "Background agent · naming off"
+            },
+            width,
+        )];
         let mut rows = Vec::new();
         for (choice, label) in CHOICES {
             let current = config::preset(choice).as_ref() == Some(&self.config.auto_name.command);
@@ -445,7 +460,7 @@ fn choice_line(
         Span::styled(label.to_string(), label_style),
     ];
     let status = if current {
-        Span::styled("✓ active", colour(State::Done))
+        Span::styled("✓ saved", colour(State::Done))
     } else if missing {
         Span::styled("not installed", OVERLAY)
     } else {
@@ -638,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn menu_marks_the_active_command_and_missing_clis() {
+    fn menu_distinguishes_the_saved_command_from_naming_and_missing_clis() {
         let mut setup = Setup {
             open: true,
             missing: vec!['2'],
@@ -648,10 +663,15 @@ mod tests {
         setup.config.auto_name.command = config::preset('1').unwrap();
         let text = rendered(&mut setup, 38, 28);
         assert!(text.contains("Background agent"));
-        assert!(text.contains("1 Claude Code") && text.contains("✓ active"));
+        assert!(text.contains("1 Claude Code") && text.contains("✓ saved"));
+        assert!(text.contains("Background agent · naming on"));
         assert!(text.contains("2 Codex") && text.contains("not installed"));
         assert!(text.contains("Name agents automatically") && text.contains("[✓]"));
         assert!(text.contains("claude model:"));
+        setup.config.auto_name.enabled = false;
+        let text = rendered(&mut setup, 38, 28);
+        assert!(text.contains("Background agent · naming off"));
+        assert!(text.contains("✓ saved"));
     }
 
     #[test]
