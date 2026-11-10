@@ -612,6 +612,9 @@ mod tests {
         assert!(setup.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
         assert!(setup.open);
         assert!(setup.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        // Enter opens a submenu only when the selected CLI is installed.
+        // Test Ctrl+C from an open menu independently of that host state.
+        setup.open = true;
         assert!(setup.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
         assert!(!setup.open);
         assert!(!setup.key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)));
