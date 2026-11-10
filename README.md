@@ -40,7 +40,7 @@ It reads this README, installs the pieces and asks you about the choices along t
 - **A sidebar of agents.** Your sidebar key (default `prefix + S`) opens a live list of every agent down the left of every window, in every session, and puts you in it: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar is there too. Close it once and it closes everywhere.
 - **Flip through your agents.** Alt + K / J (Option + K / J on macOS) goes straight to the previous or next agent from anywhere, across sessions, with no prefix. Tap it repeatedly to scroll through them. See [Direct agent navigation](#direct-agent-navigation).
 - **Search and peek before you jump.** `prefix + a` opens an agent picker with a large live preview and the sidebar's actions; `prefix + f` opens it ready to type a filter. Browse with `j`/`k`, press `/` then `n`/`N` to hop between matching rows, press `f` to fuzzy-filter names, projects and descriptions across every session, and press Enter to focus.
-- **How much is left.** Press `u` in the sidebar to pin remaining quota below the graph and tasks; press it again to hide the panel. `i` opens each plan’s windows, pace and reset times. `tmux-agent-plane quota` prints the details too, and agents can check them before handing out work. See [Quota](#quota).
+- **How much is left.** Press `u` in the sidebar to expand remaining quota above the bottom; press it again to collapse to the summary below tasks. `tmux-agent-plane quota` prints the details too, and agents can check them before handing out work. See [Quota](#quota).
 - **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
 - **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`. Optional AI naming can name the remaining default-named agents; press `c` in the sidebar to set it up.
 - **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. Every agent records the agent that spawned it, so helpers that spawn helpers form a tree.
@@ -233,8 +233,7 @@ set -g @agent-plane-keys-toggle-key e
 | `o` | Configure. AI naming: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `d` disables naming. Sidebar: `t` sets whether sidebars open with tasks shown, `u` whether they show the quota panel, `p` whether they show the graph. Each saves at once and applies to this sidebar; other sidebars take it when they next open. `Esc` goes back or closes |
 | `c` | Start a new agent in the selected agent's project. Pick the kind with arrows or `j`/`k`, then `Enter`: it opens in a new window of that session, in that agent's directory, and takes you there. `Esc` or `c` cancels |
 | `Tab` | In the popup, type to the selected agent inside the preview; `Tab` again returns to the menu |
-| `u` | Show or hide the [quota panel](#quota), pinned at the bottom below the graph and tasks. Browsing and filtering keep working; the panel stays until you press `u` again |
-| `i` | With the quota panel shown, open its full details. `Esc` returns to the panel; `u` collapses quota. In details, `r` reads again, `j`/`k` scroll, and `Enter` allows reading Claude's login from the macOS Keychain when its card asks |
+| `u` | Expand or collapse [quota](#quota) at the bottom. Agents stay visible above the expanded details; browsing stays active when collapsed |
 | `?` | Show the shortcuts: the plugin's tmux keys as you have them bound, whether they are off, and the key that turns them on or off, then the list keys by what they do. Keys that only matter mid-action, such as confirming or editing text, show in the footer at the time. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search, filter and rename |
 | `q` | Close the sidebar everywhere; close the popup |
 
@@ -299,33 +298,16 @@ Desktop notifications keep the task or blocked detail and work with the sidebar 
 
 ### Quota
 
-Press `u` in the sidebar to pin a quota panel at the bottom, below the graph and background tasks. It stays while you browse, search, filter or open agents; press `u` again to collapse it. Each sidebar keeps its own toggle. `o`, then `u` sets whether new sidebars open with quota shown; the default is off.
+Press `u` to expand quota upward from the bottom while agents remain visible above it. Press `u` again or `Esc` to collapse to the summary. The summary uses the same heading and rule as tasks. Configure whether sidebars start with it shown through `o` → Quota panel.
 
 ```
-╭ quota ─────────────────────────────╮
-│ ● claude ━━━━━━━━━┃───  72% 4d21h  │
-│ ◐ codex  ━━━━━━━━━━━──  83% 3d0h   │
-│ ● agy    ━╸─┃─────────  10% 1h0m   │
-│ ○ grok   login expired             │
-╰ i details  u expand ─────────────────╯
+── quota ───────────────────────────
+● claude ━━━━━━━━━┃───  72% 4d21h
+◐ codex  ━━━━━━━━━━━──  83% 3d0h
+● agy    ━╸─┃─────────  10% 1h0m
 ```
 
-The panel shows one line per plan you have set up, with what is left of its tightest window and the time to reset. With the panel shown, `i` opens the full details; `Esc` returns to the pinned panel and `u` collapses quota:
-
-```
-╭ quota · 14:02 · refreshing… ───────╮
-│ ● claude max             on pace ✓ │
-│   72% week                         │
-│   ━━━━━━━━━━━━━━━━━━━━━┃╸───────── │
-│   session ━━━━━━━━━━━┃  97% 4h38m  │
-│   week    ━━━━━━━━┃───  72% 4d21h  │
-│                                    │
-│ ● codex  pro        empty in 7h21m │
-│   …                                │
-│ ○ grok   not set up                │
-╰────────────────────────────────────╯
- r refresh  esc back  u expand
-```
+Expanded details show each plan's windows, pace and reset times. Use `r` to refresh, `j`/`k` or arrows to scroll, and `Enter` to allow Keychain access when Claude asks. Expired logins are omitted.
 
 Each card shows what is left of the plan's tightest window (the headline), then every window with its time to reset. Percentages are what is left: green from 50%, yellow from 20%, red below. `┃` marks where the bar would be if you used the window evenly up to its reset: fill short of the marker means you are using it faster than the clock. The verdict on the right is `on pace ✓` when every window lasts to its reset, `empty in 7h21m` when, at the rate so far this window, one runs out first, `✗ exhausted now`, or `runway unknown` when a window's cycle is not known. Antigravity shows its Gemini and Claude/GPT groups separately, because each is its own budget.
 
@@ -340,7 +322,7 @@ Each provider is read one way, with the login its own CLI already keeps. Tokens 
 | Antigravity | `agy -p /quota --output-format json`, with `open` and `xdg-open` stubbed out so it can never open a browser. |
 | Grok Build | grok.com's credits for Grok Build, with the session login in `${GROK_HOME:-~/.grok}/auth.json`. API keys are never used. |
 
-**Claude on macOS asks once.** Reading the Keychain item can make macOS ask for permission, so nothing reads it until you allow it: the Claude card says `needs Keychain access · enter allows`. Press `i` from the quota panel, then `Enter` in the details; macOS may show its dialog, where **Always Allow** keeps later reads silent. Once a read succeeds, the daemon remembers your consent in a marker file, `quota-keychain-granted` in its state directory, which holds no secret. Delete it to withdraw consent. If a later read is denied, the marker is removed and the card asks again. Until then only the item's presence is checked, which never shows a dialog. The `quota` command reports the same remedy.
+**Claude on macOS asks once.** Reading the Keychain item can make macOS ask for permission, so nothing reads it until you allow it: the Claude card says `needs Keychain access · enter allows`. Press `u` from the quota summary, then `Enter` in the details; macOS may show its dialog, where **Always Allow** keeps later reads silent. Once a read succeeds, the daemon remembers your consent in a marker file, `quota-keychain-granted` in its state directory, which holds no secret. Delete it to withdraw consent. If a later read is denied, the marker is removed and the card asks again. Until then only the item's presence is checked, which never shows a dialog. The `quota` command reports the same remedy.
 
 The snapshot lives in `${XDG_STATE_HOME:-~/.local/state}/tmux-agent-plane/quota.json`, written only by the daemon. HTTPS honours `HTTPS_PROXY` and `NO_PROXY`, follows no redirects and gives up after 15 seconds.
 
@@ -573,4 +555,4 @@ See [CHANGELOG.md](CHANGELOG.md). Releases are tagged `vX.Y.Z`.
 
 Configuration (`o`) opens at the bottom left. Use arrows or j/k, Enter or Space to choose or toggle, and Accept to close. Changes save immediately with a confirmation. Escape goes back; Ctrl+C closes. Choose a background agent for naming, then enable automatic naming separately. Each agent has editable model and effort defaults used by the launcher and `spawn` when no explicit agent arguments are supplied. Empty values use the agent CLI’s own defaults.
 
-Quota (`u`) expands above the bottom of the sidebar with agents still visible. Press `u` or Escape to return to the compact panel; `i` also expands it. Expired logins are omitted.
+Quota (`u`) expands above the bottom of the sidebar with agents still visible. Press `u` or Escape to return to the compact panel. Expired logins are omitted.

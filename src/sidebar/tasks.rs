@@ -5,7 +5,7 @@ use super::{Origin, Sidebar, kill_accepts, switch_to};
 use crate::index::State;
 use crate::tasks::{self, Status, Task};
 use crate::tmux;
-use crate::ui::{OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, colour, truncate};
+use crate::ui::{OVERLAY, SUBTEXT, SURFACE0, TEXT, colour, truncate};
 use anyhow::Result;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Style;
@@ -220,11 +220,7 @@ pub(crate) fn items(
             let mut lines = Vec::new();
             if i == 0 {
                 lines.push(Line::default());
-                lines.push(Line::from(vec![
-                    Span::styled("── ", SURFACE2),
-                    Span::styled("tasks ", Style::default().fg(SUBTEXT).bold()),
-                    Span::styled("─".repeat(width.saturating_sub(10)), SURFACE2),
-                ]));
+                lines.push(crate::ui::section_heading("tasks", width));
             }
             let is_selected = selected == Some(i);
             let (icon, icon_style) = icon(task);
@@ -500,8 +496,9 @@ mod tests {
         assert!(quota_row(&screen).unwrap() > 0);
         assert!(sidebar.quota_key(u));
         let screen = rendered(&mut sidebar);
-        assert_eq!(quota_row(&screen), Some(15), "{screen}");
-        assert!(screen.contains("u expand"));
+        assert_eq!(quota_row(&screen), Some(16), "{screen}");
+        assert!(!screen.contains("i details"));
+        assert!(screen.contains("── quota ─"));
     }
 
     #[test]

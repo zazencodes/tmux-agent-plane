@@ -784,6 +784,18 @@ pub(crate) const SEARCH_MATCH: Style = Style::new()
     .fg(Color::Rgb(0x1e, 0x1e, 0x2e))
     .bg(Color::Rgb(0xf9, 0xe2, 0xaf));
 
+/// A shared heading for the sidebar's unboxed bottom sections.
+pub(crate) fn section_heading(label: &str, width: usize) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("── ", SURFACE2),
+        Span::styled(format!("{label} "), Style::default().fg(SUBTEXT).bold()),
+        Span::styled(
+            "─".repeat(width.saturating_sub(label.chars().count() + 5)),
+            SURFACE2,
+        ),
+    ])
+}
+
 /// A rounded, quiet frame with a bold title.
 pub(crate) fn panel(title: Line<'_>) -> Block<'_> {
     Block::bordered()

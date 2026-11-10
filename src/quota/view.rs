@@ -1,10 +1,10 @@
-//! The sidebar's quota panel (`u`), with full details on `i` while it shows. It reads quota.json
+//! The sidebar's quota section: `u` expands or collapses details. It reads quota.json
 //! and asks the daemon for a fresh read when stale, every five minutes while shown, and on `r`;
 //! the request waits on its own thread, so the sidebar stays responsive.
 
 use super::{ProviderId, Snapshot, Status, render};
 use crate::index::State;
-use crate::ui::{OVERLAY, colour, hints, panel, truncate};
+use crate::ui::{OVERLAY, colour, hints, section_heading, truncate};
 use anyhow::Result;
 use chrono::Utc;
 use ratatui::Frame;
@@ -99,7 +99,7 @@ fn due(requested_at: Option<Instant>, snapshot: Option<&Snapshot>, now: super::T
 
 #[derive(Default)]
 pub struct View {
-    /// `i`: full details in place of the list, from the pinned panel.
+    /// `u`: expanded details above the bottom of the sidebar.
     pub open: bool,
     /// `u`: the panel below the graph and tasks; starts from the configuration.
     pub pinned: bool,
@@ -111,7 +111,7 @@ pub struct View {
 }
 
 impl View {
-    /// `u` toggles the panel; `i` opens its details. Browsing stays live while the panel shows.
+    /// `u` expands or collapses quota. Browsing stays live while compact quota shows.
     /// While details are open, every key but `?` is the view's; Esc returns to the panel.
     pub fn key(&mut self, key: KeyEvent, can_open: bool) -> bool {
         if can_open && key.code == KeyCode::Char('u') && key.modifiers.is_empty() {
@@ -125,12 +125,6 @@ impl View {
             return true;
         }
         if !self.open {
-            if can_open && self.pinned && key.code == KeyCode::Char('i') && key.modifiers.is_empty()
-            {
-                self.open = true;
-                self.scroll = 0;
-                return true;
-            }
             return false;
         }
         match key.code {
@@ -154,7 +148,7 @@ impl View {
         }
     }
 
-    /// The panel's height, borders included: one row per provider that is set up.
+    /// One row of spacing, a heading, then one row per active provider.
     pub fn panel_height(&self) -> u16 {
         let rows = self
             .feed
@@ -170,15 +164,23 @@ impl View {
     }
 
     fn draw_panel_at(&self, f: &mut Frame, area: Rect, now: super::Time) {
-        let mut title = String::from(" quota ");
-        if self.feed.refreshing() {
-            title.push_str("· refreshing… ");
-        }
-        let block =
-            panel(Line::from(title)).title_bottom(hints(&[("i", "details"), ("u", "expand")]));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-        let width = usize::from(inner.width.saturating_sub(2)).max(1);
+        let inner = area.inner(Margin::new(1, 0));
+        let [_, heading, rows] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .areas(inner);
+        let title = if self.feed.refreshing() {
+            "quota · refreshing…"
+        } else {
+            "quota"
+        };
+        f.render_widget(
+            Paragraph::new(section_heading(title, usize::from(inner.width))),
+            heading,
+        );
+        let width = usize::from(inner.width).max(1);
         let lines = match (&self.feed.notice, &self.feed.snapshot) {
             (Some(notice), _) => vec![Line::styled(
                 truncate(notice, width),
@@ -188,11 +190,11 @@ impl View {
             (None, None) => vec![Line::styled("no quota read yet", OVERLAY)],
         };
         let lines = if lines.is_empty() {
-            vec![Line::styled("no plan set up · i shows why", OVERLAY)]
+            vec![Line::styled("no plan set up", OVERLAY)]
         } else {
             lines
         };
-        f.render_widget(Paragraph::new(lines), inner.inner(Margin::new(1, 0)));
+        f.render_widget(Paragraph::new(lines), rows);
     }
 
     pub fn draw(&mut self, f: &mut Frame, area: Rect) {
@@ -202,24 +204,26 @@ impl View {
     fn draw_at(&mut self, f: &mut Frame, area: Rect, now: super::Time) {
         let [body, footer] =
             Layout::vertical([Constraint::Min(3), Constraint::Length(2)]).areas(area);
-        let block = panel(Line::from(format!(
-            " {} ",
-            render::title(self.feed.snapshot.as_ref(), self.feed.refreshing())
-        )));
-        let inner = block.inner(body);
-        f.render_widget(block, body);
-        // One column of air on each side inside the frame.
-        let cards = Rect {
-            x: inner.x + 1,
-            width: inner.width.saturating_sub(2),
-            ..inner
-        };
+        let inner = body.inner(Margin::new(1, 0));
+        let [_, heading, cards] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .areas(inner);
+        f.render_widget(
+            Paragraph::new(section_heading(
+                &render::title(self.feed.snapshot.as_ref(), self.feed.refreshing()),
+                usize::from(inner.width),
+            )),
+            heading,
+        );
         let lines = match &self.feed.snapshot {
             Some(snapshot) => render::cards(snapshot, now, usize::from(cards.width).max(1), true),
             None => vec![Line::styled(" no quota read yet", OVERLAY)],
         };
         self.lines = lines.len();
-        self.height = usize::from(inner.height);
+        self.height = usize::from(cards.height);
         self.scroll = self.scroll.min(self.lines.saturating_sub(self.height));
         f.render_widget(Paragraph::new(lines).scroll((self.scroll as u16, 0)), cards);
         let mut keys = Vec::new();
@@ -272,7 +276,7 @@ mod tests {
             ..View::default()
         };
         let rows = screen(&mut view, 38, 40);
-        assert!(rows[0].contains(" quota · "), "{}", rows[0]);
+        assert!(rows[1].contains(" quota · "), "{}", rows[1]);
         let all = rows.join("\n");
         assert!(all.contains("● claude"), "{all}");
         assert!(
@@ -337,17 +341,19 @@ mod tests {
             assert!(!view.key(key(code), true));
             assert!(view.pinned && !view.open);
         }
-        assert!(view.key(key(KeyCode::Char('i')), true));
+        assert!(!view.key(key(KeyCode::Char('i')), true));
+        assert!(view.key(key(KeyCode::Char('u')), true));
         assert!(view.pinned && view.open);
         assert!(view.key(key(KeyCode::Esc), true));
         assert!(view.pinned && !view.open);
-        assert!(view.key(key(KeyCode::Char('i')), true));
+        assert!(!view.key(key(KeyCode::Char('i')), true));
+        assert!(view.key(key(KeyCode::Char('u')), true));
         assert!(view.key(key(KeyCode::Char('u')), true));
         assert!(view.pinned && !view.open);
     }
 
     #[test]
-    fn the_panel_draws_one_line_per_provider_in_a_frame() {
+    fn compact_quota_matches_the_tasks_section() {
         let view = View {
             pinned: true,
             feed: Feed {
@@ -357,7 +363,7 @@ mod tests {
             ..View::default()
         };
         let height = view.panel_height();
-        assert_eq!(height, 5, "three active providers and two borders");
+        assert_eq!(height, 5, "three active providers, spacing and heading");
         let mut terminal = Terminal::new(TestBackend::new(38, height)).unwrap();
         let now = crate::quota::tests::at(render::tests::NOW);
         terminal
@@ -367,10 +373,11 @@ mod tests {
         let rows: Vec<String> = (0..height)
             .map(|y| (0..38).map(|x| buffer[(x, y)].symbol()).collect())
             .collect();
-        assert!(rows[0].starts_with("╭ quota "), "{}", rows[0]);
-        assert!(rows[1].starts_with("│ ● claude ━"), "{}", rows[1]);
-        assert!(rows[1].ends_with("72% 4d21h  │"), "{}", rows[1]);
-        assert!(rows[4].starts_with('╰') && rows[4].contains("u expand"));
+        assert!(rows[0].trim().is_empty());
+        assert!(rows[1].starts_with(" ── quota ─"), "{}", rows[1]);
+        assert!(rows[2].starts_with(" ● claude ━"), "{}", rows[2]);
         assert!(!rows.join("\n").contains("expired"));
+        assert!(!rows.join("\n").contains("details"));
+        assert!(!rows.join("\n").contains('│'));
     }
 }

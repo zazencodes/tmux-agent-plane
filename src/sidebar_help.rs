@@ -47,8 +47,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("p", "Graph: who spawned whom"),
             ("t", "Background tasks"),
-            ("u", "Sidebar: quota panel"),
-            ("i", "Sidebar: quota details"),
+            ("u", "Sidebar: expand quota"),
             ("b", "Agents to restore"),
             ("o", "Configure"),
             ("q", "Close"),

@@ -27,6 +27,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Quota uses the same unboxed heading and rule as tasks, with `u` as its single expand/collapse control. Removed the duplicate `i` shortcut.
+
 - Quota details expand upward from the bottom, keeping agents visible; `u` expands/collapses them. Expired logins disappear from quota.
 - Configuration sits at the bottom left, with arrow/j/k navigation, Enter/Space choices, checkboxes, saved confirmations and Accept. Escape goes back; Ctrl+C closes. Choose a background agent separately from automatic naming, and set each agent’s default launch model and effort.
 
