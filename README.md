@@ -166,7 +166,7 @@ Run your agents as usual. Then ask any of them things like:
 
 ### Direct agent navigation
 
-Press **Alt + K / J** (Option + K / J on macOS) to focus the previous or next agent directly, without entering the sidebar or pressing the tmux prefix. The keys work with the sidebar open or closed, follow its global order across sessions, and wrap at either end. Sidebar filters do not limit this navigation. From a shell or sidebar pane, J starts at the first agent and K at the last.
+Press **Alt + K / J** (Option + K / J on macOS) to focus the previous or next agent directly, without entering the sidebar or pressing the tmux prefix. The keys work with the sidebar open or closed, follow its global order across sessions, and wrap at either end. While typing in an agent, sidebar filters do not limit this navigation. Inside the sidebar, these keys move its selection just like Up/Down and keep the preview attached to it. From a shell, J starts at the first agent and K at the last.
 
 The binding targets the exact tmux client that received the key. It refuses a destination session or linked window another client is using. To choose other direct bindings, set these before the plugin loads, then reload the plugin:
 

@@ -1387,6 +1387,9 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
                     if let Err(error) = tmux::run(&command) {
                         sidebar.notice = Some(error.to_string());
                     }
+                    // A scan started during the switch still describes the old window.
+                    // Keep the user's selection until a scan starts after it finishes.
+                    sidebar.pressed(index::now_ms());
                 }
                 Ok(None) => {}
                 Err(error) => sidebar.notice = Some(error.to_string()),
@@ -2440,11 +2443,15 @@ mod tests {
             sidebar.apply(at(updated_at, "%1", true), Origin::Sidebar("%9"));
             assert_eq!(sidebar.selected().unwrap().pane, "%2");
         }
+        // A preview finishes after a scan has already sampled the old window.
+        sidebar.pressed(110);
+        sidebar.apply(at(105, "%1", true), Origin::Sidebar("%9"));
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
         // The daemon now agrees the sidebar is active: still the client's selection.
-        sidebar.apply(at(101, "%9", true), Origin::Sidebar("%9"));
+        sidebar.apply(at(111, "%9", true), Origin::Sidebar("%9"));
         assert_eq!(sidebar.selected().unwrap().pane, "%2");
         // The client left: the rule resumes.
-        sidebar.apply(at(102, "%9", false), Origin::Sidebar("%9"));
+        sidebar.apply(at(112, "%9", false), Origin::Sidebar("%9"));
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
     }
 

@@ -70,11 +70,11 @@ fi
 off='#{==:#{@agent-plane-keys},off}'
 for key in $previous_keys; do
   tmux bind-key -n "$key" if-shell -F "$off" "send-keys $key" \
-    "run-shell 'tmux-agent-plane cycle previous --client #{q:client_name}'"
+    "if-shell -F '#{==:#{@agent-plane-sidebar},1}' 'send-keys Up' \"run-shell 'tmux-agent-plane cycle previous --client #{q:client_name}'\""
 done
 for key in $next_keys; do
   tmux bind-key -n "$key" if-shell -F "$off" "send-keys $key" \
-    "run-shell 'tmux-agent-plane cycle next --client #{q:client_name}'"
+    "if-shell -F '#{==:#{@agent-plane-sidebar},1}' 'send-keys Down' \"run-shell 'tmux-agent-plane cycle next --client #{q:client_name}'\""
 done
 # The in key moves into the sidebar and stays there. The out key leaves it for the selected agent
 # by sending it Shift-Right, which it understands directly; other panes get the key as usual.

@@ -379,8 +379,15 @@ def assert_cycle_keys(client):
     # Direct bindings work when the sidebar is open, and keep focus in an agent.
     plane('toggle-sidebar', agent('nav-work')['window'])
     wait('sidebars open', lambda: all(w['sidebar'] for w in index()['windows']))
-    hop('next')
-    assert here() in [a['pane'] for a in order()]
+    wait('sidebar selection ready', lambda: client.selected() in [a['name'] for a in order()])
+    names = [a['name'] for a in order()]
+    expected_name = names[(names.index(client.selected()) + 1) % len(names)]
+    client.key(keys['next'])
+    selected(client, expected_name)
+    # The global key previews the adjacent row and retains sidebar keyboard focus.
+    assert here() not in [a['pane'] for a in order()]
+    client.key(b'\r')
+    wait('open after global sidebar navigation', lambda: here() == agent(expected_name)['pane'])
     # Rebinding on plugin reload removes its old keys and preserves user replacements.
     tmux('set-option', '-g', '@agent-plane-previous-key', 'C-M-Up')
     tmux('set-option', '-g', '@agent-plane-next-key', 'C-M-Down')

@@ -78,6 +78,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Sidebar selection no longer snaps back when an index refresh overlaps a preview switch. Global previous/next keys inside the sidebar move from its selected row rather than jumping to the ends of the agent list
+
 - The sidebar and agent picker no longer stay scrolled with agents hidden off the top once the whole list fits, such as after the pane grows or agents close
 - The agent you land on goes bold in the sidebar straight away, and the one you left stops being bold, with no half-second lag
 - The agent picker shows a blocked agent's reason in red, like the sidebar
