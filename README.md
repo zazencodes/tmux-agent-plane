@@ -1,4 +1,4 @@
-# tmux-agent-plane
+# `tmux-agent-plane`
 
 <p align="center">
   <a href="https://github.com/zazencodes/tmux-agent-plane/actions/workflows/ci.yml"><img src="https://github.com/zazencodes/tmux-agent-plane/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -17,12 +17,6 @@
 
 See and steer every coding agent running in your tmux.
 
-Start Claude Code, Codex or Antigravity (`agy`) in any tmux pane, the way you already do. Add Pi, OpenCode or Grok Build with the opt-in integrations below. tmux-agent-plane finds it, tracks whether it is working, waiting on you, or done, and shows that in your status bar and in an agent list. Your agents get the same view through a CLI and an agent skill, so any agent can check on, message, wait for or start other agents, and one agent can run the rest as a super agent.
-
-Claude Code, Codex and Antigravity use native signals. Pi and OpenCode use publishers built on their official extension APIs; Grok Build uses its official leader mode. Each optional integration has one setup step under [More agents](#more-agents).
-
-https://github.com/user-attachments/assets/897c88e9-50fe-4c21-ab3f-0e1785ae2a5b
-
 ## Quick start
 
 Open your coding agent (Claude Code, Codex or any other) and ask it:
@@ -33,22 +27,28 @@ Install and configure tmux-agent-plane with me: https://github.com/zazencodes/tm
 
 It reads this README, installs the pieces and asks you about the choices along the way. To do it by hand, follow [Install](#install).
 
+Start Claude Code, Codex or Antigravity in any tmux pane, the way you already do. `tmux-agent-plane` finds your agents, tracks whether each is working, waiting on you or done, and shows them in your status bar and agent list. The CLI and agent skill give your agents the same view, so they can check on, message, wait for or start each other.
+
+Claude Code, Codex and Antigravity use native signals. Add Pi, OpenCode or Grok Build with the opt-in integrations under [More agents](#more-agents): Pi and OpenCode use publishers built on their official extension APIs; Grok Build uses its official leader mode.
+
+https://github.com/user-attachments/assets/897c88e9-50fe-4c21-ab3f-0e1785ae2a5b
+
 ## Features
 
-- **Every agent, every session.** One daemon watches every pane in every tmux session and keeps a single index of the agents in them: name, state, task, location and working directory.
-- **Know what needs you.** The status bar counts agents by state. An agent that finishes or blocks while you are looking elsewhere shows a five-second notice in every open sidebar footer and sends a desktop notification, and stays `done` until you look at it.
-- **A sidebar of agents.** Your sidebar key (default `prefix + S`) opens a live list of every agent down the left of every window, in every session, and puts you in it: state, time in that state, task and location. `Enter` jumps to an agent, and the sidebar is there too. Close it once and it closes everywhere.
-- **Flip through your agents.** Alt + K / J (Option + K / J on macOS) goes straight to the previous or next agent from anywhere, across sessions, with no prefix. Tap it repeatedly to scroll through them. See [Direct agent navigation](#direct-agent-navigation).
-- **Search and peek before you jump.** `prefix + a` opens an agent picker with a large live preview and the sidebar's actions; `prefix + f` opens it ready to type a filter. Browse with `j`/`k`, press `/` then `n`/`N` to hop between matching rows, press `f` to fuzzy-filter names, projects and descriptions across every session, and press Enter to focus.
-- **How much is left.** Press `u` in the sidebar to expand remaining quota above the bottom; press it again to collapse to the summary below tasks. `tmux-agent-plane quota` prints the details too, and agents can check them before handing out work. See [Quota](#quota).
-- **Agents that know about each other.** The `tmux-agent-plane` CLI and agent skill let any agent list, read, message, answer, wait for, show, close and spawn other agents.
-- **Names you can read.** Agents name themselves after their task when they use the skill, name the agents they spawn, and you can rename any agent from the sidebar with `r`. Optional AI naming can name the remaining default-named agents; press `c` in the sidebar to set it up.
-- **Super agents.** One agent can spawn helpers in new panes, windows or sessions, hand each a task, wait for the results and report back. Every agent records the agent that spawned it, so helpers that spawn helpers form a tree.
-- **Sessions are projects.** Inspect and create named project sessions, start helpers directly in them, and move running agent panes between projects while their processes, names and parent links stay intact.
-- **Stay in tmux when a session closes.** Exit its last shell with `Ctrl-D` and tmux switches you to the most recently active remaining session, with or without the sidebar. Closing the final session exits tmux. The plugin sets tmux's `detach-on-destroy` option to `off`.
-- **Background tasks every agent can see.** Agents start dev servers, watchers and tunnels with `task start`, so there is one list of what runs, with its ports, and nobody starts a second copy. Tasks keep running after the agent that started them, and keep their output and exit status when they stop. See [Background tasks](#background-tasks).
-- **Agents come back after tmux dies.** When the tmux server stops (a crash, a reboot, `kill-server`), the agents it held wait to be brought back: the status bar shows `↺ 3`, and `restore` reopens each one's conversation in the session, window and layout it had, with its name. Nothing comes back until you ask. See [Restore](#restore).
-- **Your agents, unchanged.** Spawned agents start in a normal shell, so your aliases and flags apply, and the shell stays when the agent exits.
+- **Every agent, every session.** One daemon tracks agent names, states, tasks and locations across your tmux server.
+- **Know what needs you.** The status bar counts agents by state. Off-screen completions and blocked prompts send desktop notifications and a five-second sidebar notice. Off-screen completions stay `done` until you look at them.
+- **A sidebar of agents.** One live list down the left of every window, grouped by session. Browse to preview an agent, then `Enter` to focus it. Open or close the sidebar everywhere with your sidebar key.
+- **Flip through your agents.** Alt + k / j (Option + k / j on macOS) focuses the previous or next agent across sessions, without a prefix. See [Direct agent navigation](#direct-agent-navigation).
+- **Search and peek before you jump.** `prefix + a` opens the agent picker with a live preview; `prefix + f` starts filtering. Search names and tasks with `/`, or fuzzy-filter names, projects and descriptions with `f`.
+- **How much is left.** Press `u` in the sidebar to expand plan quota while agents stay visible above it. The CLI and your agents can read it too. See [Quota](#quota).
+- **Agents that know about each other.** The CLI and skill let agents list, read, message, answer, wait for, focus, close and spawn other agents. One agent can coordinate helpers and review their results.
+- **Names you can read.** Rename agents with `r`, name helpers when you spawn them, or enable [optional AI naming](#optional-ai-naming) through `o` → Configure.
+- **See who spawned whom.** Press `p` for the selected agent's parent and children, with their current states.
+- **Sessions are projects.** Agents started by hand join a session named after their folder. Create project sessions, launch helpers into them, and move running agents between projects. See [Project sessions](#project-sessions).
+- **Stay in tmux when a session closes.** Closing its last pane switches you to the most recently active remaining session. Closing the final session exits tmux.
+- **Background tasks every agent can see.** Keep dev servers, watchers and tunnels in a shared list with their ports, output and exit status. Tasks outlive their agents and can be restarted after they stop. See [Background tasks](#background-tasks).
+- **Restore after tmux restarts.** Review saved agents and layouts, then choose whether to bring back their conversations and background tasks. Codex conversations cannot currently be resumed. See [Restore](#restore).
+- **Your agents, unchanged.** Spawned agents use your interactive login shell, so aliases and flags apply. A shell stays open when the agent exits.
 
 ## States
 
@@ -85,21 +85,13 @@ set -g @plugin 'zazencodes/tmux-agent-plane'
 
 Without TPM, clone the repo and add `run-shell /path/to/tmux-agent-plane/tmux-agent-plane.tmux` to `~/.tmux.conf`.
 
-The plugin starts the daemon once the first session exists, binds `prefix + S` to the sidebar `prefix + a` to the agent list popup and `prefix + f` to the same popup already filtering (replacing tmux's window finder on that key), and sets a `session-created[90]` hook to start the watcher and a `window-linked[90]` hook that gives each new window the open sidebar. A `window-layout-changed[90]` hook closes a sidebar as soon as its last other pane disappears. A `pane-mode-changed[90]` hook takes a sidebar straight back out of copy mode, which would otherwise freeze its list. To use another sidebar key, set it before the plugin loads:
+The plugin starts the daemon and binds the sidebar (default `prefix + S`), the agent picker (`prefix + a`) and the picker ready to filter (`prefix + f`, replacing tmux's window finder). To choose a sidebar key, set it before the plugin loads:
 
 ```tmux
 set -g @agent-plane-sidebar-key Space   # replaces tmux's next-layout binding
 ```
 
-**Keys.** Without the prefix, Alt + K / J move to the previous / next agent and Alt + H / L go into and out of the sidebar. `prefix + g` turns them all off and on again, for when a program needs them. Ask whether these suit them, or whether they also want Shift + arrows, which are easier to reach but which some programs use for selecting text. Set keys only with these options, before the plugin loads, so `prefix + g` covers every one; a `bind -n` line of their own would not turn off. For Shift + arrows as well:
-
-```tmux
-set -g @agent-plane-previous-key 'M-k S-Up'
-set -g @agent-plane-next-key 'M-j S-Down'
-set -g @agent-plane-sidebar-in-key 'M-h S-Left'
-```
-
-Shift + Right needs no option: the sidebar reads it. See [Direct agent navigation](#direct-agent-navigation).
+**Keys.** Without the prefix, Alt + k / j move to the previous / next agent and Alt + h / l go into and out of the sidebar. `prefix + g` turns these global keys off and on when a program needs them. Choose your bindings through the plugin options so the toggle covers them all; see [Direct agent navigation](#direct-agent-navigation).
 
 **3. The status bar.** Add `#{@agent_plane_status}` to `status-right` (or `status-left`):
 
@@ -166,7 +158,7 @@ Run your agents as usual. Then ask any of them things like:
 
 ### Direct agent navigation
 
-Press **Alt + K / J** (Option + K / J on macOS) to focus the previous or next agent directly, without entering the sidebar or pressing the tmux prefix. The keys work with the sidebar open or closed, follow its global order across sessions, and wrap at either end. While typing in an agent, sidebar filters do not limit this navigation. Inside the sidebar, these keys move its selection just like Up/Down and keep the preview attached to it. From a shell, J starts at the first agent and K at the last.
+Press **Alt + k / j** (Option + k / j on macOS) to focus the previous or next agent directly, without entering the sidebar or pressing the tmux prefix. The keys work with the sidebar open or closed, follow its global order across sessions, and wrap at either end. While typing in an agent, sidebar filters do not limit this navigation. Inside the sidebar, these keys move its selection just like Up/Down and keep the preview attached to it. From a shell, Alt + j starts at the first agent and Alt + k at the last.
 
 The binding targets the exact tmux client that received the key. It refuses a destination session or linked window another client is using. To choose other direct bindings, set these before the plugin loads, then reload the plugin:
 
@@ -177,26 +169,18 @@ set -g @agent-plane-next-key C-M-j
 
 These are tmux key names (`C` is Ctrl, `M` is Alt). The defaults leave tmux's prefix-then-Alt-arrow bindings available for resizing. Your window manager and terminal must pass the chosen keys through to tmux.
 
-Press **Alt + H** to move into the sidebar, opening it if it is closed; from inside, it stays put. Press **Alt + L** to leave it for the selected agent, as `Enter` does, even halfway through typing a search. Everywhere else Alt + L goes to the pane as usual. To choose other keys:
+Press **Alt + h** to move into the sidebar, opening it if it is closed; from inside, it stays put. Press **Alt + l** to leave it for the selected agent, as `Enter` does, even halfway through typing a search. Everywhere else Alt + l goes to the pane as usual. To choose other keys:
 
 ```tmux
 set -g @agent-plane-sidebar-in-key C-M-h
 set -g @agent-plane-sidebar-out-key C-M-l
 ```
 
-Inside the sidebar, `l`, → and Shift + Right also leave it the same way, with nothing to configure.
-
-Each of these four options takes one key or several, separated by spaces. To also move between agents with Shift + Up / Down and go into the sidebar with Shift + Left:
-
-```tmux
-set -g @agent-plane-previous-key 'M-k S-Up'
-set -g @agent-plane-next-key 'M-j S-Down'
-set -g @agent-plane-sidebar-in-key 'M-h S-Left'
-```
+Inside the sidebar, `l` and → also leave it for the selected agent. Each binding option accepts one key or several, separated by spaces.
 
 #### Turning the global keys off
 
-The keys above work without the prefix, so a program in tmux never sees them. When you need them in a program, such as Shift + arrows to select text, press **prefix + g** to turn them all off: each key then reaches the pane as usual. The status bar shows `keys off · prefix g`, and the bottom left of the sidebar and the agent picker `global keys off · prefix g`, until you press it again. Inside the sidebar, its own keys keep working.
+The keys above work without the prefix, so a program in tmux never sees them. When you need them in a program, such as Alt + j in an editor, press **prefix + g** to turn them all off: each key then reaches the pane as usual. The status bar shows `keys off · prefix g`, and the bottom left of the sidebar and the agent picker `global keys off · prefix g`, until you press it again. Inside the sidebar, its own keys keep working.
 
 To start with them off, add `set -g @agent-plane-keys off` to `tmux.conf`. To toggle with another key, set `@agent-plane-keys-toggle-key` before the plugin loads:
 
@@ -208,40 +192,39 @@ set -g @agent-plane-keys-toggle-key e
 
 | Key | Action |
 | --- | --- |
-| Sidebar key (default `prefix + S`) | Open the sidebar in every window and move into it; close it everywhere when it is open |
-| `prefix + a` | Open the agent picker: the sidebar's list and actions, with a live screen preview |
-| `prefix + f` | Open the agent picker already filtering, so you can start typing |
-| `Alt + K` / `Alt + J` | Focus previous/next agent directly, across sessions; no prefix or sidebar focus needed |
-| `prefix + g` | Turn the global keys (these four and any you add) off, so programs get them, and on again; see [Turning the global keys off](#turning-the-global-keys-off) |
-| `Alt + H` / `Alt + L` | Move into the sidebar and stay / leave it for the selected agent; no prefix needed |
-| `↓` `↑` | Move selection. In the sidebar, moving previews the selected agent's window/session while keyboard input stays in the sidebar; the popup previews inside itself. Both also accept `j` / `k` |
-| `gg` / `G` | Move to the first / last agent in the list, previewing it like any other move |
-| `/` | Search, as in Vim: type part of an agent's name or the task on its row, ignoring case. The selection moves to the next match as you type, every row stays listed, and every match is highlighted; a match past the end of a cut-off line lights up its `…`. `Enter` keeps the search and previews the match, `Esc` or `Ctrl-C` cancels it and returns to where you were, and clears a kept search, `Ctrl-W` deletes a word, `Ctrl-U` clears. Project names are not searched |
-| `n` / `N` | With a search kept, go to the next / previous match, wrapping and previewing it like any other move. |
-| `f` | Filter, in the sidebar and the popup alike: hide rows that do not match, fuzzy across agent name, project (tmux session), task and blocked detail, ignoring case and allowing gaps. Each word can match any field, in any order, and the best match comes first. `Enter` opens the selected match and ends the filter, `/` freezes the filter so keys are commands on its matches, `f` resumes editing it, `Esc` or `Ctrl-C` cancels the edit, `Ctrl-W` deletes a word, `Ctrl-U` clears; arrows and `Ctrl-J`/`Ctrl-K` move selection while editing |
-| `d` | Cycle state filter: All → Blocked → Done → Working → Idle → All, skipping states with no filter matches when pressed |
-| `p` | Show the selected agent's graph: in the sidebar in a panel below the list, in the popup in place of the preview. A parent sits in a box on the left and the agents it spawned in boxes down the right, joined by lines that are dashed while a child works and red while it is blocked; the selected agent's box is lit. A selected child shows its parent and siblings, and a parent that has a parent of its own names it above (`↑ site-lead`, or `↑ parent ended`). It follows the selection, and an agent with no parent and no children shows none. Sidebars open with it shown; `o` sets that, and `p` shows or hides it in one sidebar or the popup. See [Parents](#parents) |
-| `Ctrl-J` / `Ctrl-K` | Move selection, including while editing a filter |
-| `Esc` / `Ctrl-C` | Cancel a search or filter being typed. Outside editing, clear the search, then the text and state filters together, back to the whole list; then close the popup |
-| `Enter`, `l`, `→` | Jump to the agent. `l` and `→` are letters and cursor keys while you type a search, filter or name. The sidebar stays open; the popup closes. When the list says the daemon is not running, `Enter` restarts it and shows the reason if it cannot start |
-| `x` | Ask to kill the selected agent’s pane. The footer pins its name/state; `Enter` or lowercase `y` confirms; `?` temporarily shows help; other keys cancel without replay. Refuses to end your attached session; warns if a remote session would end |
-| `t` | Show or hide background tasks below the agents, in the sidebar, under a `── tasks ──` rule. Sidebars open with tasks shown; `o` sets that, and `t` changes one sidebar. The footer offers `t tasks` while any task exists. A row reads `▸ web-dev  :5173  site  3h` while running (its listening ports, project folder and age) or `✕ worker  exit 1  site  2m` once its command has ended. `j`/`k`, `gg` and `G` move through the agents and then the tasks, previewing a task's window like an agent's; `Enter` opens it |
-| `x` on a task | Ask to stop the task, in the same style as a kill: `Enter` or lowercase `y` stops it and it leaves the list, other keys cancel. The sidebar moves to the next row first |
-| `R` | Restart the selected task: run its command again in its window |
-| `b` | While agents from before tmux restarted wait (the sidebar's top line says `↺ N agents from before tmux restarted · b restore`), list them, those that cannot come back and why, and the tasks that were running with the agent that started each. `Enter` brings back the agents and the tasks, `a` the agents only, `d` forgets them, `Esc` cancels. It asks every time; see [Restore](#restore) |
-| `r` | Rename the agent (sidebar), starting from its current name. `Ctrl-W` deletes a word, `Ctrl-U` clears, `Enter` saves, `Esc` cancels |
-| `o` | Configure. AI naming: choose a CLI or custom command, review the data disclosure, then `Enter` enables it; `d` disables naming. Sidebar: `t` sets whether sidebars open with tasks shown, `u` whether they show the quota panel, `p` whether they show the graph. Each saves at once and applies to this sidebar; other sidebars take it when they next open. `Esc` goes back or closes |
-| `c` | Start a new agent in the selected agent's project. Pick the kind with arrows or `j`/`k`, then `Enter`: it opens in a new window of that session, in that agent's directory, and takes you there. `Esc` or `c` cancels |
-| `Tab` | In the popup, type to the selected agent inside the preview; `Tab` again returns to the menu |
-| `u` | Expand or collapse [quota](#quota) at the bottom. Agents stay visible above the expanded details; browsing stays active when collapsed |
-| `?` | Show the shortcuts: the plugin's tmux keys as you have them bound, whether they are off, and the key that turns them on or off, then the list keys by what they do. Keys that only matter mid-action, such as confirming or editing text, show in the footer at the time. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search, filter and rename |
-| `q` | Close the sidebar everywhere; close the popup |
+| Sidebar key (default `prefix + S`) | Open the sidebar in every window and move into it; close it everywhere when open |
+| `prefix + a` / `prefix + f` | Open the agent picker / open it ready to filter |
+| `Alt + k` / `Alt + j` | Previous / next agent across sessions |
+| `Alt + h` / `Alt + l` | Enter the sidebar / leave for the selected agent |
+| `prefix + g` | Turn global keys off or on |
+| `j` / `k`, `↓` / `↑`, `Ctrl-J` / `Ctrl-K` | Select and preview; Ctrl-J/K and arrows also work while editing a filter |
+| `gg` / `G` | First / last row |
+| `/` | Search names and tasks without hiding rows; `Enter` keeps the search |
+| `n` / `N` | Next / previous match in a kept search |
+| `f` | Fuzzy-filter names, projects, tasks and blocked details; `/` freezes matches so keys become commands, `f` resumes editing |
+| `d` | Cycle the state filter: All → Blocked → Done → Working → Idle |
+| `Enter`, `l`, `→` | Focus the selection; the picker closes and the sidebar stays open. When the daemon is stopped, `Enter` restarts it |
+| `Esc` / `Ctrl-C` | Cancel an edit, clear a kept search, clear filters, then close the picker |
+| `r` | Rename the selected agent; `Enter` saves, `Esc` cancels |
+| `x` | Confirm killing an agent or stopping a task; `Enter` or lowercase `y` accepts, other keys cancel |
+| `c` | Start a new agent in the selected agent's project and folder |
+| `p` | Show or hide the selected agent's [graph](#parents) |
+| `t` | Sidebar: show or hide [background tasks](#background-tasks) |
+| `R` | Restart the selected task |
+| `b` | Review agents waiting to be [restored](#restore) after tmux restarted |
+| `o` | Open [Configuration](#configuration) |
+| `Tab` | Picker: type to the selected agent in the preview; `Tab` again returns to the menu |
+| `u` | Sidebar: expand [quota](#quota); `u` or `Esc` collapses it to a summary |
+| `?` | Show shortcuts, including your configured tmux bindings; reopen for the next page on a short terminal |
+| `q` | Close the sidebar everywhere, or close the picker |
+
+While editing a search, filter or name, letters are text. `Ctrl-W` deletes a word and `Ctrl-U` clears it. The footer shows the controls for the current action.
 
 `c` offers Claude Code, Codex, Pi, OpenCode and Grok Build. Antigravity needs a first task to start, so use `spawn agy "<task>"` for it. Pi, OpenCode and Grok Build always appear in the picker, but are tracked only once their [optional integrations](#more-agents) are set up. Like `Enter`, `c` refuses a session another client is using.
 
 An agent in a linked window has one index row, displayed under the first session by name. It counts as visible when its pane is visible through any link.
 
-While the sidebar is open, every window has one, including windows and sessions you create later; each keeps its own selection. A window's sidebar closes with the window: when its other panes are gone, the layout hook closes it immediately. The sidebar and popup start on the first blocked agent, or else the first done one. The agent you are looking at is shown in bold in the sidebar.
+While the sidebar is open, every window has one, including windows and sessions you create later; each keeps its own selection. A window's sidebar closes with the window: when its other panes are gone, the layout hook closes it immediately. The sidebar starts on the first blocked agent, or else the first done one; the picker opens on the agent you are viewing, or the top row. The agent you are looking at is shown in bold in the sidebar.
 
 Moving with arrows or `j`/`k` previews the selected agent's window/session and keeps keyboard input in its sidebar. The sidebar pane itself moves into the previewed window, so selection, filter, search and order stay exactly as they were, and the sidebar it swapped with takes its place in the window you left, which gets back the pane it had active before the sidebar: come back with plain tmux and you land on that agent, with no key or focus event sent to it while you were away. Preview keeps the sidebar active, so a done agent remains unseen; `Enter` focuses it and makes it seen, and the sidebar moves with you the same way. Navigation requires a unique client in the input sidebar and refuses a destination session/window used by another client.
 
@@ -390,7 +373,7 @@ An agent started with `spawn` records the agent that spawned it, and helpers tha
 
 `spawn` starts a persistent interactive session in tmux’s configured `default-shell`. It passes the launch command directly to an interactive login shell, which loads your startup files before running the agent, so aliases and flags apply even with long or multi-line tasks. Each argument is quoted separately. When the agent exits, a fresh interactive login shell stays open. `spawn` supplies its own launch command, so tmux’s `default-command` is not used.
 
-Everything after `--` is passed verbatim to the agent CLI, each argument quoted separately, ahead of the task. `tmux-agent-plane spawn codex "Review the API" -- -m gpt-6.1-sol` runs `codex '-m' 'gpt-6.1-sol' 'Review the API'`. The arguments work with or without a task; `spawn` adds none of its own.
+Everything after `--` is passed verbatim to the agent CLI, each argument quoted separately, ahead of the task. `tmux-agent-plane spawn codex "Review the API" -- -m gpt-6.1-sol` runs `codex '-m' 'gpt-6.1-sol' 'Review the API'`. The arguments work with or without a task. When no arguments follow `--`, `spawn` uses the model and effort defaults from [Configuration](#configuration); empty defaults leave the choice to the agent CLI.
 
 | Kind | Command sent to the shell with a task and agent arguments |
 | --- | --- |
@@ -403,39 +386,27 @@ Everything after `--` is passed verbatim to the agent CLI, each argument quoted 
 
 All kinds except agy can be spawned without a task. `spawn agy` requires a task and fails immediately if it is missing: agy publishes no state until its first turn. An agy started by hand appears once you send its first message; before then, use `read <pane-id>` and `keys <pane-id> ...`. Pi and OpenCode need their opt-in publisher installed before `spawn` can detect them; Grok needs leader mode.
 
+### Configuration
+
+Press `o` in the sidebar or picker to open configuration at the bottom left. Use arrows or `j`/`k` to move, `Enter` or Space to choose or toggle, and Accept to close. Changes save immediately with a confirmation. `Esc` goes back; `Ctrl-C` closes.
+
+- **Sidebar panels:** choose whether new sidebars show tasks, quota and the graph. Tasks and the graph start enabled; quota starts hidden. A change applies to this sidebar immediately and to other sidebars when they next open.
+- **Background agent:** choose a CLI preset or custom command for automatic naming, then review and accept its command. Enable automatic naming separately.
+- **Agent defaults:** set each kind's model and effort for the launcher and `spawn` when no explicit agent arguments are supplied. Empty values use the CLI's own defaults.
+
+Settings live in `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/config.json`. The daemon picks up changes without a restart. The separate `config.toml` in [Install step 5](#install) holds instructions for agents using the skill.
+
 ### Optional AI naming
 
-AI naming is **off by default**. With it off, no automatic naming command runs. The sidebar always shows `o configure` above its usual footer, so configuration is one key away.
+AI naming is **off by default**. In `o` → Configure, choose and accept a background agent, then turn on Automatic naming. Setup checks that the executable is installed and shows the command, model and data disclosure. Choosing a command leaves the naming switch unchanged. Setup itself runs no model and changes no folder trust; authenticate the chosen CLI normally first.
 
-Press `o` and choose `1` Claude Code, `2` Codex, `3` Pi, `4` OpenCode, `5` Antigravity (`agy`), `6` Grok Build, or `7` for a custom command. Setup checks the executable is installed without running it, shows the command and data disclosure, and requires `Enter` to enable. `Esc` goes back or closes; `o`, then `d` disables naming. For Antigravity, authenticate `agy` normally first, then use **`o`, `5`, `Enter`**. Setup itself never calls a model or changes folder trust. Use your configured sidebar key to open or reopen it (the plugin default is `prefix + S`).
+The naming command receives the agent's task title, working-directory path and blocked detail through your CLI's existing authentication. Its configured AI provider may receive those fields. Screen captures and file contents are excluded. Review the command before enabling it; presets select a model and effort, and custom commands control their own.
 
-The one configuration file is `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/config.json`. Setup writes it; the daemon reads changes on its existing tick, without a restart. Its `sidebar` table holds what sidebars show when they open: `"tasks"` (default `true`) and `"quota"` (default `false`). An Antigravity configuration looks like:
+Only agents still carrying an unassigned default name qualify, once they have a meaningful task title. Names given with `--name`, `rename` or sidebar `r` are preserved. Generated names are two or three lowercase words joined by hyphens, unique and at most 20 characters.
 
-```json
-{
-  "auto_name": {
-    "enabled": true,
-    "command": [
-      "agy", "--model", "gemini-3.8-flash", "--effort", "low",
-      "--output-format", "text", "--mode", "plan", "--sandbox",
-      "--print-timeout", "55s", "--print", "{prompt}"
-    ],
-    "output": "text"
-  }
-}
-```
+The daemon runs one naming job at a time, with a 60-second timeout. An invalid name gets one corrective retry; a failed or timed-out command leaves the default name and logs a fault in `daemon.log` while tracking continues. Attempts persist across daemon restarts. Changing the command lets failed agents try again.
 
-Presets select inexpensive models explicitly: Claude `haiku` with `--effort low`; Codex `gpt-6-luna` with `--config 'model_reasoning_effort="low"'` (the lowest advertised by the CLI cache); Pi `google/gemini-flash-lite-latest` with `--thinking minimal` (its catalog does not support `off` for this model); OpenCode `opencode/ling-2.6-flash-free`, a free, non-reasoning model with no thinking flag; Antigravity `gemini-3.8-flash` with `--effort low`; Grok `grok-4.5` with `--reasoning-effort low`, selecting the lowest cached-input rate among the CLI's locally advertised standard models (which tie on uncached input/output rates), and avoiding the twice-priced Fast variant. API-only cheaper models were not advertised by this CLI's cache. Claude and Pi use floating aliases; Codex, OpenCode, agy and Grok use catalog IDs because a suitable floating alias could not be confirmed. Flags were checked against CLI help and read-only catalogs; real model availability and execution were not tested. Existing saved commands stay as configured; choose the preset again to adopt these settings.
-
-A custom `command` is a JSON array containing an executable on the daemon's `PATH` (or an absolute path) and literal arguments. Exactly one argument must be `"{prompt}"`; it is replaced with the job instruction and JSON inventory. No shell interprets the command. The custom command must run noninteractively, use no tools, and print only the requested result to stdout (a name); use `"output": "text"`. The OpenCode preset uses `"output": "opencode"` to extract text events from its JSON output. Unknown fields and malformed configuration produce a daemon diagnostic. With no file, naming stays off and the hint is visible.
-
-**What is sent:** the eligible agent's task title, working-directory path (`cwd`), and blocked detail. These are passed as JSON in the prompt to your chosen CLI; its configured AI provider may receive them. tmux-agent-plane sends no screen capture or file contents. The command uses your CLI's existing authentication. Presets explicitly select the model and thinking shown during setup; custom commands control their own model/provider and thinking. Review these before enabling. Custom commands must follow the same no-tools contract.
-
-Naming waits for a title of at least eight bytes containing two words, excluding generic startup titles. It applies to every supported agent kind. Only agents with their generated `<kind>-<pane number>` name and no explicit pane name qualify. A name assigned with `--name`, `r` or `rename` stays yours, even if it resembles a generated name. Default names assigned by older versions already have an explicit pane option and are preserved; newly spawned agents leave that option unset. A live tmux condition checks the pane process, unassigned name and uniqueness across all sessions immediately before applying, so a racing manual rename wins.
-
-The daemon runs one naming process at a time, outside tmux with closed stdin and a private working directory under its state directory. Each eligible pane/process lifetime gets **one attempt**, recorded before launch in `${XDG_STATE_HOME:-$HOME/.local/state}/tmux-agent-plane/auto-name.json`, including across daemon restarts. Changing the command gives agents it failed to name a fresh attempt. An answer that fails the name rule gets one immediate retry, which tells the command what it answered and why that was rejected; a command that fails or times out is not retried. There is a 60-second timeout and a 16 KiB limit on each output stream, per run. A failed attempt pauses new naming for 60 seconds, leaves that agent's default name in place, and writes a deduplicated `auto-name:worker` diagnostic with degraded status to `daemon.log`, including the rejected answer. Tracking continues. The next agent named successfully clears the fault and is logged as recovery. A configuration change or daemon restart also clears the fault and the pause; neither repeats reserved attempts, and a command that is still broken raises the fault again on its next attempt.
-
-AI output must be two or three lowercase words joined by hyphens, each starting with a letter, at most 20 ASCII characters and unique. A single terminal newline is allowed; quotes, markdown, whitespace, commentary and duplicate names are rejected. Names are never repaired. Built-in commands use their noninteractive modes and restrict tools where the CLI provides that control; they run away from project folders and never alter your trust settings. No extra tmux commands run on idle naming ticks or while naming is disabled.
+For a custom command, enter a JSON array of an executable and literal arguments, with exactly one `"{prompt}"` argument. It must run noninteractively, use no tools and print only the name to stdout. The daemon runs it in a private working directory without a shell. The saved `auto_name.output` is `"text"`; the OpenCode preset uses `"opencode"` to extract text from its JSON events.
 
 ### CLI
 
@@ -481,7 +452,7 @@ Read a blocked question before replying: `tmux-agent-plane read reviewer`, then 
 - **Pi** publishes PID, pane, native session, live activity, UI prompts, and completed-turn counts through the opt-in extension in `extensions/pi/`.
 - **OpenCode** publishes its active TUI session and native status, permission and question snapshots through the opt-in TUI publisher plugin in `extensions/opencode/`. Its default TUI has no external HTTP listener.
 - **Grok Build** uses the official leader roster's `working`, `needs_input` and `idle` states. Native active-session records tie each local resident session to its live TUI process. The blinking terminal title is not used for state.
-- **The daemon** scans all enabled kinds once a second for every pane on the tmux server. It marks a turn that ends off screen as `done` until the pane is on screen, writes the index to `~/.local/state/tmux-agent-plane/agents.json` along with each window's active pane, the sidebar row order and the last agent used, closes sidebars left alone in a window, sets the `@agent_plane_status` tmux option, and sends notifications. It also keeps hidden windows at the size they will be shown at, so moving between agents resizes nothing: about two seconds after your terminal changes size, each hidden window gets one resize to its final layout, and tmux's global `default-size` follows so new windows start right. Agents redraw once per size change, off screen; idle, this runs nothing. Windows on screen, zoomed windows and any `window-size` other than tmux's default `latest` are left alone, as is everything while attached clients show different sizes. It runs detached from tmux jobs, exits with the tmux server, and starting it again keeps the existing watcher. Lifecycle and daemon errors are appended to `daemon.log` alongside the index (`$XDG_STATE_HOME/tmux-agent-plane/daemon.log` when set).
+- **The daemon** scans all enabled kinds once a second for every pane on the tmux server. It marks a turn that ends off screen as `done` until the pane is on screen, writes the index to `~/.local/state/tmux-agent-plane/agents.json` along with each window's active pane, the sidebar row order and the last agent used, sets the `@agent_plane_status` tmux option, and sends notifications. It also keeps hidden windows at the size they will be shown at, so moving between agents resizes nothing: about two seconds after your terminal changes size, each hidden window gets one resize to its final layout, and tmux's global `default-size` follows so new windows start right. Agents redraw once per size change, off screen; idle, this runs nothing. Windows on screen, zoomed windows and any `window-size` other than tmux's default `latest` are left alone, as is everything while attached clients show different sizes. It runs detached from tmux jobs, exits with the tmux server, and starting it again keeps the existing watcher. Lifecycle and daemon errors are appended to `daemon.log` alongside the index (`$XDG_STATE_HOME/tmux-agent-plane/daemon.log` when set).
 - **Background tasks** are panes in the `agent-plane-tasks` session whose tmux pane options hold the task's name, folder, command, starter and start time, with `remain-on-exit` so a finished task keeps its exit status. The daemon adds them to the index each second, never as agents, with their listening ports from `lsof` on each task's process tree at most every five seconds.
 - **The CLI, the sidebars and the agent list** read the index. They fail with a clear error when the daemon is not running.
 - **`send`** pastes with bracketed paste, then presses Enter, so a multi-line prompt arrives as one message.
@@ -503,7 +474,7 @@ Read a blocked question before replying: `tmux-agent-plane read reviewer`, then 
 
 Ghostty supports synchronized output, which lets tmux finish a redraw before the
 terminal displays it. Without it, pane and window changes can expose partially
-redrawn frames, including sidebar view-mode navigation. See
+redrawn frames, including sidebar navigation. See
 [Ghostty's explanation](https://ghostty.org/docs/help/synchronized-output).
 
 Check the attached clients with:
@@ -529,9 +500,16 @@ not the terminal's reported `client_termtype`, and a Ghostty client may share TE
 with a terminal lacking this feature. Automatically adding the option after
 recognizing Ghostty would also affect those other clients on their next attach.
 
-Repeat pane changes and sidebar view-mode navigation with the same window size.
+Repeat pane changes and sidebar navigation with the same window size.
 If flicker persists with `sync` active, temporarily disable custom Ghostty shaders
 and repeat to distinguish terminal rendering effects from application redraws.
+
+## Credits
+
+Thank you to:
+
+- [Kun Chen](https://github.com/kunchenguid), whose [quota-axi](https://github.com/kunchenguid/quota-axi) inspired the quota integration.
+- The [T3 Code](https://github.com/pingdotgg/t3code) team, whose work inspired keeping background tasks separate from agents and letting stopped tasks be restarted.
 
 ## Changelog
 
@@ -552,7 +530,3 @@ See [CHANGELOG.md](CHANGELOG.md). Releases are tagged `vX.Y.Z`.
   <br>
   Created by <a href="https://zazencodes.com/">ZazenCodes</a>
 </p>
-
-Configuration (`o`) opens at the bottom left. Use arrows or j/k, Enter or Space to choose or toggle, and Accept to close. Changes save immediately with a confirmation. Escape goes back; Ctrl+C closes. Choose a background agent for naming, then enable automatic naming separately. Each agent has editable model and effort defaults used by the launcher and `spawn` when no explicit agent arguments are supplied. Empty values use the agent CLI’s own defaults.
-
-Quota (`u`) expands above the bottom of the sidebar with agents still visible. Press `u` or Escape to return to the compact panel. Expired logins are omitted.
