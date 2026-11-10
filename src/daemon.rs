@@ -522,8 +522,10 @@ fn keys_status(keys: &tmux::GlobalKeys) -> String {
         return String::new();
     }
     match &keys.toggle {
-        Some(key) => format!("#[fg=#f9e2af]keys off · prefix {key}#[default] "),
-        None => "#[fg=#f9e2af]keys off#[default] ".into(),
+        Some(key) => {
+            format!("#[fg=#f9e2af]Agent Plane keys off · prefix {key} to enable#[default] ")
+        }
+        None => "#[fg=#f9e2af]Agent Plane keys off#[default] ".into(),
     }
 }
 
@@ -559,7 +561,7 @@ mod tests {
         keys.off = true;
         assert_eq!(
             keys_status(&keys),
-            "#[fg=#f9e2af]keys off · prefix o#[default] "
+            "#[fg=#f9e2af]Agent Plane keys off · prefix o to enable#[default] "
         );
     }
     use crate::tmux::Pane;

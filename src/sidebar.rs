@@ -63,6 +63,8 @@ pub fn toggle(window: &str) -> Result<()> {
 /// The in key: move into this window's sidebar, opening it everywhere if it is closed. From
 /// inside the sidebar this changes nothing.
 pub fn enter(window: &str) -> Result<()> {
+    let _lock = Lock::take()?;
+    crate::bindings::require_enabled()?;
     if !is_open()? {
         tmux::run(&["set-option", "-g", OPEN, "1"])?;
         add_everywhere()?;
@@ -74,7 +76,8 @@ pub fn enter(window: &str) -> Result<()> {
 /// Run by the plugin's hook when a window is created: add the sidebar to it while open, so its
 /// agent has its final width before anyone looks at it.
 pub fn follow(window: &str) -> Result<()> {
-    if !is_open()? {
+    let _lock = Lock::take()?;
+    if crate::bindings::disabled()? || !is_open()? {
         return Ok(());
     }
     match add(window) {
@@ -110,9 +113,7 @@ fn add_everywhere() -> Result<()> {
 
 /// The window's sidebar pane, added without moving you when the window has none.
 fn add(window: &str) -> Result<String> {
-    // Hooks fire in bursts (a jump changes session and window at once); one at a time, so a
-    // window never gets two sidebars.
-    let _lock = Lock::take()?;
+    // enter/follow hold the sidebar lock across creation and the enabled-state check.
     let panes = tmux::run(&[
         "list-panes",
         "-t",
@@ -144,7 +145,7 @@ fn add(window: &str) -> Result<String> {
 }
 
 /// Close the sidebar in every window.
-fn close() -> Result<()> {
+pub(crate) fn close() -> Result<()> {
     tmux::run(&["set-option", "-gu", OPEN])?;
     let panes = tmux::run(&[
         "list-panes",
@@ -189,6 +190,7 @@ impl Drop for Lock {
 }
 
 pub fn run() -> Result<()> {
+    crate::bindings::require_enabled()?;
     let mut terminal = ratatui::init();
     let result = event_loop(&mut terminal);
     ratatui::restore();
@@ -1785,11 +1787,11 @@ fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
     })
 }
 
-/// ` global keys off · prefix o`, for the bottom left of the sidebar and the picker.
+/// ` Agent Plane keys off · prefix o`, for the bottom left of the sidebar and the picker.
 pub(crate) fn keys_off(keys: &crate::tmux::GlobalKeys) -> Span<'static> {
     let text = match &keys.toggle {
-        Some(key) => format!(" global keys off · prefix {key} "),
-        None => " global keys off ".into(),
+        Some(key) => format!(" Agent Plane keys off · prefix {key} "),
+        None => " Agent Plane keys off ".into(),
     };
     Span::styled(text, Style::default().fg(crate::quota::render::YELLOW))
 }
@@ -2051,7 +2053,7 @@ mod tests {
         );
         assert_eq!(
             footer(&sidebar, 38, 5100).to_string(),
-            " global keys off · prefix o "
+            " Agent Plane keys off · prefix o "
         );
         sidebar.global_keys.off = false;
         assert!(footer(&sidebar, 38, 5100).to_string().contains("jump"));

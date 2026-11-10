@@ -3,6 +3,7 @@ mod autoname;
 mod autoname_config;
 mod autoname_setup;
 mod background;
+mod bindings;
 mod commands;
 mod daemon;
 mod detect;
@@ -49,6 +50,12 @@ enum Cmd {
         /// Open with the filter being typed
         #[arg(long)]
         search: bool,
+    },
+    /// Install the plugin's tmux bindings, or toggle them off and on
+    #[command(hide = true)]
+    Bindings {
+        #[arg(long)]
+        toggle: bool,
     },
     /// Run the always-on agent list (shown in the sidebar pane)
     Sidebar,
@@ -208,6 +215,7 @@ fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Cmd::Daemon { action } => lifecycle::run(action),
         Cmd::Ui { client, search } => ui::run(&client, search),
+        Cmd::Bindings { toggle } => bindings::apply(toggle),
         Cmd::Sidebar => sidebar::run(),
         Cmd::Notice => popup::notice(),
         Cmd::ToggleSidebar { window } => sidebar::toggle(&commands::target_pane(&window)?),

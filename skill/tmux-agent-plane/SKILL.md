@@ -34,6 +34,10 @@ A name is one short kebab-case word for the work, 2 to 3 words joined by `-`, at
 
 Optional AI auto-naming is off by default and configured by the user with `o` in the sidebar. This bottom-left menu also sets per-kind launch model and effort defaults in config.json; the launcher and `spawn` apply them when no explicit agent arguments are supplied. Use arrows/j/k to select, Enter/Space to choose or toggle, Accept to close, and Esc/Ctrl+C to leave. It only names agents with a meaningful title and an unassigned default name. Explicit `--name`, `rename` and sidebar `r` assignments are always preserved.
 
+## Suspending Agent Plane keys
+
+`prefix + o` suspends navigation, sidebar and picker bindings and closes open sidebars. While suspended, the sidebar and picker cannot open, and original tmux bindings work (including `prefix + Space` for layouts when configured as the sidebar key). The status bar keeps an enable reminder visible. `prefix + o` remains available to reenable the keys; then use the sidebar key to reopen it. The toggle key is configurable with `@agent-plane-keys-toggle-key`.
+
 ## Caller identity
 
 Codex tool shells can inherit `TMUX_PANE` from a shared app-server. Their `CODEX_THREAD_ID`/`CODEX_SESSION_ID` identifies a thread, but current published files do not reliably associate that thread with its TUI pane. Never use `$TMUX_PANE` from a Codex tool shell. `list` works and marks no caller row for Codex. Use explicit agent names supplied in your task. If your own name is unknown, ask the lead to identify/name you. The CLI fails on Codex self references (including the inherited pane value) and `spawn --in pane`, since it cannot safely choose a caller pane. Use `spawn --in window` or `spawn --in session` and name yourself as the parent with `--parent <your name>`; spawn refuses a Codex caller without it, or with a name that is not a Codex agent. Do not unset Codex identity variables to bypass this error. Other callers may use `self`.

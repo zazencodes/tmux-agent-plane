@@ -422,7 +422,8 @@ def assert_cycle_keys(client):
     wait('departed row withdrawn', lambda: not any(a['name'] == 'nav-done' for a in index()['agents']))
     hop('next')
     hop('previous')
-    # Direct bindings work when the sidebar is open, and keep focus in an agent.
+    # Open the sidebar from the client's actual window, as the plugin key does.
+    plane('focus', 'nav-work')
     plane('toggle-sidebar', agent('nav-work')['window'])
     wait('sidebars open', lambda: all(w['sidebar'] for w in index()['windows']))
     wait('sidebar selection ready', lambda: client.selected() in [a['name'] for a in order()])
@@ -431,7 +432,7 @@ def assert_cycle_keys(client):
     client.key(keys['next'])
     selected(client, expected_name)
     # The global key previews the adjacent row and retains sidebar keyboard focus.
-    assert here() not in [a['pane'] for a in order()]
+    wait('sidebar keeps keyboard focus after preview', lambda: here() not in [a['pane'] for a in order()])
     client.key(b'\r')
     wait('open after global sidebar navigation', lambda: here() == agent(expected_name)['pane'])
     # Rebinding on plugin reload removes its old keys and preserves user replacements.
@@ -459,17 +460,14 @@ def assert_cycle_keys(client):
     hop('next')
     keys = default_keys
     hop('next')
-    # prefix + o turns every global key off: each reaches the agent instead, and the status bar
-    # says how to turn them back on. prefix + o again turns them on.
+    # Suspension closes every sidebar and returns the global keys to the agent.
     origin = here()
     name = next(a['name'] for a in index()['agents'] if a['pane'] == origin)
     client.key(b'\x02o')
     wait('keys off', lambda: tmux('show-option', '-gqv', '@agent-plane-keys') == 'off')
     wait('status says keys are off',
-         lambda: 'keys off · prefix o' in tmux('show-option', '-gqv', '@agent_plane_status'))
-    sidebar = next(w['sidebar'] for w in index()['windows'] if w['sidebar'])
-    wait('sidebar says keys are off',
-         lambda: 'global keys off · prefix o' in tmux('capture-pane', '-p', '-t', sidebar))
+         lambda: 'Agent Plane keys off · prefix o to enable' in tmux('show-option', '-gqv', '@agent_plane_status'))
+    wait('sidebars close', lambda: all(not w['sidebar'] for w in index()['windows']))
     sent = input_bytes(name)
     client.key(b'\x1bj\x1b[1;2B\x1bh')
     wait('off keys reach the agent',
@@ -480,8 +478,6 @@ def assert_cycle_keys(client):
     wait('keys on', lambda: tmux('show-option', '-gqv', '@agent-plane-keys') == 'on')
     wait('status no longer says off',
          lambda: 'keys off' not in tmux('show-option', '-gqv', '@agent_plane_status'))
-    wait('sidebar no longer says off',
-         lambda: 'global keys off' not in tmux('capture-pane', '-p', '-t', sidebar))
     hop('next')
     tmux('set-option', '-gu', '@agent-plane-next-key')
     subprocess.run(['bash', str(SOURCE.parent / 'tmux-agent-plane.tmux')], env=ENV, check=True)
@@ -493,6 +489,122 @@ def assert_cycle_keys(client):
             'explicit_client': True, 'shared_target_refused': True, 'departed_row': True,
             'works_with_sidebar_open': True, 'custom_keys_reload': True,
             'user_rebinding_preserved': True, 'key_lists': True, 'keys_toggle': True}
+
+
+def assert_suspend_keys(client):
+    """Actual prefix input, original tmux bindings, persistent notice, and reloads."""
+    plugin = SOURCE.parent / 'tmux-agent-plane.tmux'
+
+    def reload():
+        subprocess.run(['bash', str(plugin)], env=ENV, check=True)
+
+    def binding(table, key):
+        for line in tmux('list-keys', '-T', table).splitlines():
+            words = line.split()
+            i = words.index('-T')
+            if words[i + 2] == key:
+                return line
+        return ''
+
+    def off():
+        return tmux('show-option', '-gqv', '@agent-plane-keys') == 'off'
+
+    def no_sidebars():
+        return all(not w['sidebar'] for w in index()['windows'])
+
+    tmux('set-option', '-g', 'status-format[0]', 'TOP-STATUS #{@agent_plane_status}')
+    tmux('set-option', '-g', '@agent-plane-sidebar-key', 'Space')
+    # Preserve user commands, including quoting, alongside native Space/f defaults.
+    tmux('bind-key', 'a', 'display-message', 'user  original; quoted "text"')
+    tmux('bind-key', '-n', 'M-k', 'display-message', 'user-root')
+    # Release the previous installation before changing the underlying user binding.
+    plane('bindings', '--toggle')
+    tmux('bind-key', 'a', 'display-message', 'user  original; quoted "text"')
+    tmux('bind-key', '-n', 'M-k', 'display-message', 'user-root')
+    original_a = binding('prefix', 'a').split('display-message ', 1)[1]
+    plane('bindings', '--toggle')
+    reload()
+    client.key(b'\x02 ')
+    wait('sidebar opens with Space', lambda: all(w['sidebar'] for w in index()['windows']))
+    # Toggle from the sidebar itself: it closes without killing the toggle process.
+    client.key(b'\x02o')
+    wait('all keys off', off)
+    wait('all sidebars closed', no_sidebars)
+    reminder = 'Agent Plane keys off · prefix o to enable'
+    wait('permanent reminder', lambda: reminder in tmux('show-option', '-gqv', '@agent_plane_status'))
+    wait('reminder rendered at the top', lambda: reminder in client.screen.display[0])
+    assert 'next-layout' in binding('prefix', 'Space')
+    assert 'find-window' in binding('prefix', 'f')
+    assert original_a in binding('prefix', 'a')
+    assert 'user-root' in binding('root', 'M-k')
+    assert 'M-j' not in tmux('list-keys', '-T', 'root')
+    for command in [('toggle-sidebar', agent('nav-work')['window']),
+                    ('enter-sidebar', agent('nav-work')['window']),
+                    ('ui', '--client', client.context()[0])]:
+        result = subprocess.run([str(BINARY), *command], env=ENV, capture_output=True, text=True)
+        assert result.returncode and 'keys are off' in result.stderr, result
+    # Native next-layout runs from the actual terminal, on a shell-only window.
+    shell = tmux('list-windows', '-t', 'scratch', '-F', '#{window_id}').splitlines()[0]
+    tmux('split-window', '-h', '-t', shell, '/bin/sh')
+    tmux('switch-client', '-c', client.context()[0], '-t', shell)
+    tmux('select-layout', '-t', shell, 'even-horizontal')
+    before = tmux('display-message', '-p', '-t', shell, '#{window_layout}')
+    client.key(b'\x02 ')
+    wait('Space changes the native layout', lambda: tmux('display-message', '-p', '-t', shell, '#{window_layout}') != before)
+    # Reloads and new-window hooks stay suspended; the notice survives ordinary input.
+    reload()
+    tmux('new-window', '-d', '-t', 'scratch', '-n', 'off-shell', '/bin/sh')
+    plane('follow-sidebar', shell)
+    settle(1.2)
+    assert off() and no_sidebars()
+    assert reminder in tmux('show-option', '-gqv', '@agent_plane_status')
+    assert reminder in client.screen.display[0]
+    client.snapshot('keys-off-layout')
+    client.key(b'\x02o')
+    wait('keys enabled', lambda: not off())
+    wait('reminder cleared', lambda: 'keys off' not in tmux('show-option', '-gqv', '@agent_plane_status'))
+    assert no_sidebars(), 'enabling should leave the sidebar closed'
+    client.key(b'\x02 ')
+    wait('Space opens again', lambda: all(w['sidebar'] for w in index()['windows']))
+    # A custom enable key works, and the old key returns to its native pane command.
+    tmux('set-option', '-g', '@agent-plane-keys-toggle-key', 'e')
+    reload()
+    assert 'select-pane' in binding('prefix', 'o')
+    client.key(b'\x02e')
+    wait('custom toggle disables', off)
+    wait('custom toggle reminder', lambda: 'prefix e to enable' in tmux('show-option', '-gqv', '@agent_plane_status'))
+    wait('custom toggle closes sidebars', no_sidebars)
+    client.key(b'\x02e')
+    wait('custom toggle enables', lambda: not off())
+    # Invalid conflicting options fail before changing the existing bindings.
+    tmux('set-option', '-g', '@agent-plane-sidebar-key', 'e')
+    before = tmux('list-keys')
+    result = subprocess.run([str(BINARY), 'bindings'], env=ENV, capture_output=True, text=True)
+    assert result.returncode and 'repeated' in result.stderr
+    after = tmux('list-keys')
+    (ROOT / 'bindings-before.txt').write_text(before)
+    (ROOT / 'bindings-after.txt').write_text(after)
+    assert sorted(line.split() for line in after.splitlines()) == sorted(line.split() for line in before.splitlines())
+    # Upgrade a running pre-snapshot plugin: it already owns Space/f/o without originals.
+    tmux('set-option', '-g', '@agent-plane-sidebar-key', 'Space')
+    tmux('set-option', '-g', '@agent-plane-keys-toggle-key', 'o')
+    plane('bindings')
+    plane('bindings', '--toggle')
+    tmux('set-option', '-gu', '@agent-plane-bindings')
+    tmux('set-option', '-g', '@agent-plane-keys', 'on')
+    for key, command in [('Space', "tmux-agent-plane toggle-sidebar '#{window_id}'"),
+                         ('f', 'tmux-agent-plane ui --search'),
+                         ('o', 'tmux-agent-plane daemon tick')]:
+        tmux('bind-key', key, 'run-shell', command)
+    plane('bindings')
+    plane('bindings', '--toggle')
+    assert 'next-layout' in binding('prefix', 'Space')
+    assert 'find-window' in binding('prefix', 'f')
+    assert 'bindings --toggle' in binding('prefix', 'o')
+    assert 'user-root' in binding('root', 'M-k')
+    return {'legacy_plugin_upgrade': True, 'all_keys_suspend': True, 'native_layout_key': True, 'exact_user_bindings_restored': True,
+            'sidebars_closed_and_guarded': True, 'persistent_reminder': True,
+            'reload_while_off': True, 'custom_enable_key': True, 'conflicts_fail_before_changes': True}
 
 
 def bold_names(client):
@@ -1118,6 +1230,9 @@ try:
     change("nav-done", "idle", 1)
     change("nav-away", "blocked", 0)
     wait("states", lambda: agent("nav-done")["state"] == "done" and agent("nav-away")["state"] == "blocked")
+    if "--keys-only" in sys.argv[2:]:
+        RESULTS = {"passed": True, **assert_suspend_keys(client)}
+        sys.exit(0)
     if "--cycle-only" in sys.argv[2:]:
         RESULTS = {"passed": True, **assert_cycle_keys(client)}
         sys.exit(0)

@@ -403,6 +403,7 @@ impl App {
 }
 
 pub fn run(client: &str, search: bool) -> Result<()> {
+    crate::bindings::require_enabled()?;
     let mut terminal = ratatui::init();
     let result = event_loop(&mut terminal, client, search);
     ratatui::restore();

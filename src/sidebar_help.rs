@@ -200,9 +200,9 @@ fn lines(global: Result<Global, String>) -> Vec<Line<'static>> {
             lines.extend(global.keys.iter().map(|(key, action)| entry(key, action)));
             if let Some(toggle) = &global.toggle {
                 let action = if global.off {
-                    "Turn these on"
+                    "Enable Agent Plane"
                 } else {
-                    "Turn these off"
+                    "Suspend Agent Plane"
                 };
                 lines.push(entry(&format!("prefix {toggle}"), action));
             }
@@ -303,11 +303,14 @@ pub(crate) mod tests {
             text[1],
             format!("C-M-k S-Up{}Previous agent", " ".repeat(2))
         );
-        assert_eq!(text[2], format!("prefix o{}Turn these off", " ".repeat(4)));
+        assert_eq!(
+            text[2],
+            format!("prefix o{}Suspend Agent Plane", " ".repeat(4))
+        );
         global.off = true;
         let text = lines_text(Ok(global));
         assert_eq!(text[0], "Anywhere in tmux  off");
-        assert!(text[2].ends_with("Turn these on"));
+        assert!(text[2].ends_with("Enable Agent Plane"));
         let failed = lines_text(Err("no server running".into()));
         assert_eq!(failed[1], "no server running");
         assert_eq!(lines_text(Ok(Global::default()))[0], "Move");
