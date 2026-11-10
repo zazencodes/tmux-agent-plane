@@ -1,4 +1,4 @@
-# `tmux-agent-plane`
+# tmux-agent-plane
 
 <p align="center">
   <a href="https://github.com/zazencodes/tmux-agent-plane/actions/workflows/ci.yml"><img src="https://github.com/zazencodes/tmux-agent-plane/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -25,13 +25,11 @@ Open your coding agent (Claude Code, Codex or any other) and ask it:
 Install and configure tmux-agent-plane with me: https://github.com/zazencodes/tmux-agent-plane
 ```
 
-It reads this README, installs the pieces and asks you about the choices along the way. To do it by hand, follow [Install](#install).
+https://github.com/user-attachments/assets/aa11b86c-dab4-4c0a-b485-0f2c2e8fea59
 
 Start Claude Code, Codex or Antigravity in any tmux pane, the way you already do. `tmux-agent-plane` finds your agents, tracks whether each is working, waiting on you or done, and shows them in your status bar and agent list. The CLI and agent skill give your agents the same view, so they can check on, message, wait for or start each other.
 
 Claude Code, Codex and Antigravity use native signals. Add Pi, OpenCode or Grok Build with the opt-in integrations under [More agents](#more-agents): Pi and OpenCode use publishers built on their official extension APIs; Grok Build uses its official leader mode.
-
-https://github.com/user-attachments/assets/897c88e9-50fe-4c21-ab3f-0e1785ae2a5b
 
 ## Features
 
