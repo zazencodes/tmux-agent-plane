@@ -19,7 +19,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
         "Move",
         &[
             ("j k ↑ ↓", "Select and preview"),
-            ("gg G", "First / last row"),
+            ("gg G", "First / last agent"),
             ("enter l →", "Go to the selected row"),
         ],
     ),

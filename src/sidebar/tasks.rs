@@ -389,7 +389,7 @@ mod tests {
         }
         assert_eq!(seen, ["%1", "%2", "%57", "%56"]);
         assert_eq!(sidebar.navigation.pane.as_deref(), Some("%1"));
-        key(&mut sidebar, KeyCode::Char('G'));
+        key(&mut sidebar, KeyCode::Char('k'));
         assert_eq!(sidebar.selected_task().unwrap().definition.name, "worker");
         sidebar.rebuild();
         assert_eq!(sidebar.selected_task().unwrap().definition.name, "worker");
@@ -401,6 +401,47 @@ mod tests {
         key(&mut sidebar, KeyCode::Char('t'));
         assert!(sidebar.selected().is_some());
         assert_eq!(sidebar.row_count(), 2);
+    }
+
+    #[test]
+    fn boundary_jumps_select_agents_while_tasks_are_shown() {
+        let mut sidebar = with_tasks();
+        key(&mut sidebar, KeyCode::Char('t'));
+        sidebar.select(sidebar.task_row("%56"));
+        key(&mut sidebar, KeyCode::Char('G'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
+        assert!(sidebar.selected_task().is_none());
+        // Tasks remain reachable one row below the last agent.
+        key(&mut sidebar, KeyCode::Char('j'));
+        assert_eq!(sidebar.selected_task().unwrap().definition.name, "web-dev");
+        key(&mut sidebar, KeyCode::Char('g'));
+        key(&mut sidebar, KeyCode::Char('g'));
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        // With no agents, boundary jumps cannot select a task.
+        sidebar.all_agents.clear();
+        sidebar.rebuild();
+        for code in [KeyCode::Char('G'), KeyCode::Char('g'), KeyCode::Char('g')] {
+            key(&mut sidebar, code);
+        }
+        assert!(sidebar.list.selected().is_none());
+    }
+
+    #[test]
+    fn footer_has_a_blank_row_below_tasks_and_quota() {
+        for quota in [false, true] {
+            let mut sidebar = with_tasks();
+            key(&mut sidebar, KeyCode::Char('t'));
+            sidebar.quota.pinned = quota;
+            let screen = rendered(&mut sidebar);
+            let lines: Vec<_> = screen.lines().collect();
+            let footer = lines
+                .iter()
+                .position(|line| line.contains("c new"))
+                .unwrap();
+            assert!(lines[footer - 1].trim().is_empty(), "{screen}");
+            let last_content = if quota { "no quota read yet" } else { "worker" };
+            assert!(lines[footer - 2].contains(last_content), "{screen}");
+        }
     }
 
     #[test]
@@ -496,7 +537,7 @@ mod tests {
         assert!(quota_row(&screen).unwrap() > 0);
         assert!(sidebar.quota_key(u));
         let screen = rendered(&mut sidebar);
-        assert_eq!(quota_row(&screen), Some(16), "{screen}");
+        assert_eq!(quota_row(&screen), Some(15), "{screen}");
         assert!(!screen.contains("i details"));
         assert!(screen.contains("── quota ─"));
     }

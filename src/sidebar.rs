@@ -1072,9 +1072,9 @@ impl Sidebar {
             }
             KeyCode::Char('j') | KeyCode::Down => self.step(1),
             KeyCode::Char('k') | KeyCode::Up => self.step(-1),
-            KeyCode::Char('g') if pending_g => self.select((self.row_count() > 0).then_some(0)),
+            KeyCode::Char('g') if pending_g => self.select((!self.agents.is_empty()).then_some(0)),
             KeyCode::Char('g') => self.pending_g = true,
-            KeyCode::Char('G') => self.select(self.row_count().checked_sub(1)),
+            KeyCode::Char('G') => self.select(self.agents.len().checked_sub(1)),
             KeyCode::Char('n') => self.next_match(1),
             KeyCode::Char('N') => self.next_match(-1),
             KeyCode::Char('d') => {
@@ -1485,9 +1485,10 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         0
     };
     // Dock quota and the footer first, so scrolling content cannot push them off screen.
-    let [body_area, quota_area, help_area] = Layout::vertical([
+    let [body_area, quota_area, _, help_area] = Layout::vertical([
         Constraint::Min(0),
         Constraint::Length(quota_height),
+        Constraint::Length(1),
         Constraint::Length(footer_height),
     ])
     .areas(f.area());
@@ -2805,10 +2806,10 @@ mod tests {
         other.name = "elsewhere".into();
         let mut sidebar = showing(vec![agent("%1", State::Idle), other]);
         let heading_colour = |sidebar: &mut Sidebar| {
-            let mut terminal = Terminal::new(TestBackend::new(38, 12)).unwrap();
+            let mut terminal = Terminal::new(TestBackend::new(38, 13)).unwrap();
             terminal.draw(|frame| draw(frame, sidebar)).unwrap();
             let buffer = terminal.backend().buffer().clone();
-            let row = (0..12)
+            let row = (0..13)
                 .find(|&y| (0..38).any(|x| buffer[(x, y)].symbol() == "z"))
                 .unwrap();
             let x = (0..38).find(|&x| buffer[(x, row)].symbol() == "z").unwrap();

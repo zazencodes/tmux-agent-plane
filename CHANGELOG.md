@@ -5,6 +5,11 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Fixed
+
+- Jumping to the bottom of the sidebar stops at the last agent, even with tasks shown.
+- Keep one blank line between sidebar content and the key hints, with quota shown or hidden.
+
 ### Changed
 
 - Simplify the README, put Quick start first, update configuration and restore guidance, and credit quota-axi and T3 Code for their inspiration.

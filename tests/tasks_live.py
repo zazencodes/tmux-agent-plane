@@ -242,7 +242,7 @@ try:
     log = (STATE / "daemon.log").read_text()
     check("daemon log has no task faults", "[tasks" not in log and "[scan:" not in log)
 
-    # Sidebar: t shows tasks below the agents; j/k/G preview them, Enter opens, R restarts and
+    # Sidebar: t shows tasks below the agents; j/k preview them, Enter opens, R restarts and
     # x asks to stop. The plugin's hooks run as they would for a user.
     subprocess.run(["bash", str(SOURCE.parent / "tmux-agent-plane.tmux")], env=ENV, check=True)
     plane("spawn", "pi", "--in", "window", "--session", "harness", "--cwd", str(WORK),
@@ -270,7 +270,11 @@ try:
           and "✕" in flaky_row and "exit 2" in flaky_row)
     check("tasks come after the agents", text.index("── tasks") > text.index("watcher"))
     client.key(b"G")
-    eventually("G selects the last task", lambda: "web2" in client.selected())
+    eventually("G selects the last agent", lambda: "watcher" in client.selected())
+    client.key(b"j")
+    eventually("j selects the first task", lambda: "flaky" in client.selected())
+    client.key(b"j")
+    eventually("j selects the last task", lambda: "web2" in client.selected())
     eventually("moving onto a task previews its window",
                lambda: client.where()[0] == web2["window"])
     check("task footer offers stop and restart", "x stop" in client.text())
