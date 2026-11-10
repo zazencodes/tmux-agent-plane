@@ -178,9 +178,11 @@ Inside the sidebar, `l` and → also leave it for the selected agent. Each bindi
 
 #### Turning Agent Plane keys off
 
-Press **prefix + o** to suspend Agent Plane's keys. Open sidebars close, the sidebar and picker cannot open, and every navigation, sidebar and picker binding returns to what it did before the plugin loaded. For example, if you use `prefix + Space` for the sidebar, it returns to tmux's `next-layout` command while keys are off.
+Press **prefix + o** to suspend Agent Plane's global shortcuts. Every navigation, sidebar and picker binding returns to what it did before the plugin loaded, so Shift/Alt shortcuts can reach Codex and other programs. For example, if you use `prefix + Space` for the sidebar, it returns to tmux's `next-layout` command while keys are off.
 
-The status bar permanently shows **Agent Plane keys off · prefix o to enable** until you turn them back on. **prefix + o** remains available as the enable key. Reenabling restores Agent Plane's bindings; use the sidebar key to reopen it.
+Sidebars keep their current open or closed state. While shortcuts are off, you cannot open or close them (including with `q`), or open the picker. An open sidebar still follows new windows and works normally: use your tmux pane navigation, such as `prefix + h/j/k/l` when configured, to move in and out, then `j/k` or arrows to browse inside it. `enter-sidebar` can focus an open sidebar.
+
+The status bar permanently shows **Agent Plane keys off · prefix o to enable** until you turn them back on. **prefix + o** remains available as the enable key. Reenabling restores Agent Plane's bindings and keeps the sidebar's open or closed state.
 
 To start with them off, add `set -g @agent-plane-keys off` to `tmux.conf`. To toggle with another key, set `@agent-plane-keys-toggle-key` before the plugin loads:
 

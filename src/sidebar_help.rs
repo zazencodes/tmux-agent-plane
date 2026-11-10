@@ -51,7 +51,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("u", "Sidebar: expand quota"),
             ("b", "Agents to restore"),
             ("o", "Configure"),
-            ("q", "Close"),
+            ("q", "Close (sidebar: keys on)"),
         ],
     ),
 ];
@@ -200,9 +200,9 @@ fn lines(global: Result<Global, String>) -> Vec<Line<'static>> {
             lines.extend(global.keys.iter().map(|(key, action)| entry(key, action)));
             if let Some(toggle) = &global.toggle {
                 let action = if global.off {
-                    "Enable Agent Plane"
+                    "Enable global shortcuts"
                 } else {
-                    "Suspend Agent Plane"
+                    "Suspend global shortcuts"
                 };
                 lines.push(entry(&format!("prefix {toggle}"), action));
             }
@@ -305,12 +305,12 @@ pub(crate) mod tests {
         );
         assert_eq!(
             text[2],
-            format!("prefix o{}Suspend Agent Plane", " ".repeat(4))
+            format!("prefix o{}Suspend global shortcuts", " ".repeat(4))
         );
         global.off = true;
         let text = lines_text(Ok(global));
         assert_eq!(text[0], "Anywhere in tmux  off");
-        assert!(text[2].ends_with("Enable Agent Plane"));
+        assert!(text[2].ends_with("Enable global shortcuts"));
         let failed = lines_text(Err("no server running".into()));
         assert_eq!(failed[1], "no server running");
         assert_eq!(lines_text(Ok(Global::default()))[0], "Move");

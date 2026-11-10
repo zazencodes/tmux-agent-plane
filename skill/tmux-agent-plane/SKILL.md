@@ -36,7 +36,7 @@ Optional AI auto-naming is off by default and configured by the user with `o` in
 
 ## Suspending Agent Plane keys
 
-`prefix + o` suspends navigation, sidebar and picker bindings and closes open sidebars. While suspended, the sidebar and picker cannot open, and original tmux bindings work (including `prefix + Space` for layouts when configured as the sidebar key). The status bar keeps an enable reminder visible. `prefix + o` remains available to reenable the keys; then use the sidebar key to reopen it. The toggle key is configurable with `@agent-plane-keys-toggle-key`.
+`prefix + o` suspends global navigation, sidebar and picker bindings while preserving the sidebar's open or closed state. While suspended, sidebars cannot open or close (including with `q`), and the picker cannot open. Open sidebars stay usable, follow new windows, and accept their normal navigation keys. Use ordinary tmux pane navigation to move in and out; `enter-sidebar` can also focus an open sidebar. Original tmux bindings work (including `prefix + Space` for layouts when configured as the sidebar key). The status bar keeps an enable reminder visible. `prefix + o` remains available to reenable the keys. The toggle key is configurable with `@agent-plane-keys-toggle-key`.
 
 ## Caller identity
 

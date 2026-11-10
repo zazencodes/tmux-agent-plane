@@ -15,7 +15,7 @@ fi
 tmux set-option -g detach-on-destroy off
 
 # Install the configured keys, preserving the tmux bindings they replace. The toggle
-# restores those bindings and closes sidebars while Agent Plane keys are off.
+# restores those bindings while leaving open sidebars usable.
 tmux-agent-plane bindings
 # While the sidebar is open, a window gets one as soon as it exists, so its agent has its final
 # width before anyone looks at it. window-linked also fires for new sessions and moved panes.

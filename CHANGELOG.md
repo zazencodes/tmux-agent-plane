@@ -11,7 +11,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
-- Turning Agent Plane keys off closes sidebars and restores every navigation, sidebar and picker key to its original tmux binding, including `prefix + Space` for layouts. The status bar keeps an enable reminder visible; `prefix + o` turns the keys back on.
+- Turning Agent Plane keys off preserves open sidebars and their normal navigation. Opening or closing a sidebar is blocked until keys are back on. Global navigation, sidebar and picker keys return to their original tmux bindings, including `prefix + Space` for layouts. The status bar keeps an enable reminder visible; `prefix + o` turns the keys back on.
 - Use lowercase `prefix + o` to turn global navigation keys off or on, so you can pass them through to Codex and other programs.
 
 ## 0.7.0 - 2026-11-10

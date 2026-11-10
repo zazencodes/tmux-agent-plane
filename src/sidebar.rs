@@ -54,18 +54,24 @@ impl Origin<'_> {
 /// The sidebar key: close the sidebar everywhere when it is open, wherever you are; otherwise
 /// open it everywhere and move into this window's.
 pub fn toggle(window: &str) -> Result<()> {
+    let _lock = Lock::take()?;
+    crate::bindings::require_enabled()?;
     if is_open()? {
-        return close();
+        return close_locked();
     }
-    enter(window)
+    enter_locked(window)
 }
 
 /// The in key: move into this window's sidebar, opening it everywhere if it is closed. From
 /// inside the sidebar this changes nothing.
 pub fn enter(window: &str) -> Result<()> {
     let _lock = Lock::take()?;
-    crate::bindings::require_enabled()?;
+    enter_locked(window)
+}
+
+fn enter_locked(window: &str) -> Result<()> {
     if !is_open()? {
+        crate::bindings::require_enabled()?;
         tmux::run(&["set-option", "-g", OPEN, "1"])?;
         add_everywhere()?;
     }
@@ -77,7 +83,7 @@ pub fn enter(window: &str) -> Result<()> {
 /// agent has its final width before anyone looks at it.
 pub fn follow(window: &str) -> Result<()> {
     let _lock = Lock::take()?;
-    if crate::bindings::disabled()? || !is_open()? {
+    if !is_open()? {
         return Ok(());
     }
     match add(window) {
@@ -113,7 +119,7 @@ fn add_everywhere() -> Result<()> {
 
 /// The window's sidebar pane, added without moving you when the window has none.
 fn add(window: &str) -> Result<String> {
-    // enter/follow hold the sidebar lock across creation and the enabled-state check.
+    // enter/follow hold the sidebar lock across creation and the open-state check.
     let panes = tmux::run(&[
         "list-panes",
         "-t",
@@ -145,7 +151,13 @@ fn add(window: &str) -> Result<String> {
 }
 
 /// Close the sidebar in every window.
-pub(crate) fn close() -> Result<()> {
+fn close() -> Result<()> {
+    let _lock = Lock::take()?;
+    crate::bindings::require_enabled()?;
+    close_locked()
+}
+
+fn close_locked() -> Result<()> {
     tmux::run(&["set-option", "-gu", OPEN])?;
     let panes = tmux::run(&[
         "list-panes",
@@ -190,13 +202,10 @@ impl Drop for Lock {
 }
 
 pub fn run() -> Result<()> {
-    crate::bindings::require_enabled()?;
     let mut terminal = ratatui::init();
     let result = event_loop(&mut terminal);
     ratatui::restore();
-    result?;
-    // `q` closes the sidebar everywhere, this pane included.
-    close()
+    result
 }
 
 #[derive(Default)]
@@ -1400,7 +1409,12 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
                     && sidebar.editing.is_none()
                     && (sidebar.selected_task().is_some() || sidebar.open_selected().is_some());
                 if sidebar.key(key) {
-                    return Ok(());
+                    // Check live state under the binding toggle's lock: the index can lag
+                    // behind a just-pressed prefix + o. A refused q keeps this UI running.
+                    match close() {
+                        Ok(()) => return Ok(()),
+                        Err(error) => sidebar.notice = Some(error.to_string()),
+                    }
                 }
                 // Moving the selection previews it. Filter and search edits stay in this pane:
                 // only freezing the filter or accepting the search previews the final selection,

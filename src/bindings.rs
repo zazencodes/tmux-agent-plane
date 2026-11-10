@@ -218,8 +218,8 @@ pub fn apply(toggle: bool) -> Result<()> {
             );
         }
     }
-    // Validation precedes any changes. The same lock serializes sidebar creation, so an
-    // in-flight window hook cannot leave a new sidebar behind after disabling keys.
+    // Validation precedes any changes. Share the sidebar lock so toggling keys cannot race
+    // an explicit sidebar open or close.
     let saved = option(SAVED)?;
     let current = tmux::run(&["list-keys"])?;
     if saved.is_empty() {
@@ -237,7 +237,6 @@ pub fn apply(toggle: bool) -> Result<()> {
     }
     if off {
         tmux::run(&["set-option", "-g", KEYS, "off"])?;
-        sidebar::close()?;
     }
     let originals = tmux::run(&["list-keys"])?;
     let mut bindings = Vec::new();
