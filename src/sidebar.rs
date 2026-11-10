@@ -1785,7 +1785,7 @@ fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
     })
 }
 
-/// ` global keys off · prefix g`, for the bottom left of the sidebar and the picker.
+/// ` global keys off · prefix o`, for the bottom left of the sidebar and the picker.
 pub(crate) fn keys_off(keys: &crate::tmux::GlobalKeys) -> Span<'static> {
     let text = match &keys.toggle {
         Some(key) => format!(" global keys off · prefix {key} "),
@@ -2035,7 +2035,7 @@ mod tests {
         let mut sidebar = Sidebar {
             global_keys: crate::tmux::GlobalKeys {
                 off: true,
-                toggle: Some("g".into()),
+                toggle: Some("o".into()),
             },
             recent_event: Some(RecentEvent {
                 name: "grok-support".into(),
@@ -2051,7 +2051,7 @@ mod tests {
         );
         assert_eq!(
             footer(&sidebar, 38, 5100).to_string(),
-            " global keys off · prefix g "
+            " global keys off · prefix o "
         );
         sidebar.global_keys.off = false;
         assert!(footer(&sidebar, 38, 5100).to_string().contains("jump"));

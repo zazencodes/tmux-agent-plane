@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Changed
+
+- Use lowercase `prefix + o` to turn global navigation keys off or on, so you can pass them through to Codex and other programs.
+
 ## 0.7.0 - 2026-11-10
 
 ### Changed

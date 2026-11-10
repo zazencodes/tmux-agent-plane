@@ -291,7 +291,7 @@ pub(crate) mod tests {
         let mut global = Global {
             keys: vec![("C-M-k S-Up".into(), "Previous agent")],
             off: false,
-            toggle: Some("g".into()),
+            toggle: Some("o".into()),
         };
         let text = lines_text(Ok(Global {
             keys: global.keys.clone(),
@@ -303,7 +303,7 @@ pub(crate) mod tests {
             text[1],
             format!("C-M-k S-Up{}Previous agent", " ".repeat(2))
         );
-        assert_eq!(text[2], format!("prefix g{}Turn these off", " ".repeat(4)));
+        assert_eq!(text[2], format!("prefix o{}Turn these off", " ".repeat(4)));
         global.off = true;
         let text = lines_text(Ok(global));
         assert_eq!(text[0], "Anywhere in tmux  off");

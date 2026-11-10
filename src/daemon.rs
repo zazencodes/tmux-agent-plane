@@ -554,12 +554,12 @@ mod tests {
     fn the_status_says_when_global_keys_are_off_and_how_to_turn_them_on() {
         let mut keys = tmux::GlobalKeys::default();
         assert_eq!(keys_status(&keys), "");
-        keys.toggle = Some("g".into());
+        keys.toggle = Some("o".into());
         assert_eq!(keys_status(&keys), "");
         keys.off = true;
         assert_eq!(
             keys_status(&keys),
-            "#[fg=#f9e2af]keys off · prefix g#[default] "
+            "#[fg=#f9e2af]keys off · prefix o#[default] "
         );
     }
     use crate::tmux::Pane;

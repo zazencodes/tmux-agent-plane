@@ -459,24 +459,24 @@ def assert_cycle_keys(client):
     hop('next')
     keys = default_keys
     hop('next')
-    # prefix + g turns every global key off: each reaches the agent instead, and the status bar
-    # says how to turn them back on. prefix + g again turns them on.
+    # prefix + o turns every global key off: each reaches the agent instead, and the status bar
+    # says how to turn them back on. prefix + o again turns them on.
     origin = here()
     name = next(a['name'] for a in index()['agents'] if a['pane'] == origin)
-    client.key(b'\x02g')
+    client.key(b'\x02o')
     wait('keys off', lambda: tmux('show-option', '-gqv', '@agent-plane-keys') == 'off')
     wait('status says keys are off',
-         lambda: 'keys off · prefix g' in tmux('show-option', '-gqv', '@agent_plane_status'))
+         lambda: 'keys off · prefix o' in tmux('show-option', '-gqv', '@agent_plane_status'))
     sidebar = next(w['sidebar'] for w in index()['windows'] if w['sidebar'])
     wait('sidebar says keys are off',
-         lambda: 'global keys off · prefix g' in tmux('capture-pane', '-p', '-t', sidebar))
+         lambda: 'global keys off · prefix o' in tmux('capture-pane', '-p', '-t', sidebar))
     sent = input_bytes(name)
     client.key(b'\x1bj\x1b[1;2B\x1bh')
     wait('off keys reach the agent',
          lambda: input_bytes(name)[len(sent):] == b'\x1bj\x1b[1;2B\x1bh')
     settle(0.5)
     assert here() == origin
-    client.key(b'\x02g')
+    client.key(b'\x02o')
     wait('keys on', lambda: tmux('show-option', '-gqv', '@agent-plane-keys') == 'on')
     wait('status no longer says off',
          lambda: 'keys off' not in tmux('show-option', '-gqv', '@agent_plane_status'))
