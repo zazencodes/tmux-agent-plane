@@ -5,6 +5,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+## 0.7.0 - 2026-11-10
+
 ### Changed
 
 - Restore `gg` to jump to the first agent and move the graph toggle back to `p` in the sidebar, picker and configuration.
