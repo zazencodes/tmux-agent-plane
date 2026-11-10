@@ -10,6 +10,10 @@ if ! command -v tmux-agent-plane >/dev/null; then
   exit 0
 fi
 
+# Closing a session keeps its clients in tmux while another session remains,
+# whether or not the sidebar is open. tmux chooses the most recently active one.
+tmux set-option -g detach-on-destroy off
+
 # prefix + S (or @agent-plane-sidebar-key): open the agent sidebar on the left of every window
 # and move into it; close it everywhere when you are in it.
 sidebar_key="$(tmux show-option -gqv @agent-plane-sidebar-key)"

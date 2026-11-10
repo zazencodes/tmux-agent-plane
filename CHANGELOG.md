@@ -27,6 +27,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Closing a session switches you to the most recently active remaining session, with or without the sidebar; closing the final session exits tmux
 - Shown background tasks stay at the bottom of the sidebar, below the family graph, while the agent list scrolls
 
 - A parent link now belongs to the agents, not their panes: it ends when the spawned agent exits, so an agent started later in the same pane no longer inherits it, and `list` shows `ended` once the parent has exited. `spawn` from a plain shell records no parent
