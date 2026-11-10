@@ -359,6 +359,7 @@ impl App {
         if key.code == KeyCode::Char('c')
             && key.modifiers.contains(KeyModifiers::CONTROL)
             && self.sidebar.unfiltered()
+            && !self.sidebar.auto_name.open
         {
             return ControlFlow::Break(None);
         }

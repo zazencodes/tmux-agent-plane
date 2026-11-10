@@ -27,6 +27,9 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Quota details expand upward from the bottom, keeping agents visible; `u` expands/collapses them. Expired logins disappear from quota.
+- Configuration sits at the bottom left, with arrow/j/k navigation, Enter/Space choices, checkboxes, saved confirmations and Accept. Escape goes back; Ctrl+C closes. Choose a background agent separately from automatic naming, and set each agent’s default launch model and effort.
+
 - `u` shows or hides quota pinned at the bottom of the sidebar, below the graph and tasks, while browsing stays active. `i` opens full quota details; `Esc` returns to the panel
 - The parent/child diagram is called Graph in configuration, panel headings and help
 - Closing a session switches you to the most recently active remaining session, with or without the sidebar; closing the final session exits tmux

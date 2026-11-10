@@ -234,7 +234,7 @@ set -g @agent-plane-keys-toggle-key e
 | `c` | Start a new agent in the selected agent's project. Pick the kind with arrows or `j`/`k`, then `Enter`: it opens in a new window of that session, in that agent's directory, and takes you there. `Esc` or `c` cancels |
 | `Tab` | In the popup, type to the selected agent inside the preview; `Tab` again returns to the menu |
 | `u` | Show or hide the [quota panel](#quota), pinned at the bottom below the graph and tasks. Browsing and filtering keep working; the panel stays until you press `u` again |
-| `i` | With the quota panel shown, open its full details. `Esc` returns to the panel; `u` hides quota. In details, `r` reads again, `j`/`k` scroll, and `Enter` allows reading Claude's login from the macOS Keychain when its card asks |
+| `i` | With the quota panel shown, open its full details. `Esc` returns to the panel; `u` collapses quota. In details, `r` reads again, `j`/`k` scroll, and `Enter` allows reading Claude's login from the macOS Keychain when its card asks |
 | `?` | Show the shortcuts: the plugin's tmux keys as you have them bound, whether they are off, and the key that turns them on or off, then the list keys by what they do. Keys that only matter mid-action, such as confirming or editing text, show in the footer at the time. Any key closes help and is consumed. On short terminals, reopen `?` for the next page; `?` stays literal text during search, filter and rename |
 | `q` | Close the sidebar everywhere; close the popup |
 
@@ -299,7 +299,7 @@ Desktop notifications keep the task or blocked detail and work with the sidebar 
 
 ### Quota
 
-Press `u` in the sidebar to pin a quota panel at the bottom, below the graph and background tasks. It stays while you browse, search, filter or open agents; press `u` again to hide it. Each sidebar keeps its own toggle. `o`, then `u` sets whether new sidebars open with quota shown; the default is off.
+Press `u` in the sidebar to pin a quota panel at the bottom, below the graph and background tasks. It stays while you browse, search, filter or open agents; press `u` again to collapse it. Each sidebar keeps its own toggle. `o`, then `u` sets whether new sidebars open with quota shown; the default is off.
 
 ```
 ╭ quota ─────────────────────────────╮
@@ -307,10 +307,10 @@ Press `u` in the sidebar to pin a quota panel at the bottom, below the graph and
 │ ◐ codex  ━━━━━━━━━━━──  83% 3d0h   │
 │ ● agy    ━╸─┃─────────  10% 1h0m   │
 │ ○ grok   login expired             │
-╰ i details  u hide ─────────────────╯
+╰ i details  u expand ─────────────────╯
 ```
 
-The panel shows one line per plan you have set up, with what is left of its tightest window and the time to reset. With the panel shown, `i` opens the full details; `Esc` returns to the pinned panel and `u` hides quota:
+The panel shows one line per plan you have set up, with what is left of its tightest window and the time to reset. With the panel shown, `i` opens the full details; `Esc` returns to the pinned panel and `u` collapses quota:
 
 ```
 ╭ quota · 14:02 · refreshing… ───────╮
@@ -324,7 +324,7 @@ The panel shows one line per plan you have set up, with what is left of its tigh
 │   …                                │
 │ ○ grok   not set up                │
 ╰────────────────────────────────────╯
- r refresh  esc back  u hide
+ r refresh  esc back  u expand
 ```
 
 Each card shows what is left of the plan's tightest window (the headline), then every window with its time to reset. Percentages are what is left: green from 50%, yellow from 20%, red below. `┃` marks where the bar would be if you used the window evenly up to its reset: fill short of the marker means you are using it faster than the clock. The verdict on the right is `on pace ✓` when every window lasts to its reset, `empty in 7h21m` when, at the rate so far this window, one runs out first, `✗ exhausted now`, or `runway unknown` when a window's cycle is not known. Antigravity shows its Gemini and Claude/GPT groups separately, because each is its own budget.
@@ -570,3 +570,7 @@ See [CHANGELOG.md](CHANGELOG.md). Releases are tagged `vX.Y.Z`.
   <br>
   Created by <a href="https://zazencodes.com/">ZazenCodes</a>
 </p>
+
+Configuration (`o`) opens at the bottom left. Use arrows or j/k, Enter or Space to choose or toggle, and Accept to close. Changes save immediately with a confirmation. Escape goes back; Ctrl+C closes. Choose a background agent for naming, then enable automatic naming separately. Each agent has editable model and effort defaults used by the launcher and `spawn` when no explicit agent arguments are supplied. Empty values use the agent CLI’s own defaults.
+
+Quota (`u`) expands above the bottom of the sidebar with agents still visible. Press `u` or Escape to return to the compact panel; `i` also expands it. Expired logins are omitted.

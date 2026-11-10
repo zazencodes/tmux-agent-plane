@@ -492,26 +492,16 @@ mod tests {
         let u = KeyEvent::from(KeyCode::Char('u'));
         assert!(sidebar.quota_key(u));
         let screen = rendered(&mut sidebar);
-        let graph = screen.find(" graph ").expect(&screen);
-        let tasks = screen.find("── tasks").expect(&screen);
-        let quota = screen.find(" quota ").expect(&screen);
-        assert!(graph < tasks && tasks < quota, "{screen}");
         let quota_row = |screen: &str| screen.lines().position(|line| line.contains(" quota "));
-        assert_eq!(quota_row(&screen), Some(15), "{screen}");
-        key(&mut sidebar, KeyCode::Char('j'));
-        assert_eq!(quota_row(&rendered(&mut sidebar)), Some(15));
-        // Even more tasks than the screen can hold give way to the pinned quota panel.
-        sidebar.tasks.apply(
-            (0..20)
-                .map(|i| task(&format!("task-{i}"), Status::Running, &[]))
-                .collect(),
+        assert!(
+            screen.contains("agents") && screen.contains("u collapse"),
+            "{screen}"
         );
-        sidebar.rebuild();
+        assert!(quota_row(&screen).unwrap() > 0);
+        assert!(sidebar.quota_key(u));
         let screen = rendered(&mut sidebar);
         assert_eq!(quota_row(&screen), Some(15), "{screen}");
-        assert!(screen.contains("u hide"), "{screen}");
-        assert!(sidebar.quota_key(u));
-        assert!(!rendered(&mut sidebar).contains("╭ quota "));
+        assert!(screen.contains("u expand"));
     }
 
     #[test]

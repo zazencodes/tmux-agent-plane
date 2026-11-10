@@ -1459,10 +1459,6 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         sidebar.help.draw(f, f.area());
         return;
     }
-    if sidebar.quota.open {
-        sidebar.quota.draw(f, f.area());
-        return;
-    }
     if sidebar.auto_name.open {
         sidebar.auto_name.draw(f, f.area());
         return;
@@ -1474,7 +1470,14 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let confirmation = confirmation_footer(sidebar, f.area().width as usize);
     let footer_height = confirmation.as_ref().map_or(2, |lines| lines.len() as u16);
     let quota_height = if sidebar.quota.pinned {
-        sidebar.quota.panel_height()
+        if sidebar.quota.open {
+            f.area()
+                .height
+                .saturating_sub(6)
+                .min(f.area().height * 2 / 3)
+        } else {
+            sidebar.quota.panel_height()
+        }
     } else {
         0
     };
@@ -1488,7 +1491,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     // An agent with no parent and no children has nothing to draw.
     let family = sidebar
         .selected()
-        .filter(|_| sidebar.navigation.family && sidebar.error.is_none())
+        .filter(|_| sidebar.navigation.family && sidebar.error.is_none() && !sidebar.quota.open)
         .map(|selected| family::family(&sidebar.all_agents, selected))
         .filter(|family| !family.alone());
     let task_items = tasks::items(
@@ -1500,11 +1503,15 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         sidebar.in_use.as_deref(),
         f.area().width.saturating_sub(2) as usize,
     );
-    let tasks_height = task_items
-        .iter()
-        .map(|item| item.height() as u16)
-        .sum::<u16>()
-        .min(body_area.height.saturating_sub(3));
+    let tasks_height = if sidebar.quota.open {
+        0
+    } else {
+        task_items
+            .iter()
+            .map(|item| item.height() as u16)
+            .sum::<u16>()
+            .min(body_area.height.saturating_sub(3))
+    };
     // Reserve tasks first; the family shares the remaining room with agents.
     let remaining = body_area.height.saturating_sub(tasks_height);
     // The family takes at most half the remaining height.
@@ -1524,7 +1531,11 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         family.render(inner, f.buffer_mut());
     }
     if sidebar.quota.pinned {
-        sidebar.quota.draw_panel(f, quota_area);
+        if sidebar.quota.open {
+            sidebar.quota.draw(f, quota_area);
+        } else {
+            sidebar.quota.draw_panel(f, quota_area);
+        }
     }
     let tasks_area = tasks_area.inner(ratatui::layout::Margin::new(1, 0));
     let mut task_state = ListState::default().with_selected(

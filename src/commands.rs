@@ -345,7 +345,10 @@ pub struct Spawn {
     pub timeout: Option<u64>,
 }
 
-pub fn spawn(s: Spawn) -> Result<()> {
+pub fn spawn(mut s: Spawn) -> Result<()> {
+    if s.agent_args.is_empty() {
+        s.agent_args = crate::autoname_config::read()?.launch_args(s.kind);
+    }
     // Validate the interactive launch before creating a pane or contacting tmux.
     let launch = (s.kind.adapter().launch)(s.task.as_deref(), &s.agent_args)?;
     validate_session_placement(s.placement, s.session.as_deref())?;
@@ -542,7 +545,8 @@ fn spawn_parent(
 }
 
 pub fn open_agent_window(kind: Kind, session: &str, cwd: &str) -> Result<(String, String)> {
-    let launch = (kind.adapter().launch)(None, &[])?;
+    let args = crate::autoname_config::read()?.launch_args(kind);
+    let launch = (kind.adapter().launch)(None, &args)?;
     let cwd = std::path::Path::new(cwd).canonicalize()?;
     let cwd = cwd.to_str().expect("cwd is UTF-8");
     let shell = tmux::default_shell(Some(session))?;

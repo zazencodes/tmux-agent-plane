@@ -115,8 +115,13 @@ impl View {
     /// While details are open, every key but `?` is the view's; Esc returns to the panel.
     pub fn key(&mut self, key: KeyEvent, can_open: bool) -> bool {
         if can_open && key.code == KeyCode::Char('u') && key.modifiers.is_empty() {
-            self.pinned = !self.pinned;
-            self.open = false;
+            if self.open {
+                self.open = false;
+            } else {
+                self.pinned = true;
+                self.open = true;
+                self.scroll = 0;
+            }
             return true;
         }
         if !self.open {
@@ -170,7 +175,7 @@ impl View {
             title.push_str("· refreshing… ");
         }
         let block =
-            panel(Line::from(title)).title_bottom(hints(&[("i", "details"), ("u", "hide")]));
+            panel(Line::from(title)).title_bottom(hints(&[("i", "details"), ("u", "expand")]));
         let inner = block.inner(area);
         f.render_widget(block, area);
         let width = usize::from(inner.width.saturating_sub(2)).max(1);
@@ -221,7 +226,7 @@ impl View {
         if self.feed.needs_keychain() {
             keys.push(("⏎", "allow"));
         }
-        keys.extend([("r", "refresh"), ("esc", "back"), ("u", "hide")]);
+        keys.extend([("r", "refresh"), ("esc", "back"), ("u", "collapse")]);
         if self.lines > self.height {
             keys.push(("j k", "scroll"));
         }
@@ -274,8 +279,8 @@ mod tests {
             all.contains("◐ codex") && all.contains("claude/gpt"),
             "{all}"
         );
-        assert!(all.contains("○ grok"));
-        assert!(rows[38].contains("r refresh") && rows[38].contains("u hide"));
+        assert!(!all.contains("○ grok"));
+        assert!(rows[38].contains("r refresh") && rows[38].contains("u collapse"));
         assert!(!rows[38].contains("allow"));
     }
 
@@ -320,6 +325,8 @@ mod tests {
         assert!(!view.pinned);
         assert!(!view.key(key(KeyCode::Char('i')), true));
         assert!(view.key(key(KeyCode::Char('u')), true));
+        assert!(view.pinned && view.open);
+        assert!(view.key(key(KeyCode::Char('u')), true));
         assert!(view.pinned && !view.open);
         for code in [
             KeyCode::Char('j'),
@@ -336,7 +343,7 @@ mod tests {
         assert!(view.pinned && !view.open);
         assert!(view.key(key(KeyCode::Char('i')), true));
         assert!(view.key(key(KeyCode::Char('u')), true));
-        assert!(!view.pinned && !view.open);
+        assert!(view.pinned && !view.open);
     }
 
     #[test]
@@ -350,7 +357,7 @@ mod tests {
             ..View::default()
         };
         let height = view.panel_height();
-        assert_eq!(height, 6, "four providers and two borders");
+        assert_eq!(height, 5, "three active providers and two borders");
         let mut terminal = Terminal::new(TestBackend::new(38, height)).unwrap();
         let now = crate::quota::tests::at(render::tests::NOW);
         terminal
@@ -363,13 +370,7 @@ mod tests {
         assert!(rows[0].starts_with("╭ quota "), "{}", rows[0]);
         assert!(rows[1].starts_with("│ ● claude ━"), "{}", rows[1]);
         assert!(rows[1].ends_with("72% 4d21h  │"), "{}", rows[1]);
-        assert!(
-            rows[4].starts_with("│ ○ grok   login expired"),
-            "{}",
-            rows[4]
-        );
-        assert!(
-            rows[5].starts_with('╰') && rows[5].contains("i details") && rows[5].contains("u hide")
-        );
+        assert!(rows[4].starts_with('╰') && rows[4].contains("u expand"));
+        assert!(!rows.join("\n").contains("expired"));
     }
 }

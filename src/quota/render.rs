@@ -349,10 +349,21 @@ pub fn card(provider: &Provider, now: Time, width: usize, in_view: bool) -> Vec<
     lines
 }
 
+/// An expired login means this plan is currently unused.
+fn visible(provider: &super::Provider) -> bool {
+    !provider.error.as_deref().is_some_and(|error| {
+        let error = error.to_ascii_lowercase();
+        error.contains("expired")
+            && ["login", "token", "session", "credential"]
+                .iter()
+                .any(|word| error.contains(word))
+    })
+}
+
 /// Every card, a blank line apart.
 pub fn cards(snapshot: &Snapshot, now: Time, width: usize, in_view: bool) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    for provider in &snapshot.providers {
+    for provider in snapshot.providers.iter().filter(|p| visible(p)) {
         if !lines.is_empty() {
             lines.push(Line::default());
         }
@@ -367,7 +378,7 @@ pub fn summary(snapshot: &Snapshot, now: Time, width: usize) -> Vec<Line<'static
     snapshot
         .providers
         .iter()
-        .filter(|p| p.status != Status::NotSetUp)
+        .filter(|p| p.status != Status::NotSetUp && visible(p))
         .map(|provider| {
             let name = Span::styled(
                 format!("{:<6} ", provider.provider.as_str()),
@@ -662,8 +673,8 @@ pub(crate) mod tests {
             assert!(all.contains("◐ codex"));
             assert!(all.contains("stale"));
             assert!(all.contains("gemini") && all.contains("claude/gpt"));
-            assert!(all.contains("○ grok"));
-            assert!(all.contains("run grok to renew it"));
+            assert!(!all.contains("○ grok"));
+            assert!(!all.contains("run grok to renew it"));
         }
         let wide = plain(&cards(&snapshot, at(NOW), 40, true));
         assert_eq!(
@@ -742,13 +753,13 @@ pub(crate) mod tests {
             .iter()
             .map(|l| l.trim_end().to_string())
             .collect();
-        assert_eq!(lines.len(), 4, "{lines:#?}");
+        assert_eq!(lines.len(), 3, "{lines:#?}");
         for line in plain(&summary(&snapshot, at(NOW), 34)).iter().take(3) {
             assert_eq!(line.chars().count(), 34, "{line:?}");
         }
         assert!(lines[0].starts_with("● claude ━") && lines[0].ends_with(" 72% 4d21h"));
         assert!(lines[1].starts_with("◐ codex  ") && lines[1].ends_with(" 83% 3d0h"));
         assert!(lines[2].starts_with("● agy    ") && lines[2].ends_with(" 10% 1h0m"));
-        assert_eq!(lines[3], "○ grok   login expired");
+        assert!(!lines.iter().any(|line| line.contains("expired")));
     }
 }

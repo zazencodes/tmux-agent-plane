@@ -9,6 +9,43 @@ use std::path::{Path, PathBuf};
 pub struct Config {
     pub auto_name: AutoName,
     pub sidebar: Sidebar,
+    pub defaults: std::collections::BTreeMap<String, AgentDefaults>,
+}
+
+/// Explicit launch preferences, shared by the launcher and CLI.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct AgentDefaults {
+    pub model: String,
+    pub effort: String,
+}
+
+impl Config {
+    pub fn launch_args(&self, kind: crate::index::Kind) -> Vec<String> {
+        let Some(defaults) = self.defaults.get(kind.as_str()) else {
+            return Vec::new();
+        };
+        let mut args = Vec::new();
+        if !defaults.model.is_empty() {
+            args.extend(["--model".into(), defaults.model.clone()]);
+        }
+        if !defaults.effort.is_empty() {
+            let flag = match kind {
+                crate::index::Kind::Codex => "--config",
+                crate::index::Kind::Pi => "--thinking",
+                crate::index::Kind::Grok => "--reasoning-effort",
+                crate::index::Kind::Opencode => "--variant",
+                _ => "--effort",
+            };
+            let value = if kind == crate::index::Kind::Codex {
+                format!("model_reasoning_effort=\"{}\"", defaults.effort)
+            } else {
+                defaults.effort.clone()
+            };
+            args.extend([flag.into(), value]);
+        }
+        args
+    }
 }
 
 /// What a sidebar shows when it opens. `t` still shows or hides one sidebar's tasks.
@@ -267,6 +304,23 @@ pub fn model_summary(command: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn explicit_launch_defaults_round_trip() {
+        let cfg =
+            parse(br#"{"defaults":{"codex":{"model":"test-model","effort":"medium"}}}"#).unwrap();
+        assert_eq!(
+            cfg.launch_args(crate::index::Kind::Codex),
+            [
+                "--model",
+                "test-model",
+                "--config",
+                "model_reasoning_effort=\"medium\""
+            ]
+        );
+        assert!(cfg.launch_args(crate::index::Kind::Claude).is_empty());
+        assert_eq!(parse(&serde_json::to_vec(&cfg).unwrap()).unwrap(), cfg);
+    }
+
     #[test]
     fn agy_takes_the_prompt_as_the_value_of_print() {
         let command = preset('5').unwrap();

@@ -21,11 +21,14 @@ pub struct Setup {
     config_error: Option<String>,
     /// Presets whose CLI was not on `PATH` when the menu opened.
     missing: Vec<char>,
+    selected: usize,
+    notice: Option<String>,
+    editing: Option<(String, bool, String)>,
     /// Sidebar settings just saved with `t` or `u`, for the sidebar to take up.
     pub saved_sidebar: Option<config::Sidebar>,
 }
 
-/// A wider screen, such as the picker's, shows the setup as a centred card of this width.
+/// Keep configuration readable in the bottom-left of wider screens.
 const CARD_WIDTH: u16 = 60;
 
 impl Setup {
@@ -49,6 +52,9 @@ impl Setup {
         self.command = None;
         self.custom = None;
         self.error = None;
+        self.notice = None;
+        self.editing = None;
+        self.selected = 0;
     }
 
     /// True consumes the key, so setup Enter never jumps to an agent behind the screen.
@@ -60,12 +66,123 @@ impl Setup {
             }
             return false;
         }
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.open = false;
+            self.command = None;
+            self.custom = None;
+            self.editing = None;
+            return true;
+        }
+        if key.code == KeyCode::Esc && self.editing.take().is_some() {
+            return true;
+        }
         if key.code == KeyCode::Esc {
             if self.custom.take().is_none() && self.command.take().is_none() {
                 self.open = false;
             }
             self.error = None;
             return true;
+        }
+        if let Some((kind, effort, input)) = &mut self.editing {
+            match key.code {
+                KeyCode::Enter => {
+                    let kind = kind.clone();
+                    let effort = *effort;
+                    let value = input.trim().to_string();
+                    let result = config::read().and_then(|mut cfg| {
+                        let defaults = cfg.defaults.entry(kind).or_default();
+                        if effort {
+                            defaults.effort = value;
+                        } else {
+                            defaults.model = value;
+                        }
+                        config::write(&cfg)?;
+                        Ok(cfg)
+                    });
+                    match result {
+                        Ok(cfg) => {
+                            self.config = cfg;
+                            self.editing = None;
+                            self.notice = Some("Saved".into());
+                        }
+                        Err(e) => self.error = Some(format!("{e:#}")),
+                    }
+                }
+                KeyCode::Backspace => {
+                    input.pop();
+                }
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => input.push(c),
+                _ => {}
+            }
+            return true;
+        }
+        let mut key = key;
+        if self.command.is_none() && self.custom.is_none() && key.modifiers.is_empty() {
+            match key.code {
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.selected = (self.selected + 1).min(23);
+                    return true;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.selected = self.selected.saturating_sub(1);
+                    return true;
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    let code = match self.selected {
+                        0..=6 => KeyCode::Char(char::from(b'1' + self.selected as u8)),
+                        7 => {
+                            if !self.config.auto_name.enabled
+                                && self.config.auto_name.command.is_empty()
+                            {
+                                self.error = Some("Choose a background agent first".into());
+                                return true;
+                            }
+                            let result = config::read().and_then(|mut cfg| {
+                                cfg.auto_name.enabled = !cfg.auto_name.enabled;
+                                config::write(&cfg)?;
+                                Ok(cfg)
+                            });
+                            match result {
+                                Ok(cfg) => {
+                                    self.config = cfg;
+                                    self.notice = Some("Saved".into());
+                                }
+                                Err(e) => self.error = Some(format!("{e:#}")),
+                            }
+                            return true;
+                        }
+                        8 => KeyCode::Char('t'),
+                        9 => KeyCode::Char('u'),
+                        10 => KeyCode::Char('p'),
+                        11..=22 => {
+                            let i = self.selected - 11;
+                            let kind = ["claude", "codex", "pi", "opencode", "agy", "grok"][i / 2]
+                                .to_string();
+                            let effort = i % 2 == 1;
+                            let current = self
+                                .config
+                                .defaults
+                                .get(&kind)
+                                .map(|d| {
+                                    if effort {
+                                        d.effort.clone()
+                                    } else {
+                                        d.model.clone()
+                                    }
+                                })
+                                .unwrap_or_default();
+                            self.editing = Some((kind, effort, current));
+                            return true;
+                        }
+                        _ => {
+                            self.open = false;
+                            return true;
+                        }
+                    };
+                    key.code = code;
+                }
+                _ => {}
+            }
         }
         if let Some(input) = &mut self.custom {
             match key.code {
@@ -81,6 +198,7 @@ impl Setup {
                             self.output = Output::Text;
                             self.custom = None;
                             self.error = None;
+                            self.notice = Some("Saved".into());
                         }
                         Err(error) => self.error = Some(format!("{error:#}")),
                     }
@@ -99,10 +217,9 @@ impl Setup {
                 _ => {}
             }
         } else if self.command.is_some() {
-            if key.code == KeyCode::Enter && key.modifiers.is_empty() {
+            if matches!(key.code, KeyCode::Enter | KeyCode::Char(' ')) && key.modifiers.is_empty() {
                 let result: Result<Config> = (|| {
                     let mut config = config::read()?;
-                    config.auto_name.enabled = true;
                     config.auto_name.command = self.command.clone().unwrap();
                     config.auto_name.output = self.output;
                     config::executable(&config.auto_name.command)?;
@@ -112,7 +229,7 @@ impl Setup {
                 match result {
                     Ok(config) => {
                         self.config = config;
-                        self.open = false;
+                        self.notice = Some("Background agent saved".into());
                         self.command = None;
                     }
                     Err(error) => self.error = Some(format!("{error:#}")),
@@ -131,6 +248,7 @@ impl Setup {
                                 Output::Text
                             };
                             self.error = None;
+                            self.notice = Some("Saved".into());
                         }
                         Err(error) => self.error = Some(format!("{error:#}")),
                     }
@@ -156,6 +274,7 @@ impl Setup {
                             self.saved_sidebar = Some(config.sidebar.clone());
                             self.config = config;
                             self.error = None;
+                            self.notice = Some("Saved".into());
                         }
                         Err(error) => self.error = Some(format!("{error:#}")),
                     }
@@ -183,71 +302,125 @@ impl Setup {
 
     pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
         let width = usize::from(area.width.min(CARD_WIDTH).saturating_sub(4));
-        let (mut lines, keys): (Vec<Line>, Vec<(&str, &str)>) = if let Some(input) = &self.custom {
-            (
-                custom_lines(input, width),
-                vec![("⏎", "review"), ("^u", "clear"), ("esc", "back")],
-            )
-        } else if let Some(command) = &self.command {
-            (
-                review_lines(command, width),
-                vec![("⏎", "enable"), ("esc", "back")],
-            )
-        } else {
-            (
-                self.menu_lines(width),
-                vec![("1-7", "names"), ("t u", "sidebar"), ("esc", "close")],
-            )
-        };
+        let (mut lines, keys): (Vec<Line>, Vec<(&str, &str)>) =
+            if let Some((kind, effort, input)) = &self.editing {
+                (
+                    vec![
+                        heading(
+                            &format!("{kind} {}", if *effort { "effort" } else { "model" }),
+                            width,
+                        ),
+                        muted("Enter a CLI value; empty uses the agent's own default."),
+                        Line::from(format!("› {input}▏")),
+                        Line::from("Accept"),
+                    ],
+                    vec![("⏎", "save"), ("esc", "back")],
+                )
+            } else if let Some(input) = &self.custom {
+                (
+                    custom_lines(input, width),
+                    vec![("⏎", "review"), ("^u", "clear"), ("esc", "back")],
+                )
+            } else if let Some(command) = &self.command {
+                (
+                    review_lines(command, width),
+                    vec![("⏎ space", "accept"), ("esc", "back")],
+                )
+            } else {
+                (
+                    self.menu_lines(width),
+                    vec![
+                        ("↑↓ j k", "move"),
+                        ("⏎ space", "choose"),
+                        ("esc ^c", "close"),
+                    ],
+                )
+            };
         if let Some(error) = self.config_error.as_ref().or(self.error.as_ref()) {
             lines.push(Line::default());
             lines.push(Line::styled(format!("⚠ {error}"), colour(State::Blocked)));
         }
         let [panel_area, footer_area] =
-            Layout::vertical([Constraint::Min(3), Constraint::Length(1)])
+            Layout::vertical([Constraint::Min(3), Constraint::Length(2)])
                 .areas(card(area, &lines, width));
         let block = panel(Line::from(" configure "));
         let inner = block.inner(panel_area).inner(Margin::new(1, 0));
         frame.render_widget(block, panel_area);
-        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
-        frame.render_widget(Paragraph::new(hints(&keys)), footer_area);
+        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+        let scroll = if self.command.is_none() && self.custom.is_none() && self.editing.is_none() {
+            (self.selected + 2).saturating_sub(usize::from(inner.height).saturating_sub(2)) as u16
+        } else {
+            0
+        };
+        frame.render_widget(paragraph.scroll((scroll, 0)), inner);
+        frame.render_widget(
+            Paragraph::new(vec![
+                hints(&keys),
+                Line::styled(self.notice.clone().unwrap_or_default(), colour(State::Done)),
+            ]),
+            footer_area,
+        );
     }
 
     fn menu_lines(&self, width: usize) -> Vec<Line<'static>> {
-        let auto_name = &self.config.auto_name;
-        let is_current = |choice| {
-            auto_name.enabled && config::preset(choice).as_ref() == Some(&auto_name.command)
-        };
-        let any_preset = CHOICES.iter().any(|(choice, _)| is_current(*choice));
-        let state = if auto_name.enabled {
-            Span::styled("● on", colour(State::Done))
-        } else {
-            Span::styled("○ off", OVERLAY)
-        };
-        let mut lines = vec![heading_with("AI agent names", state, width)];
-        lines.push(muted(
-            "Name agents after their task, using an AI CLI on this computer.",
-        ));
-        lines.push(Line::default());
+        let mut lines = vec![heading("Background agent", width)];
+        let mut rows = Vec::new();
         for (choice, label) in CHOICES {
-            let current = is_current(choice) || (choice == '7' && auto_name.enabled && !any_preset);
-            let missing = self.missing.contains(&choice);
-            lines.push(choice_line(choice, label, current, missing, width));
+            let current = config::preset(choice).as_ref() == Some(&self.config.auto_name.command);
+            rows.push(choice_line(
+                choice,
+                label,
+                current,
+                self.missing.contains(&choice),
+                width.saturating_sub(2),
+            ));
         }
-        lines.push(Line::default());
-        lines.push(muted(
-            "You review each choice before anything runs. Presets use a low-cost model.",
+        rows.push(toggle_line(
+            ' ',
+            "Name agents automatically",
+            self.config.auto_name.enabled,
+            width.saturating_sub(2),
         ));
-        if auto_name.enabled {
-            lines.push(muted("d turns AI names off."));
+        rows.push(toggle_line(
+            't',
+            "Background tasks",
+            self.config.sidebar.tasks,
+            width.saturating_sub(2),
+        ));
+        rows.push(toggle_line(
+            'u',
+            "Quota panel",
+            self.config.sidebar.quota,
+            width.saturating_sub(2),
+        ));
+        rows.push(toggle_line(
+            'p',
+            "Graph",
+            self.config.sidebar.family,
+            width.saturating_sub(2),
+        ));
+        for kind in ["claude", "codex", "pi", "opencode", "agy", "grok"] {
+            let defaults = self.config.defaults.get(kind).cloned().unwrap_or_default();
+            for (label, value) in [("model", defaults.model), ("effort", defaults.effort)] {
+                rows.push(Line::from(format!(
+                    "{kind} {label}: {}",
+                    if value.is_empty() {
+                        "agent default"
+                    } else {
+                        &value
+                    }
+                )));
+            }
         }
-        lines.push(Line::default());
-        lines.push(heading("Sidebar", width));
-        let sidebar = &self.config.sidebar;
-        lines.push(toggle_line('t', "Background tasks", sidebar.tasks, width));
-        lines.push(toggle_line('u', "Quota panel", sidebar.quota, width));
-        lines.push(toggle_line('p', "Graph", sidebar.family, width));
-        lines.push(muted("What every sidebar shows when it opens."));
+        rows.push(Line::from("Accept"));
+        for (i, row) in rows.into_iter().enumerate() {
+            let mut spans = vec![Span::styled(
+                if i == self.selected { "› " } else { "  " },
+                LAVENDER,
+            )];
+            spans.extend(row.spans);
+            lines.push(Line::from(spans));
+        }
         lines
     }
 }
@@ -292,9 +465,9 @@ fn toggle_line(key: char, label: &str, shown: bool, width: usize) -> Line<'stati
         Span::styled(label.to_string(), TEXT),
     ];
     let status = if shown {
-        Span::styled("● shown", colour(State::Done))
+        Span::styled("[✓]", colour(State::Done))
     } else {
-        Span::styled("○ hidden", OVERLAY)
+        Span::styled("[ ]", OVERLAY)
     };
     let used = left.iter().map(Span::width).sum::<usize>() + status.width();
     let mut spans = left;
@@ -303,21 +476,17 @@ fn toggle_line(key: char, label: &str, shown: bool, width: usize) -> Line<'stati
     Line::from(spans)
 }
 
-/// The whole area in a narrow pane; otherwise a centred card just tall enough for `lines`.
+/// Anchor the configuration to the bottom left, growing upward to fit its content.
 fn card(area: Rect, lines: &[Line], width: usize) -> Rect {
-    if area.width <= CARD_WIDTH {
-        return area;
-    }
     let rows: usize = lines
         .iter()
-        .map(|line| line.width().div_ceil(width).max(1))
+        .map(|line| line.width().div_ceil(width.max(1)).max(1))
         .sum();
-    // Borders and hints, and a row for each of the few long lines that wrap at a word.
-    let height = u16::try_from(rows + 5).unwrap_or(u16::MAX).min(area.height);
+    let height = u16::try_from(rows + 4).unwrap_or(u16::MAX).min(area.height);
     Rect {
-        x: area.x + (area.width - CARD_WIDTH) / 2,
-        y: area.y + (area.height - height) / 2,
-        width: CARD_WIDTH,
+        x: area.x,
+        y: area.bottom().saturating_sub(height),
+        width: area.width.min(CARD_WIDTH),
         height,
     }
 }
@@ -338,16 +507,6 @@ fn heading(text: &str, width: usize) -> Line<'static> {
     Line::from(vec![
         Span::styled(text.to_string(), Style::default().fg(LAVENDER).bold()),
         Span::styled(format!(" {}", "─".repeat(rule)), SURFACE2),
-    ])
-}
-
-/// A heading whose rule ends in `state`.
-fn heading_with(text: &str, state: Span<'static>, width: usize) -> Line<'static> {
-    let rule = width.saturating_sub(text.chars().count() + state.width() + 2);
-    Line::from(vec![
-        Span::styled(text.to_string(), Style::default().fg(LAVENDER).bold()),
-        Span::styled(format!(" {} ", "─".repeat(rule)), SURFACE2),
-        state,
     ])
 }
 
@@ -411,6 +570,27 @@ fn custom_lines(input: &str, width: usize) -> Vec<Line<'static>> {
 mod tests {
     use super::*;
     #[test]
+    fn navigation_selects_accept_and_editors_close_with_control_c() {
+        let mut setup = Setup {
+            open: true,
+            ..Setup::default()
+        };
+        for _ in 0..23 {
+            setup.key(KeyEvent::from(KeyCode::Down));
+        }
+        let text = rendered(&mut setup, 38, 20);
+        assert!(text.contains("› Accept"), "{text}");
+        setup.key(KeyEvent::from(KeyCode::Enter));
+        assert!(!setup.open);
+        setup.open = true;
+        setup.selected = 11;
+        setup.key(KeyEvent::from(KeyCode::Char(' ')));
+        assert!(setup.editing.is_some());
+        setup.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(!setup.open && setup.editing.is_none());
+    }
+
+    #[test]
     fn o_opens_configuration_whatever_the_state() {
         for enabled in [false, true] {
             let mut setup = Setup::default();
@@ -432,6 +612,7 @@ mod tests {
         assert!(setup.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
         assert!(setup.open);
         assert!(setup.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        assert!(setup.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
         assert!(!setup.open);
         assert!(!setup.key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)));
     }
@@ -463,28 +644,11 @@ mod tests {
         setup.config.auto_name.enabled = true;
         setup.config.auto_name.command = config::preset('1').unwrap();
         let text = rendered(&mut setup, 38, 28);
-        assert!(
-            text.lines()
-                .any(|l| l.contains("AI agent names") && l.contains("● on"))
-        );
-        assert!(
-            text.lines()
-                .any(|l| l.contains("1 Claude Code") && l.contains("✓ active"))
-        );
-        assert!(
-            text.lines()
-                .any(|l| l.contains("2 Codex") && l.contains("not installed"))
-        );
-        assert!(text.contains("1-7 names"));
-        assert!(text.contains("d turns AI names off"));
-        assert!(
-            text.lines()
-                .any(|l| l.contains("t Background tasks") && l.contains("● shown"))
-        );
-        assert!(
-            text.lines()
-                .any(|l| l.contains("u Quota panel") && l.contains("○ hidden"))
-        );
+        assert!(text.contains("Background agent"));
+        assert!(text.contains("1 Claude Code") && text.contains("✓ active"));
+        assert!(text.contains("2 Codex") && text.contains("not installed"));
+        assert!(text.contains("Name agents automatically") && text.contains("[✓]"));
+        assert!(text.contains("claude model:"));
     }
 
     #[test]
@@ -506,12 +670,12 @@ mod tests {
                 .iter()
                 .position(|row| row.contains("╭ configure"))
                 .unwrap();
-            assert!(top > 0, "vertically centred");
-            assert_eq!(rows[top].chars().position(|c| c == '╭'), Some(30));
+            assert!(top > 0, "anchored at bottom");
+            assert_eq!(rows[top].chars().position(|c| c == '╭'), Some(0));
             let bottom = rows.iter().position(|row| row.contains('╰')).unwrap();
             assert!(rows[bottom + 1].contains("esc"), "hints sit under the card");
             // The last line of content shows, with room to spare for word wrap.
-            assert!(rows[bottom - 1].chars().all(|c| c == ' ' || c == '│'));
+            assert_eq!(bottom + 3, rows.len());
         }
     }
 
@@ -531,7 +695,7 @@ mod tests {
         let text: String = (0..28)
             .map(|y| (0..38).map(|x| buffer[(x, y)].symbol()).collect::<String>() + "\n")
             .collect();
-        assert!(text.contains("⏎ enable"));
+        assert!(text.contains("accept"));
         assert!(text.contains("Model     gemini-3.8-flash"));
         assert!(text.contains("Thinking  low"));
         assert!(text.contains("What is sent"));
