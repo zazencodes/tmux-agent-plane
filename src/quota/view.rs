@@ -1,5 +1,5 @@
-//! The sidebar's quota view (`u`): full height in place of the agent list. It reads quota.json
-//! and asks the daemon for a fresh read when opened, every five minutes while open, and on `r`;
+//! The sidebar's quota panel (`u`), with full details on `i` while it shows. It reads quota.json
+//! and asks the daemon for a fresh read when stale, every five minutes while shown, and on `r`;
 //! the request waits on its own thread, so the sidebar stays responsive.
 
 use super::{ProviderId, Snapshot, Status, render};
@@ -99,9 +99,9 @@ fn due(requested_at: Option<Instant>, snapshot: Option<&Snapshot>, now: super::T
 
 #[derive(Default)]
 pub struct View {
-    /// `u`: the full view in place of the list.
+    /// `i`: full details in place of the list, from the pinned panel.
     pub open: bool,
-    /// The panel below the list, from the configuration.
+    /// `u`: the panel below the graph and tasks; starts from the configuration.
     pub pinned: bool,
     feed: Feed,
     scroll: usize,
@@ -111,21 +111,26 @@ pub struct View {
 }
 
 impl View {
-    /// While open, every key but `?` is the view's. `u` opens it when nothing else is typing.
+    /// `u` toggles the panel; `i` opens its details. Browsing stays live while the panel shows.
+    /// While details are open, every key but `?` is the view's; Esc returns to the panel.
     pub fn key(&mut self, key: KeyEvent, can_open: bool) -> bool {
+        if can_open && key.code == KeyCode::Char('u') && key.modifiers.is_empty() {
+            self.pinned = !self.pinned;
+            self.open = false;
+            return true;
+        }
         if !self.open {
-            if can_open && key.code == KeyCode::Char('u') && key.modifiers.is_empty() {
+            if can_open && self.pinned && key.code == KeyCode::Char('i') && key.modifiers.is_empty()
+            {
                 self.open = true;
                 self.scroll = 0;
-                self.feed.reload();
-                self.feed.ask(false);
                 return true;
             }
             return false;
         }
         match key.code {
             KeyCode::Char('?') => return false,
-            KeyCode::Char('u') | KeyCode::Esc => self.open = false,
+            KeyCode::Esc => self.open = false,
             KeyCode::Char('r') => self.feed.ask(false),
             KeyCode::Enter if self.feed.needs_keychain() => self.feed.ask(true),
             KeyCode::Char('j') | KeyCode::Down => {
@@ -164,7 +169,8 @@ impl View {
         if self.feed.refreshing() {
             title.push_str("· refreshing… ");
         }
-        let block = panel(Line::from(title));
+        let block =
+            panel(Line::from(title)).title_bottom(hints(&[("i", "details"), ("u", "hide")]));
         let inner = block.inner(area);
         f.render_widget(block, area);
         let width = usize::from(inner.width.saturating_sub(2)).max(1);
@@ -177,7 +183,7 @@ impl View {
             (None, None) => vec![Line::styled("no quota read yet", OVERLAY)],
         };
         let lines = if lines.is_empty() {
-            vec![Line::styled("no plan set up · u shows why", OVERLAY)]
+            vec![Line::styled("no plan set up · i shows why", OVERLAY)]
         } else {
             lines
         };
@@ -215,7 +221,7 @@ impl View {
         if self.feed.needs_keychain() {
             keys.push(("⏎", "allow"));
         }
-        keys.extend([("r", "refresh"), ("u", "back")]);
+        keys.extend([("r", "refresh"), ("esc", "back"), ("u", "hide")]);
         if self.lines > self.height {
             keys.push(("j k", "scroll"));
         }
@@ -269,7 +275,7 @@ mod tests {
             "{all}"
         );
         assert!(all.contains("○ grok"));
-        assert!(rows[38].contains("r refresh") && rows[38].contains("u back"));
+        assert!(rows[38].contains("r refresh") && rows[38].contains("u hide"));
         assert!(!rows[38].contains("allow"));
     }
 
@@ -307,6 +313,33 @@ mod tests {
     }
 
     #[test]
+    fn u_pins_quota_until_toggled_and_keeps_browsing_live() {
+        let mut view = View::default();
+        let key = |code| KeyEvent::from(code);
+        assert!(!view.key(key(KeyCode::Char('u')), false));
+        assert!(!view.pinned);
+        assert!(!view.key(key(KeyCode::Char('i')), true));
+        assert!(view.key(key(KeyCode::Char('u')), true));
+        assert!(view.pinned && !view.open);
+        for code in [
+            KeyCode::Char('j'),
+            KeyCode::Char('r'),
+            KeyCode::Esc,
+            KeyCode::Enter,
+        ] {
+            assert!(!view.key(key(code), true));
+            assert!(view.pinned && !view.open);
+        }
+        assert!(view.key(key(KeyCode::Char('i')), true));
+        assert!(view.pinned && view.open);
+        assert!(view.key(key(KeyCode::Esc), true));
+        assert!(view.pinned && !view.open);
+        assert!(view.key(key(KeyCode::Char('i')), true));
+        assert!(view.key(key(KeyCode::Char('u')), true));
+        assert!(!view.pinned && !view.open);
+    }
+
+    #[test]
     fn the_panel_draws_one_line_per_provider_in_a_frame() {
         let view = View {
             pinned: true,
@@ -335,6 +368,8 @@ mod tests {
             "{}",
             rows[4]
         );
-        assert!(rows[5].starts_with('╰'));
+        assert!(
+            rows[5].starts_with('╰') && rows[5].contains("i details") && rows[5].contains("u hide")
+        );
     }
 }

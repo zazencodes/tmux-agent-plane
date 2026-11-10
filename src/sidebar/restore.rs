@@ -382,6 +382,7 @@ mod tests {
         let mut sidebar = confirming();
         assert!(!sidebar.quota_key(KeyEvent::from(KeyCode::Char('u'))));
         assert!(!sidebar.quota.open);
+        assert!(!sidebar.quota.pinned);
         assert!(matches!(sidebar.restore.view, Some(View::Confirm(_))));
     }
 

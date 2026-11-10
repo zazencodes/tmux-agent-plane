@@ -23,7 +23,7 @@ const KEYCHAIN_PRESENCE_TIMEOUT: Duration = Duration::from_secs(5);
 /// `security` exits 44 both for a missing item and for a Keychain it cannot reach.
 const SECURITY_NOT_REACHED: i32 = 44;
 
-pub const ALLOW_REMEDY: &str = "allow it in the sidebar quota view: u, then enter";
+pub const ALLOW_REMEDY: &str = "allow it from the sidebar quota panel: u, i, then enter";
 const RENEW_REMEDY: &str = "open Claude Code to renew it";
 const LOGIN_REMEDY: &str = "log in with Claude Code";
 

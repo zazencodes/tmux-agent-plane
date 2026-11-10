@@ -380,7 +380,7 @@ pub fn summary(snapshot: &Snapshot, now: Time, width: usize) -> Vec<Line<'static
             };
             match provider.status {
                 Status::NeedsKeychain => {
-                    return problem(Style::default().fg(YELLOW), "needs Keychain · u");
+                    return problem(Style::default().fg(YELLOW), "needs Keychain · i");
                 }
                 Status::Failed => {
                     return problem(

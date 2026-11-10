@@ -17,7 +17,7 @@ pub struct Config {
 pub struct Sidebar {
     /// Background tasks below the agents.
     pub tasks: bool,
-    /// The quota panel below the list; `u` opens the full view either way.
+    /// The quota panel below the graph and tasks; `u` toggles it in one sidebar.
     pub quota: bool,
     /// The selected agent's family below the list; `p` still shows or hides it in one sidebar.
     pub family: bool,

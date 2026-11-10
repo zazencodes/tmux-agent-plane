@@ -416,7 +416,7 @@ pub(crate) struct Sidebar {
     // Auto-naming setup is local UI state; it never performs periodic work.
     pub(crate) auto_name: crate::autoname_setup::Setup,
     pub(crate) help: crate::sidebar_help::Help,
-    /// `u`: the quota view, sidebar only.
+    /// `u`: the pinned quota panel, sidebar only; `i` opens its details.
     pub(crate) quota: crate::quota::view::View,
     pub(crate) all_agents: Vec<Agent>,
     pub(crate) agents: Vec<Agent>,
@@ -1006,13 +1006,14 @@ impl Sidebar {
         self.rebuild();
     }
 
-    /// The quota view takes every key but `?` while open; `u` opens it when nothing is typed.
+    /// Quota toggles work when nothing is typed; only its details view takes over navigation.
     fn quota_key(&mut self, key: KeyEvent) -> bool {
         let can_open = self.editing.is_none()
             && !self.typing_query()
             && !self.auto_name.open
             && self.new_agent.is_none()
             && self.killing.is_none()
+            && self.tasks.stopping.is_none()
             && !self.restore.is_open();
         !self.help.open && self.quota.key(key, can_open)
     }
@@ -1477,6 +1478,13 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     } else {
         0
     };
+    // Dock quota and the footer first, so scrolling content cannot push them off screen.
+    let [body_area, quota_area, help_area] = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(quota_height),
+        Constraint::Length(footer_height),
+    ])
+    .areas(f.area());
     // An agent with no parent and no children has nothing to draw.
     let family = sidebar
         .selected()
@@ -1495,24 +1503,20 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     let tasks_height = task_items
         .iter()
         .map(|item| item.height() as u16)
-        .sum::<u16>();
+        .sum::<u16>()
+        .min(body_area.height.saturating_sub(3));
     // Reserve tasks first; the family shares the remaining room with agents.
-    let remaining = f
-        .area()
-        .height
-        .saturating_sub(quota_height + footer_height + tasks_height);
+    let remaining = body_area.height.saturating_sub(tasks_height);
     // The family takes at most half the remaining height.
     let family_height = family
         .as_ref()
         .map_or(0, |family| (family.height() + 2).min(remaining / 2));
-    let [list_area, family_area, quota_area, tasks_area, help_area] = Layout::vertical([
-        Constraint::Min(3),
+    let [list_area, family_area, tasks_area] = Layout::vertical([
+        Constraint::Min(0),
         Constraint::Length(family_height),
-        Constraint::Length(quota_height),
         Constraint::Length(tasks_height),
-        Constraint::Length(footer_height),
     ])
-    .areas(f.area());
+    .areas(body_area);
     if let Some(family) = &family {
         let block = panel(Line::from(" graph "));
         let inner = block.inner(family_area);
@@ -2879,6 +2883,8 @@ mod tests {
             sidebar.all_agents.push(agent("%1", State::Done));
             sidebar.navigation.order = vec!["%1".into()];
             sidebar.rebuild();
+            terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
+            sidebar.quota.pinned = true;
             terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
         }
     }

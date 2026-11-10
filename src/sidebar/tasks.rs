@@ -477,6 +477,44 @@ mod tests {
     }
 
     #[test]
+    fn quota_stays_at_the_bottom_below_graph_and_overflowing_tasks() {
+        let mut sidebar = with_tasks();
+        sidebar.all_agents = crate::ui::family::tests::family_agents();
+        for i in 10..40 {
+            sidebar
+                .all_agents
+                .push(agent(&format!("%{i}"), State::Idle));
+        }
+        sidebar.rebuild();
+        sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%2"));
+        key(&mut sidebar, KeyCode::Char('t'));
+        key(&mut sidebar, KeyCode::Char('p'));
+        let u = KeyEvent::from(KeyCode::Char('u'));
+        assert!(sidebar.quota_key(u));
+        let screen = rendered(&mut sidebar);
+        let graph = screen.find(" graph ").expect(&screen);
+        let tasks = screen.find("── tasks").expect(&screen);
+        let quota = screen.find(" quota ").expect(&screen);
+        assert!(graph < tasks && tasks < quota, "{screen}");
+        let quota_row = |screen: &str| screen.lines().position(|line| line.contains(" quota "));
+        assert_eq!(quota_row(&screen), Some(15), "{screen}");
+        key(&mut sidebar, KeyCode::Char('j'));
+        assert_eq!(quota_row(&rendered(&mut sidebar)), Some(15));
+        // Even more tasks than the screen can hold give way to the pinned quota panel.
+        sidebar.tasks.apply(
+            (0..20)
+                .map(|i| task(&format!("task-{i}"), Status::Running, &[]))
+                .collect(),
+        );
+        sidebar.rebuild();
+        let screen = rendered(&mut sidebar);
+        assert_eq!(quota_row(&screen), Some(15), "{screen}");
+        assert!(screen.contains("u hide"), "{screen}");
+        assert!(sidebar.quota_key(u));
+        assert!(!rendered(&mut sidebar).contains("╭ quota "));
+    }
+
+    #[test]
     fn rows_fit_narrow_widths() {
         let long = task(
             "a-very-long-task-name-indeed",

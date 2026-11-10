@@ -14,10 +14,10 @@ before 1.0, a breaking change bumps the minor version.
 - Agents come back after tmux dies: when the tmux server stops (a crash, a reboot, `kill-server`) and starts again, the status bar shows `↺ N` and `tmux-agent-plane restore` lists the agents that can come back. `restore --tasks` or `--no-tasks` reopens each one's conversation in its session, window and layout, with its name and parent, with or without the background tasks that were running; `restore --discard` forgets them. Codex agents cannot be resumed and are listed with their folder
 - While agents from before tmux restarted wait, the sidebar says so on its top line; press `b` to see who can come back, who cannot and why, and the tasks that were running, then `Enter` to bring back agents and tasks, `a` for agents only, `d` to forget them or `Esc` to decide later
 - Install by asking your coding agent to "install and configure tmux-agent-plane with me"; the README walks it through onboarding you, one choice at a time, including which keys move you between agents
-- Press `u` in the sidebar to see how much of your Claude, Codex, Antigravity and Grok Build plans is left: each window's remaining percent and time to reset, a marker for even use, and whether it lasts until the reset. `u` or `Esc` returns to the list and `r` reads again
+- Press `u` in the sidebar to pin how much of your Claude, Codex, Antigravity and Grok Build plans is left: each window's remaining percent and time to reset, a marker for even use, and whether it lasts until the reset. `u` hides the panel; `i` opens details, where `r` reads again
 - `tmux-agent-plane quota [--json]` reads the same, fresh, so agents can check capacity before handing out work
 - Claude's login is read from the macOS Keychain only after you allow it once: press `Enter` on its card in the quota view
-- Keep quota in sight: press `o`, then `u`, and every sidebar shows a quota panel below the agents, one line per plan with what is left and when it resets. It is off by default, and the sidebar footer offers `u quota` for the full view
+- Keep quota in sight: press `o`, then `u`, and every sidebar shows a quota panel below the agents, one line per plan with what is left and when it resets. It is off by default, and `u` in a sidebar shows or hides it and `i` opens full details
 - Choose whether sidebars open with background tasks shown: `o`, then `t`. They are shown by default, and `t` in a sidebar still shows or hides them there
 - Press `prefix + g` to turn the global keys off when a program needs them, and again to turn them back on. While they are off, every one of them reaches the pane as usual and the status bar shows `keys off · prefix g`, as does the bottom left of the sidebar and the agent picker. Start with them off with `set -g @agent-plane-keys off`, and choose the toggle with `@agent-plane-keys-toggle-key`
 - The global key options take several keys each, separated by spaces, such as `set -g @agent-plane-sidebar-in-key 'M-h S-Left'`; all of them turn off together
@@ -27,6 +27,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- `u` shows or hides quota pinned at the bottom of the sidebar, below the graph and tasks, while browsing stays active. `i` opens full quota details; `Esc` returns to the panel
 - The parent/child diagram is called Graph in configuration, panel headings and help
 - Closing a session switches you to the most recently active remaining session, with or without the sidebar; closing the final session exits tmux
 - Shown background tasks stay at the bottom of the sidebar, below the graph, while the agent list scrolls
