@@ -588,7 +588,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
         .map(|(i, a)| {
             let is_selected = selected == Some(i);
             let search = &sidebar.navigation.pattern;
-            let (task, task_style) = task(a);
+            let (task, task_style) = task(a, SUBTEXT);
             let mut spans = vec![
                 Span::styled(if is_selected { "▌" } else { " " }, colour(a.state)),
                 Span::styled(format!("{} ", icon(a.state)), colour(a.state)),
@@ -796,6 +796,7 @@ pub(crate) fn list_title(sidebar: &Sidebar) -> Line<'static> {
 // Catppuccin mocha.
 pub(crate) const SUBTEXT: Color = Color::Rgb(0xa6, 0xad, 0xc8);
 pub(crate) const TEXT: Color = Color::Rgb(0xcd, 0xd6, 0xf4);
+pub(crate) const OVERLAY1: Color = Color::Rgb(0x7f, 0x84, 0x9c);
 pub(crate) const OVERLAY: Color = Color::Rgb(0x6c, 0x70, 0x86);
 pub(crate) const SURFACE2: Color = Color::Rgb(0x58, 0x5b, 0x70);
 pub(crate) const SURFACE0: Color = Color::Rgb(0x31, 0x32, 0x44);
@@ -925,11 +926,11 @@ pub(crate) fn name_style(agent: &Agent, in_use: bool) -> Style {
 }
 
 /// What an agent is doing: a blocked agent's reason, in the colour that asks for attention, or
-/// else its task.
-pub(crate) fn task(agent: &Agent) -> (&str, Style) {
+/// else its task, in the `quiet` colour of the list drawing it.
+pub(crate) fn task(agent: &Agent, quiet: Color) -> (&str, Style) {
     match (agent.state, &agent.detail) {
         (State::Blocked, Some(detail)) => (detail, Style::default().fg(colour(State::Blocked))),
-        _ => (&agent.title, Style::default().fg(SUBTEXT)),
+        _ => (&agent.title, Style::default().fg(quiet)),
     }
 }
 
@@ -1132,14 +1133,20 @@ mod tests {
     fn a_blocked_agents_reason_is_red_and_any_other_task_is_quiet() {
         let mut blocked = agent("a", "%1", "the task");
         blocked.state = State::Blocked;
-        assert_eq!(task(&blocked), ("the task", Style::default().fg(SUBTEXT)));
+        assert_eq!(
+            task(&blocked, SUBTEXT),
+            ("the task", Style::default().fg(SUBTEXT))
+        );
         blocked.detail = Some("the reason".into());
         assert_eq!(
-            task(&blocked),
+            task(&blocked, SUBTEXT),
             ("the reason", Style::default().fg(colour(State::Blocked)))
         );
         blocked.state = State::Idle;
-        assert_eq!(task(&blocked), ("the task", Style::default().fg(SUBTEXT)));
+        assert_eq!(
+            task(&blocked, SUBTEXT),
+            ("the task", Style::default().fg(SUBTEXT))
+        );
     }
 
     #[test]

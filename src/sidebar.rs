@@ -13,9 +13,9 @@ use crate::navigation::{CLIENT_FORMAT, Client, guard_destination, parse_client};
 use crate::tmux;
 use crate::ui::family;
 use crate::ui::{
-    LAVENDER, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, daemon_down, fill, fill_viewport,
-    group_colour, hints, icon, list_title, marked, message, name_style, no_agents, panel, rank,
-    search_matches, state_style, task, truncate,
+    LAVENDER, OVERLAY1, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, daemon_down, fill,
+    fill_viewport, group_colour, hints, icon, list_title, marked, message, name_style, no_agents,
+    panel, rank, search_matches, state_style, task, truncate,
 };
 use anyhow::{Context, Result, bail};
 use nucleo_matcher::Matcher;
@@ -802,7 +802,7 @@ impl Sidebar {
         let agent = &self.agents[row];
         let pattern = &self.navigation.pattern;
         !search_matches(&agent.name, pattern).is_empty()
-            || !search_matches(task(agent).0, pattern).is_empty()
+            || !search_matches(task(agent, OVERLAY1).0, pattern).is_empty()
             || (self.project_start(row) && !search_matches(&agent.session, pattern).is_empty())
     }
 
@@ -1917,8 +1917,8 @@ pub(crate) fn status_footer(sidebar: &Sidebar, width: usize) -> Option<Line<'sta
 }
 
 /// One item per agent, grouped under a heading per tmux session in that session's picker colour,
-/// with a blank line between sessions. The selected agent gets an accent bar and a background; its
-/// heading does not. `all` is every agent, filtered out or not, so no search recolours a session.
+/// with a blank line between sessions. An agent is its name and state, then its description on a
+/// dimmer line. The selected agent gets an accent bar and a background; its heading does not. `all` is every agent, filtered out or not, so no search recolours a session.
 fn items<'a>(
     agents: &'a [Agent],
     all: &[Agent],
@@ -1987,12 +1987,14 @@ fn items<'a>(
             let first = Line::from(first);
             let first = right(first, Span::styled(status, state_style(a.state)), width);
 
-            let (task, task_style) = task(a);
+            // The description sits under its name, a step dimmer, so the names read as a column.
+            // An agent with none takes one line.
+            let (task, task_style) = task(a, OVERLAY1);
             let mut second = vec![bar, Span::raw("  ")];
             second.extend(marked(task, width.saturating_sub(4), search, task_style));
-            let second = Line::from(second);
+            let second = (!task.is_empty()).then(|| Line::from(second));
 
-            for line in [first, second] {
+            for line in std::iter::once(first).chain(second) {
                 lines.push(if is_selected {
                     fill(line, width).style(Style::default().bg(SURFACE0))
                 } else {
@@ -3089,6 +3091,26 @@ mod tests {
             !screen.contains("1.1") && !screen.contains("4.2"),
             "{screen}"
         );
+    }
+
+    #[test]
+    fn descriptions_are_dimmer_than_names_and_an_agent_without_one_takes_one_line() {
+        let mut bare = agent("%1", State::Working);
+        bare.title = String::new();
+        let mut blocked = agent("%3", State::Blocked);
+        blocked.detail = Some("needs approval".into());
+        let mut sidebar = showing(vec![bare, agent("%2", State::Working), blocked]);
+        let mut terminal = Terminal::new(TestBackend::new(38, 20)).unwrap();
+        terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let row = |y: u16| (0..38).map(|x| buffer[(x, y)].symbol()).collect::<String>();
+        let top = (0..20).find(|&y| row(y).contains("agent-%1")).unwrap();
+        assert!(row(top + 1).contains("agent-%2"), "{}", row(top + 1));
+        assert!(row(top + 2).contains("Review payment flow"));
+        assert_eq!(buffer[(4, top + 1)].fg, TEXT);
+        assert_eq!(buffer[(4, top + 2)].fg, OVERLAY1);
+        assert!(row(top + 4).contains("needs approval"));
+        assert_eq!(buffer[(4, top + 4)].fg, colour(State::Blocked));
     }
 
     #[test]
