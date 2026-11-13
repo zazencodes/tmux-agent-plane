@@ -419,7 +419,7 @@ All kinds except agy can be spawned without a task. `spawn agy` requires a task 
 
 Press `o` in the sidebar or picker to open configuration at the bottom left. Use arrows or `j`/`k` to move, `Enter` or Space to choose or toggle, and Accept to close. Changes save immediately with a confirmation. `Esc` goes back; `Ctrl-C` closes.
 
-- **Sidebar panels:** choose whether new sidebars show tasks, quota and the graph. Tasks and the graph start enabled; quota starts hidden. A change applies to this sidebar immediately and to other sidebars when they next open.
+- **Sidebar panels:** choose whether new sidebars show tasks, quota and the graph. Tasks and the graph start enabled; quota starts hidden. A change applies to this sidebar immediately and to other sidebars when they next open, except the graph, which every sidebar follows within half a second. Pressing `p` in a sidebar saves the same setting.
 - **Background agent:** choose a CLI preset or custom command for automatic naming, then review and accept its command. Enable automatic naming separately.
 - **Agent defaults:** set each kind's model and effort for the launcher and `spawn` when no explicit agent arguments are supplied. Empty values use the CLI's own defaults.
 

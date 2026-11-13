@@ -48,7 +48,7 @@ impl Config {
     }
 }
 
-/// What a sidebar shows when it opens. `t` still shows or hides one sidebar's tasks.
+/// What sidebars show. `t` and `u` still show or hide one sidebar's tasks and quota.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Sidebar {
@@ -56,7 +56,7 @@ pub struct Sidebar {
     pub tasks: bool,
     /// The quota panel below the graph and tasks; `u` toggles it in one sidebar.
     pub quota: bool,
-    /// The selected agent's family below the list; `p` still shows or hides it in one sidebar.
+    /// The selected agent's family below the list; `p` in any sidebar saves it for every sidebar.
     pub family: bool,
 }
 

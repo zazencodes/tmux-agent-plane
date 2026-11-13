@@ -1417,6 +1417,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
         if Instant::now() >= next_read {
             // Refresh may change selection when an agent vanishes. Only input triggers preview.
             sidebar.refresh(origin);
+            follow_graph(&mut sidebar);
             next_read = Instant::now() + REFRESH;
         }
         sidebar.quota.tick();
@@ -1451,6 +1452,7 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
                 let jumping = sidebar.navigation.jump.is_some();
                 let command = sidebar.editing.is_none() && !searching && !jumping;
                 let before = sidebar.navigation.pane.clone();
+                let graph = sidebar.navigation.family;
                 // Enter while typing a search keeps it, so `n` can go on from there.
                 let opens = (key.code == KeyCode::Enter && !jumping)
                     || leaves_sidebar(key)
@@ -1465,6 +1467,12 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
                         Ok(()) => return Ok(()),
                         Err(error) => sidebar.notice = Some(error.to_string()),
                     }
+                }
+                if sidebar.navigation.family != graph
+                    && let Err(error) = save_graph(sidebar.navigation.family)
+                {
+                    sidebar.navigation.family = graph;
+                    sidebar.notice = Some(format!("{error:#}"));
                 }
                 // Moving the selection previews it. Filter and search edits stay in this pane:
                 // only freezing the filter or accepting the search previews the final selection,
@@ -1504,6 +1512,22 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             }
         }
     }
+}
+
+/// The graph is one setting for every sidebar: `p` saves it, and each refresh takes it up, so
+/// a sidebar in another window matches before you get there.
+fn follow_graph(sidebar: &mut Sidebar) {
+    match crate::autoname_config::read() {
+        Ok(config) => sidebar.navigation.family = config.sidebar.family,
+        Err(error) => sidebar.notice = Some(format!("{error:#}")),
+    }
+}
+
+fn save_graph(shown: bool) -> Result<()> {
+    // Read afresh to keep whatever another sidebar or setup saved meanwhile.
+    let mut config = crate::autoname_config::read()?;
+    config.sidebar.family = shown;
+    crate::autoname_config::write(&config)
 }
 
 /// Shift-Right leaves like Enter, also mid-search. The plugin's out key sends it here too.
