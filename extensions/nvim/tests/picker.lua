@@ -76,6 +76,8 @@ local function test()
     write("config-checks", "PASS: local lazy plugin declaration; actual tele.lua extension load and Space f a callback; existing fs/fz mappings preserved")
   end
   local picker = open(2)
+  -- Only the agents of Neovim's own workspace, which the title names.
+  assert(picker.prompt_title == "Agents · main", picker.prompt_title)
   local first = picker:get_selection()
   assert(first.value.name == "cedar-review")
   keys("<Down>")
@@ -137,7 +139,7 @@ local function test()
   local selected = picker:get_selection()
   selected.value.name = "renamed-after-selection"
   write("selected-pane", selected.value.pane)
-  write("checks", "PASS: real Telescope arrows in both modes; case-insensitive name/title/detail and spanning fuzzy queries; empty/no-match Enter; stale/malformed/list/focus errors; browsing never focuses")
+  write("checks", "PASS: only the agents of Neovim's workspace, named in the title; real Telescope arrows in both modes; case-insensitive name/title/detail and spanning fuzzy queries; empty/no-match Enter; stale/malformed/list/focus errors; browsing never focuses")
   write("before-focus", "ready")
   wait_for(function() return vim.fn.filereadable(root .. "/allow-focus") == 1 end, "two-client focus setup")
   keys("i<CR>")

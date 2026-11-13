@@ -275,7 +275,7 @@ vim.keymap.set("n", "<leader>fa", function()
 end, { desc = "Find agent sessions" })
 ```
 
-Run Neovim inside tmux with `tmux-agent-plane` on `PATH` and its daemon running. `:Telescope tmux_agent_plane agents` opens the same picker. It reads tracked agents from `tmux-agent-plane list --json`, with their existing names and task descriptions (blocked detail when present). Type a case-insensitive fuzzy search across name, project, title and blocked detail, including queries spanning those fields; use Up/Down in insert or normal mode to browse, then Enter to run `tmux-agent-plane focus <pane-id>` for that exact selection. Browsing does not change agent focus. An empty index opens an empty picker; command failures, including a stale index, appear as error notifications.
+Run Neovim inside tmux with `tmux-agent-plane` on `PATH` and its daemon running. `:Telescope tmux_agent_plane agents` opens the same picker. Like the sidebar, it lists the agents of the [workspace](#workspaces) Neovim's tmux session is in and names it in its title: it asks `tmux-agent-plane workspace list --json` which workspace is `here`, then reads that workspace's agents from `tmux-agent-plane list --json`, with their existing names and task descriptions (blocked detail when present). Type a case-insensitive fuzzy search across name, project, title and blocked detail, including queries spanning those fields; use Up/Down in insert or normal mode to browse, then Enter to run `tmux-agent-plane focus <pane-id>` for that exact selection. Browsing does not change agent focus. An empty index opens an empty picker; command failures, including a stale index, appear as error notifications.
 
 ### Notifications
 
@@ -338,7 +338,7 @@ An agent you start by hand joins a project by itself. Within a second of appeari
 
 ### Workspaces
 
-A workspace is a group of tmux sessions, one level above tmux. Every session belongs to exactly one. While you only have one, called `main`, nothing changes but the sidebar and picker headings, which name it. Once you start a second, everything Agent Plane shows is scoped to the workspace you are in: the sidebar lists its agents and tasks, the picker and Alt + k / j go through its agents only, sidebar notices come from it, and each session's status bar counts its own workspace's agents after the workspace's name. tmux itself is untouched: `prefix + s`, `tmux ls`, switching and detaching see every session, as always. Agents in other workspaces keep running; desktop notifications still reach you from all of them.
+A workspace is a group of tmux sessions, one level above tmux. Every session belongs to exactly one. While you only have one, called `main`, nothing changes but the sidebar and picker headings, which name it. Once you start a second, everything Agent Plane shows is scoped to the workspace you are in: the sidebar lists its agents and tasks, the picker, the [Telescope picker](#neovim-telescope-picker) and Alt + k / j go through its agents only, sidebar notices come from it, and each session's status bar counts its own workspace's agents after the workspace's name. tmux itself is untouched: `prefix + s`, `tmux ls`, switching and detaching see every session, as always. Agents in other workspaces keep running; desktop notifications still reach you from all of them.
 
 Press `w` in the sidebar or the picker to see your workspaces, marked `◆` or `✓` when an agent there is blocked or done. `Enter` takes you to the session you used last in the highlighted workspace. `c` starts a new workspace: type its name, and you land in a fresh session of the same name, in the folder the list runs in. `r` renames the highlighted workspace. `m` moves the project (the whole session) of the agent selected in the list into the highlighted workspace. `x` closes the highlighted workspace and asks first: `Enter` moves its sessions intact into `main`, agents still running; `n` asks again, and `Enter` there ends all of its sessions and their agents. `Esc` or `Ctrl+C` cancels either question. Its background tasks keep running and move to `main` either way. `main` cannot be renamed or closed, and no other workspace can take its name. `Esc`, `Ctrl+C` or `w` closes the menu.
 
@@ -442,7 +442,7 @@ For a custom command, enter a JSON array of an executable and literal arguments,
 | `list [--json]` | All agents. `*` (or `"self": true`) marks a known caller |
 | `sessions list [--json]` | Every project session: name/ID, windows, attached clients, group and agents |
 | `sessions create <name> [--cwd DIR] [--workspace W]` | Create a detached named project with an interactive shell, in the caller's workspace or `W` |
-| `workspace list [--json]` | Every workspace with its sessions and agents; `*` marks the one you are in |
+| `workspace list [--json]` | Every workspace with its sessions and agents; `*` marks the one you are in, `(here)` (`"here"` in JSON) the caller's |
 | `workspace switch <name>` | Show the workspace's most recently used session in your tmux client |
 | `workspace move <session>... --to <name>` | Move whole sessions, with their agents, into a workspace, starting it if the name is new |
 | `workspace rename <name> <new-name>` | Rename a workspace; `main` keeps its name, and no other can take it |

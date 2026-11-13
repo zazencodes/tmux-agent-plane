@@ -22,7 +22,7 @@ const SEP: char = '\x1f';
 
 #[derive(clap::Subcommand)]
 pub enum Action {
-    /// List workspaces with their sessions and agents; `*` marks the one you are in
+    /// List workspaces with their sessions and agents; `*` marks the one you are in, `(here)` the caller's
     List {
         #[arg(long)]
         json: bool,
@@ -307,33 +307,40 @@ pub fn for_new(named: Option<&str>, creator: Option<&Agent>, index: &Index) -> R
     if let Some(agent) = creator.filter(|a| !a.workspace.is_empty()) {
         return Ok(agent.workspace.clone());
     }
-    // A Codex tool shell may inherit another pane's TMUX_PANE, so its pane says nothing. A
-    // caller pane that has closed says nothing either.
-    if !commands::codex_caller()
-        && let Some(pane) = commands::self_pane()?
-    {
-        let panes = tmux::run(&[
-            "list-panes",
-            "-a",
-            "-F",
-            &format!("#{{pane_id}}{SEP}#{{{OPTION}}}"),
-        ])?;
-        if let Some(label) = panes
-            .lines()
-            .filter_map(|line| line.split_once(SEP))
-            .find(|(id, _)| *id == pane)
-            .map(|(_, label)| label)
-            .filter(|label| !label.is_empty())
-        {
-            return Ok(label.to_owned());
-        }
-    }
-    if index.workspace.is_empty() {
+    let workspace = caller_workspace(index)?.unwrap_or_else(|| index.workspace.clone());
+    if workspace.is_empty() {
         bail!(
             "the daemon has not published a workspace; restart it with `tmux-agent-plane daemon restart`"
         );
     }
-    Ok(index.workspace.clone())
+    Ok(workspace)
+}
+
+/// The workspace a view from the calling pane shows, as in the sidebar and picker: its session's,
+/// or for a session without one (the tasks session, or one created this second) the one you are
+/// in. None when the caller cannot be told: outside tmux, a Codex tool shell, which may inherit
+/// another pane's TMUX_PANE, or a pane that has closed.
+fn caller_workspace(index: &Index) -> Result<Option<String>> {
+    if commands::codex_caller() {
+        return Ok(None);
+    }
+    let Some(pane) = commands::self_pane()? else {
+        return Ok(None);
+    };
+    let panes = tmux::run(&[
+        "list-panes",
+        "-a",
+        "-F",
+        &format!("#{{pane_id}}{SEP}#{{{OPTION}}}"),
+    ])?;
+    Ok(panes
+        .lines()
+        .filter_map(|line| line.split_once(SEP))
+        .find(|(id, _)| *id == pane)
+        .map(|(_, label)| match label {
+            "" => index.workspace.clone(),
+            label => label.to_owned(),
+        }))
 }
 
 /// Put a session in a workspace.
@@ -346,18 +353,23 @@ struct Listed<'a> {
     name: &'a str,
     /// You are in it: the client used last shows one of its sessions.
     current: bool,
+    /// The caller is in it, as the sidebar and picker of its pane would show. False everywhere
+    /// when the caller cannot be told.
+    here: bool,
     sessions: &'a [WorkspaceSession],
     agents: Vec<&'a str>,
 }
 
 fn list(json: bool) -> Result<()> {
     let index = index::read()?;
+    let here = caller_workspace(&index)?;
     let listed: Vec<Listed> = index
         .workspaces
         .iter()
         .map(|w| Listed {
             name: &w.name,
             current: w.name == index.workspace,
+            here: here.as_ref() == Some(&w.name),
             sessions: &w.sessions,
             agents: index
                 .agents
@@ -374,9 +386,10 @@ fn list(json: bool) -> Result<()> {
     for workspace in listed {
         let sessions: Vec<&str> = workspace.sessions.iter().map(|s| s.name.as_str()).collect();
         println!(
-            "{}{}  sessions: {}  agents: {}",
+            "{}{}{}  sessions: {}  agents: {}",
             if workspace.current { "*" } else { " " },
             workspace.name,
+            if workspace.here { " (here)" } else { "" },
             sessions.join(", "),
             if workspace.agents.is_empty() {
                 "-".to_owned()

@@ -53,7 +53,7 @@ tmux-agent-plane list                     # all agents: name, kind, state, where
 tmux-agent-plane list --json              # the same with every field
 tmux-agent-plane sessions list [--json]   # projects: exact name/id, workspace, windows, clients, group, agents
 tmux-agent-plane sessions create <name> [--cwd DIR] [--workspace W] # new detached project with a shell
-tmux-agent-plane workspace list [--json]  # workspaces: their sessions and agents; * is the one the user is in
+tmux-agent-plane workspace list [--json]  # workspaces: their sessions and agents; * is the one the user is in, (here) yours
 tmux-agent-plane workspace switch <name>  # show it in the user's tmux client
 tmux-agent-plane workspace move <session>... --to <name>  # move whole sessions; a new name starts a workspace
 tmux-agent-plane workspace rename <name> <new-name>
@@ -153,7 +153,7 @@ When coordinating several agents: spawn each with a self-contained task and a na
 
 ## Workspaces
 
-A workspace is a named group of tmux sessions, one level above tmux; the user may call it an "Agent Plane session". Every session belongs to one; `main` is the first. The user's sidebar, picker, agent keys and status bar show only the workspace they are in, so they can set work aside the way they detach from tmux. tmux itself still shows every session. `list` shows every agent with its `workspace`; yours is on your own row (or your `--parent` name's row, for Codex).
+A workspace is a named group of tmux sessions, one level above tmux; the user may call it an "Agent Plane session". Every session belongs to one; `main` is the first. The user's sidebar, picker, agent keys and status bar show only the workspace they are in, so they can set work aside the way they detach from tmux. tmux itself still shows every session. `list` shows every agent with its `workspace`; yours is marked `(here)` by `workspace list` (`"here": true` in JSON), and is on your own row in `list` (or your own name's row, for Codex, whose shell cannot identify itself).
 
 **Never create, switch, rename or move between workspaces on your own initiative**, not even while organizing, cleaning up or coordinating helpers. Do it only when the user explicitly asks for that workspace operation. Moving work into another workspace takes it out of the user's view, which is confusing when they did not ask for it.
 

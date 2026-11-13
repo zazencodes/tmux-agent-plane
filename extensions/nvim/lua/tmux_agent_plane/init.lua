@@ -20,7 +20,26 @@ local function run(args)
   return result.stdout
 end
 
-local function agents()
+-- The workspace this Neovim's tmux session belongs to, as its sidebar and picker show it.
+local function workspace_here()
+  local output = run({ "workspace", "list", "--json" })
+  if not output then
+    return
+  end
+  local ok, rows = pcall(vim.json.decode, output)
+  if not ok or type(rows) ~= "table" or not vim.islist(rows) or not output:match("^%s*%[") then
+    error_message("tmux-agent-plane workspace list --json: expected an array of workspaces")
+    return
+  end
+  for _, row in ipairs(rows) do
+    if type(row) == "table" and row.here == true and type(row.name) == "string" then
+      return row.name
+    end
+  end
+  error_message("tmux-agent-plane: cannot tell which workspace this pane is in; run Neovim inside tmux")
+end
+
+local function agents(workspace)
   local output = run({ "list", "--json" })
   if not output then
     return
@@ -31,7 +50,7 @@ local function agents()
     return
   end
   for _, row in ipairs(rows) do
-    for _, field in ipairs({ "name", "title", "session", "pane", "state", "location" }) do
+    for _, field in ipairs({ "name", "title", "session", "workspace", "pane", "state", "location" }) do
       if type(row) ~= "table" or type(row[field]) ~= "string" then
         error_message("tmux-agent-plane list --json: invalid agent field " .. field)
         return
@@ -42,12 +61,18 @@ local function agents()
       return
     end
   end
-  return rows
+  return vim.tbl_filter(function(row)
+    return row.workspace == workspace
+  end, rows)
 end
 
 function M.agents(opts)
   opts = opts or {}
-  local rows = agents()
+  local workspace = workspace_here()
+  if not workspace then
+    return
+  end
+  local rows = agents(workspace)
   if not rows then
     return
   end
@@ -55,7 +80,7 @@ function M.agents(opts)
   local actions = require("telescope.actions")
   local action_state = require("telescope.actions.state")
   local picker = require("telescope.pickers").new(opts, {
-    prompt_title = "Agent sessions",
+    prompt_title = "Agents · " .. workspace,
     previewer = false,
     finder = require("telescope.finders").new_table({
       results = rows,

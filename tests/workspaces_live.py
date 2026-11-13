@@ -177,6 +177,14 @@ try:
         assert name in text and not any(o in text for o in others), (session, text)
     proof('each session status names its workspace and counts only its agents')
 
+    # Pickers ask which workspace their pane is in: its session's, whatever the one you are in.
+    from_api = dict(ENV, TMUX_PANE=agent('x-helper')['pane'])
+    listed = json.loads(plane('workspace', 'list', '--json', env=from_api).stdout)
+    assert [w['name'] for w in listed if w['here']] == ['client-x'], listed
+    assert not any(w['here'] for w in json.loads(plane('workspace', 'list', '--json').stdout))
+    assert ' client-x (here)' in plane('workspace', 'list', env=from_api).stdout
+    proof("workspace list marks the caller's own workspace here")
+
     # A session made by hand joins the workspace the client used last was in.
     client = attach('harness')
     infra('new-session', '-d', '-s', 'hand-main', '-c', folder('hand'), '/bin/sh')

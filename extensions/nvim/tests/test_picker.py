@@ -119,6 +119,12 @@ def attach(session):
 try:
     for session in ("origin", "other", "destination"):
         tmux("-f", "/dev/null", "new-session", "-d", "-s", session, "/bin/sh")
+    # Neovim's session is in main; the agents' destination too. "other" is another workspace,
+    # and the one you are in, so only the pane's own workspace can scope the picker.
+    for session, workspace in (("origin", "main"), ("destination", "main"), ("other", "client-x")):
+        tmux("set-option", "-t", session, "@agent-plane-workspace", workspace)
+    session_ids = {s: tmux("display-message", "-p", "-t", s, "#{session_id}")
+                   for s in ("origin", "other", "destination")}
     window = tmux("display-message", "-p", "-t", "destination", "#{window_id}")
     first = tmux("display-message", "-p", "-t", "destination", "#{pane_id}")
     second = tmux("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "destination", "/bin/sh")
@@ -129,15 +135,24 @@ try:
     ):
         rows.append(dict(name=name, title=title, pane=pane, detail=detail, kind="codex",
                          state="blocked" if detail else "idle", location="destination:0.0",
-                         session="destination", window=window, cwd=str(ROOT), parent=None,
-                         session_id=None, state_since=0, completions=0, visible=False))
+                         session="destination", workspace="main", window=window, cwd=str(ROOT),
+                         parent=None, session_id=None, state_since=0, completions=0,
+                         visible=False))
+    elsewhere = tmux("display-message", "-p", "-t", "other", "#{pane_id}")
+    rows.append(dict(rows[0], name="quartz-elsewhere", title="Ship compiler elsewhere", pane=elsewhere,
+                     detail=None, state="idle", location="other:0.0", session="other",
+                     workspace="client-x"))
+    workspaces = [dict(name="client-x", sessions=[dict(id=session_ids["other"], name="other")]),
+                  dict(name="main", sessions=[dict(id=session_ids[s], name=s)
+                                              for s in ("destination", "origin")])]
     (ROOT / "mode").write_text("normal")
     (ROOT / "ready").write_text("")
     def refresh_index():
         while not stop.is_set():
             mode = (ROOT / "mode").read_text().strip()
             value = dict(updated_at=0 if mode == "stale" else int(time.time() * 1000),
-                         agents=[] if mode == "empty" else [dict(row) for row in rows])
+                         agents=[] if mode == "empty" else [dict(row) for row in rows],
+                         workspaces=workspaces, workspace="client-x")
             if mode == "bad-pane":
                 value["agents"][0]["pane"] = "mutable-name"
             temp = STATE / "next.json"
