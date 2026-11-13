@@ -52,7 +52,7 @@ Do every agent job through `tmux-agent-plane`: finding agents, reading their scr
 tmux-agent-plane list                     # all agents: name, kind, state, where, parent, cwd, task
 tmux-agent-plane list --json              # the same with every field
 tmux-agent-plane sessions list [--json]   # projects: exact name/id, workspace, windows, clients, group, agents
-tmux-agent-plane sessions create <name> [--cwd DIR] [--workspace W] # new detached project with a shell
+tmux-agent-plane sessions create [name] [--cwd DIR] [--workspace W] # new detached project with a shell; no name: its folder's
 tmux-agent-plane workspace list [--json]  # workspaces: their sessions and agents; * is the one the user is in, (here) yours
 tmux-agent-plane workspace switch <name>  # show it in the user's tmux client
 tmux-agent-plane workspace move <session>... --to <name>  # move whole sessions; a new name starts a workspace
@@ -158,7 +158,7 @@ A workspace is a named group of tmux sessions, one level above tmux; the user ma
 **Never create, switch, rename or move between workspaces on your own initiative**, not even while organizing, cleaning up or coordinating helpers. Do it only when the user explicitly asks for that workspace operation. Moving work into another workspace takes it out of the user's view, which is confusing when they did not ask for it.
 
 - New work stays in your workspace without any flag: helpers you spawn into your session or a new window share it, and `sessions create` or `spawn --in session` puts a new session in your workspace. Pass `--workspace` only when the user names a workspace. Codex callers cannot be identified from their shell, so pass `--workspace <your workspace>` to `sessions create`.
-- "Start a new workspace (for X)": `sessions create <name> --workspace <name> --cwd <dir>` for a plain shell, or `spawn <kind> "<task>" --in session --session <name> --workspace <name> --cwd <dir> --name <agent>` to start it with an agent. Then `workspace switch <name>` only if the user wants to go there.
+- "Start a new workspace (for X)": `sessions create --workspace <name> --cwd <dir>` for a plain shell, its project named after the folder, or `spawn <kind> "<task>" --in session --session <project> --workspace <name> --cwd <dir> --name <agent>` to start it with an agent. Name projects after their folder, not after the workspace; `sessions list` shows which names are taken. Then `workspace switch <name>` only if the user wants to go there.
 - "Break these off into a workspace": move whole sessions with `workspace move <session>... --to <name>` (a new name starts the workspace). For single agents, create a session in the target workspace, then `move <agent> --session <that session>`. Report what moved where.
 - "Close workspace X": `workspace close X` moves its sessions and background tasks to `main`. Use `--terminate-sessions` only when the user explicitly asks to end its sessions and agents; background tasks still move to `main`. `main` is reserved and cannot be closed or renamed.
 - "Switch me to X": `workspace switch X`. "Rename X to Y": `workspace rename X Y`.
@@ -170,7 +170,7 @@ Treat requests such as “organize my tmux sessions”, “clean up my tmux proj
 Organize within workspaces: keep every session and agent in the workspace it is in, unless the user explicitly asks to move work between workspaces.
 
 1. Inspect `sessions list --json` and `list --json`. The session inventory includes shell-only sessions, attached-client counts, window IDs, group membership and agent names. Linked agents appear in every session containing their window; `list` retains one canonical agent row. Use tasks, names, directories and parent links to understand the work and choose appropriate existing or new sessions. Read an agent if its task is unclear.
-2. Create any needed project with `sessions create api --cwd /path/to/api`. Choose short, meaningful session names. Keep the user's established session/project boundaries.
+2. Create any needed project with `sessions create --cwd /path/to/api`, which names it after its folder, or `sessions create api --cwd ...` to choose a short, meaningful name. Keep the user's established session/project boundaries.
 3. Move each existing agent with `move reviewer --session api`. Move its orchestrator and helpers individually when they belong together. Each move detaches only that agent pane into a destination window; other agents and shells in a mixed source window stay there. Moving preserves the process, pane ID, name, parent and completion history, and sends no prompt or keys. It prints the new location immediately; the index/sidebar follows on the next daemon scan.
 4. Start future helpers directly in that project: `spawn codex "<full task>" --in window --session api --cwd /path/to/worktree --name api-review`. Check `sessions list` and `list` to verify the result, then report the organization.
 

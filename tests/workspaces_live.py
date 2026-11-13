@@ -240,18 +240,30 @@ try:
     assert reject.returncode and 'reserved' in reject.stderr, reject
     proof('workspace rename relabels its sessions and refuses an existing name')
 
-    # Automatic folder projects stay inside the agent's workspace.
+    # A project without a name is named after its folder; a name another session has gets -2.
+    def sessions_named():
+        return infra('list-sessions', '-F', '#{session_name}').splitlines()
+    out = plane('sessions', 'create', '--cwd', folder('notes'), '--workspace', 'main').stdout
+    assert out.startswith('notes '), out
+    out = plane('sessions', 'create', '--cwd', folder('notes'), '--workspace', 'lab').stdout
+    assert out.startswith('notes-2 ') and label('notes-2') == 'lab', out
+    proof('a new project is named after its folder, -2 when taken')
+
+    # A hand-started agent joins its folder's project in its own workspace. shared-folder is
+    # main's, so client-x gets shared-folder-2, and the next agent from there joins it.
     plane('sessions', 'create', 'shared-folder', '--cwd', folder('shared-folder'), '--workspace', 'main')
-    stay = infra('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', '=api:', '-c', folder('shared-folder'),
-                 '/bin/sh', '-c', 'pi')
-    eventually('hand agent indexed', lambda: agent_in(stay))
-    time.sleep(2.5)
-    assert agent_in(stay)['session'] == 'api', agent_in(stay)
+    first = infra('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', '=api:', '-c', folder('shared-folder'),
+                  '/bin/sh', '-c', 'pi')
+    eventually('first in shared-folder-2', lambda: (a := agent_in(first)) and a['session'] == 'shared-folder-2')
+    assert label('shared-folder-2') == 'client-x' and label('shared-folder') == 'main'
+    second = infra('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', '=api:', '-c', folder('shared-folder'),
+                   '/bin/sh', '-c', 'pi')
+    eventually('second joins it', lambda: (a := agent_in(second)) and a['session'] == 'shared-folder-2')
     moved = infra('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', '=api:', '-c', folder('fresh-folder'),
                   '/bin/sh', '-c', 'pi')
     eventually('hand agent placed', lambda: (a := agent_in(moved)) and a['session'] == 'fresh-folder')
     assert label('fresh-folder') == 'client-x'
-    proof("a hand-started agent's folder project is created in its own workspace, never joined across")
+    proof("a hand-started agent's folder project is found or made in its own workspace, never joined across")
 
     # The sidebar lists its own workspace only and names it.
     plane('workspace', 'switch', 'client-x')
@@ -281,6 +293,23 @@ try:
     eventually('client in lab', lambda: workspaces()['lab']['current'])
     proof('w lists every workspace and Enter shows the highlighted one')
 
+    # c starts a workspace whose first project is named after the list's folder, not the workspace.
+    infra('switch-client', '-c', client, '-t', '=api')
+    infra('select-pane', '-t', sidebar)
+    base = Path(infra('display-message', '-p', '-t', sidebar, '#{pane_current_path}')).name
+    infra('send-keys', '-t', sidebar, 'w')
+    eventually('menu for c', lambda: screen().startswith('workspaces'))
+    infra('send-keys', '-t', sidebar, 'c')
+    infra('send-keys', '-t', sidebar, '-l', 'fresh-ws')
+    infra('send-keys', '-t', sidebar, 'Enter')
+    fresh = eventually('fresh workspace', lambda: workspaces().get('fresh-ws'))
+    names = [s['name'] for s in fresh['sessions']]
+    assert len(names) == 1 and (names[0] == base or names[0].startswith(base + '-')), (base, names)
+    assert 'fresh-ws' not in sessions_named()
+    plane('workspace', 'close', 'fresh-ws', '--terminate-sessions')
+    eventually('fresh workspace closed', lambda: 'fresh-ws' not in workspaces())
+    proof(f'a new workspace\'s first project is named after its folder ({names[0]})')
+
     # Closing a session keeps its client in the workspace, though tmux picks another one's.
     plane('sessions', 'create', 'doomed', '--cwd', ROOT / 'scratch', '--workspace', 'client-x')
     infra('switch-client', '-c', client, '-t', '=lab-bench')
@@ -289,7 +318,8 @@ try:
     eventually('client in doomed', lambda: workspaces()['client-x']['current'])
     infra('kill-session', '-t', '=doomed')
     landed = eventually('client back in client-x', lambda: (s := infra(
-        'list-clients', '-F', '#{client_session}')) in ('api', 'fresh-folder') and s, timeout=4)
+        'list-clients', '-F', '#{client_session}')) in ('api', 'fresh-folder', 'shared-folder-2') and s,
+        timeout=4)
     proof(f'a client whose session closes stays in its workspace ({landed})')
 
     plane('daemon', 'stop')

@@ -6,7 +6,7 @@ use anyhow::{Context, Result, anyhow};
 use std::path::Path;
 
 /// tmux would rewrite dots and colons in a session name, so spell them the one way here.
-fn project_name(cwd: &str) -> Option<String> {
+pub(crate) fn project_name(cwd: &str) -> Option<String> {
     let folder = Path::new(cwd).file_name()?.to_str()?;
     let name = folder.replace(['.', ':'], "-");
     let name = name.trim_matches(['-', ' ']);
@@ -55,7 +55,8 @@ fn place(agent: &Agent, pane: &tmux::Pane, moving: bool) -> Result<()> {
     if !moving {
         return Ok(());
     }
-    let Some(project) = project_name(&agent.cwd).filter(|name| name != &agent.session) else {
+    // The agent may already be in its folder's project, under the folder's name or a numbered one.
+    let Some(project) = project_name(&agent.cwd) else {
         return Ok(());
     };
     if let Some(location) = sessions::place(agent, pane.pid, &project)? {

@@ -16,9 +16,10 @@ pub enum Action {
         #[arg(long)]
         json: bool,
     },
-    /// Create a detached named project with an interactive shell
+    /// Create a detached project with an interactive shell
     Create {
-        name: String,
+        /// Its name (default: its folder's, with -2, -3... when a session has that name)
+        name: Option<String>,
         /// Working directory (default: current directory)
         #[arg(long)]
         cwd: Option<PathBuf>,
@@ -35,7 +36,7 @@ pub fn run(action: Action) -> Result<()> {
             name,
             cwd,
             workspace,
-        } => create(&name, cwd, workspace.as_deref()),
+        } => create(name.as_deref(), cwd, workspace.as_deref()),
     }
 }
 
@@ -190,11 +191,36 @@ pub fn validate_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn create(name: &str, cwd: Option<PathBuf>, workspace: Option<&str>) -> Result<()> {
+fn create(name: Option<&str>, cwd: Option<PathBuf>, workspace: Option<&str>) -> Result<()> {
     let workspace = crate::workspaces::for_new(workspace, None, &index::read()?)?;
-    let id = create_project(name, cwd, &workspace)?;
+    let (id, name) = match name {
+        Some(name) => (create_project(name, cwd, &workspace)?, name.to_owned()),
+        None => create_folder_project(cwd, &workspace)?,
+    };
     println!("{name} {id} {workspace}");
     Ok(())
+}
+
+/// A new project named after its folder: the folder's name, or with -2, -3... when a session
+/// already has it. tmux session names are unique, and the same folder can be a project in several
+/// workspaces. Returns its id and name.
+pub fn create_folder_project(cwd: Option<PathBuf>, workspace: &str) -> Result<(String, String)> {
+    let cwd = match cwd {
+        Some(cwd) => cwd,
+        None => std::env::current_dir()?,
+    };
+    let folder = crate::projects::project_name(cwd.to_str().context("folder is not UTF-8")?)
+        .with_context(|| format!("{} has no name to give a project; name it", cwd.display()))?;
+    let snapshot = Snapshot::load()?;
+    let name = candidates(&folder)
+        .find(|name| !snapshot.sessions.iter().any(|s| &s.name == name))
+        .expect("names never run out");
+    Ok((create_project(&name, Some(cwd), workspace)?, name))
+}
+
+/// A folder's project names, in order: its name, then with -2, -3...
+fn candidates(folder: &str) -> impl Iterator<Item = String> + '_ {
+    std::iter::once(folder.to_owned()).chain((2..).map(move |n| format!("{folder}-{n}")))
 }
 
 /// A detached session with a login shell, in a workspace.
@@ -433,12 +459,14 @@ fn relocate(agent: &Agent, pid: i32, target: &str, followers: &[String]) -> Resu
 enum Placement<'a> {
     Stay,
     Existing(&'a Session),
-    New,
+    New(String),
 }
 
-/// A window shared with other work, shared sessions, a client already busy in the project and a
-/// project in another workspace keep the agent where it started. Those are the user's
-/// arrangement, not faults.
+/// The folder's project in the agent's workspace is the first of its names (`api`, `api-2`...)
+/// that is in that workspace; without one, a new session takes the first name nobody uses, so a
+/// project in another workspace is never joined. A window shared with other work, shared sessions
+/// and a client already busy in the project keep the agent where it started. Those are the
+/// user's arrangement, not faults.
 fn plan_placement<'a>(
     snapshot: &'a Snapshot,
     pane: &str,
@@ -460,17 +488,16 @@ fn plan_placement<'a>(
     if shared_window || source.group.is_some() {
         return Ok(Placement::Stay);
     }
-    Ok(match snapshot.sessions.iter().find(|s| s.name == project) {
-        Some(s)
-            if s.group.is_some()
-                || s.workspace != source.workspace
-                || (followers > 0 && s.attached > 0) =>
-        {
-            Placement::Stay
-        }
-        Some(s) => Placement::Existing(s),
-        None => Placement::New,
-    })
+    for name in candidates(project) {
+        return Ok(match snapshot.sessions.iter().find(|s| s.name == name) {
+            Some(s) if s.workspace != source.workspace => continue,
+            Some(s) if s.id == source.id => Placement::Stay,
+            Some(s) if s.group.is_some() || (followers > 0 && s.attached > 0) => Placement::Stay,
+            Some(s) => Placement::Existing(s),
+            None => Placement::New(name),
+        });
+    }
+    unreachable!("names never run out")
 }
 
 /// Put an agent in its project, taking along every client viewing it. Returns its new location,
@@ -487,8 +514,8 @@ pub fn place(agent: &Agent, pid: i32, project: &str) -> Result<Option<String>> {
     let destination = match plan_placement(&snapshot, &agent.pane, project, followers.len())? {
         Placement::Stay => return Ok(None),
         Placement::Existing(session) => session.id.clone(),
-        Placement::New => {
-            create_project(project, Some(agent.cwd.clone().into()), &agent.workspace)?
+        Placement::New(name) => {
+            create_project(&name, Some(agent.cwd.clone().into()), &agent.workspace)?
         }
     };
     relocate(agent, pid, &destination, &followers).map(Some)
@@ -678,11 +705,44 @@ mod tests {
             agent() + &row("$2", "alias", 0, "", "@0", "%0", false),
             1
         ));
-        // A folder project in another workspace is someone else's arrangement.
-        assert!(stays(
-            agent() + &in_workspace("$1", "api", 0, "", "@1", "%1", false, "client-x"),
-            1
-        ));
+    }
+
+    #[test]
+    fn a_folder_project_is_found_or_made_in_the_agents_own_workspace() {
+        let plan = |rows: String| -> String {
+            let snapshot = Snapshot::parse(&rows).unwrap();
+            match plan_placement(&snapshot, "%0", "api", 0).unwrap() {
+                Placement::Stay => "stay".into(),
+                Placement::Existing(s) => format!("join {}", s.name),
+                Placement::New(name) => format!("new {name}"),
+            }
+        };
+        let agent = || row("$0", "work", 0, "", "@0", "%0", false);
+        let elsewhere = |id, name| in_workspace(id, name, 0, "", "@9", "%9", false, "client-x");
+        // api is another workspace's project: this one gets api-2, then joins it.
+        assert_eq!(plan(agent() + &elsewhere("$1", "api")), "new api-2");
+        assert_eq!(
+            plan(agent() + &elsewhere("$1", "api") + &row("$2", "api-2", 0, "", "@2", "%2", false)),
+            "join api-2"
+        );
+        assert_eq!(
+            plan(agent() + &elsewhere("$1", "api") + &elsewhere("$2", "api-2")),
+            "new api-3"
+        );
+        // Already in its folder's project, under either name.
+        assert_eq!(plan(row("$0", "api", 0, "", "@0", "%0", false)), "stay");
+        assert_eq!(
+            plan(elsewhere("$1", "api") + &row("$0", "api-2", 0, "", "@0", "%0", false)),
+            "stay"
+        );
+    }
+
+    #[test]
+    fn folder_names_count_up_from_the_bare_name() {
+        assert_eq!(
+            candidates("notes").take(3).collect::<Vec<_>>(),
+            ["notes", "notes-2", "notes-3"]
+        );
     }
 
     #[test]

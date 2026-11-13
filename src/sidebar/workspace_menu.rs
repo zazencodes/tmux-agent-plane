@@ -202,8 +202,8 @@ impl Sidebar {
         Ok(())
     }
 
-    /// A new workspace starts with a session of its own name, in the folder this list runs in,
-    /// and the client goes there.
+    /// A new workspace starts with a project in the folder this list runs in, named after that
+    /// folder, and the client goes there.
     fn new_workspace(&mut self, name: &str, origin: Origin<'_>) -> Result<()> {
         workspaces::validate(name)?;
         if name == workspaces::FIRST {
@@ -214,7 +214,8 @@ impl Sidebar {
         }
         let clients = clients()?;
         let client = input_client(&clients, origin)?;
-        let session = sessions::create_project(name, None, name)?;
+        // Its first project is named after the folder, as any project is.
+        let (session, _) = sessions::create_folder_project(None, name)?;
         tmux::run(&["switch-client", "-c", &client.name, "-t", &session])?;
         self.menu.view = None;
         self.left = matches!(origin, Origin::Popup(_));
