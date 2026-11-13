@@ -496,14 +496,6 @@ pub(crate) fn group_colour(agents: &[Agent], session: &str) -> Color {
     GROUP_COLOURS[position % GROUP_COLOURS.len()]
 }
 
-/// The window and pane: the group column already names the session.
-fn place(agent: &Agent) -> &str {
-    agent
-        .location
-        .strip_prefix(&format!("{}:", agent.session))
-        .unwrap_or(&agent.location)
-}
-
 fn draw(f: &mut Frame, app: &mut App) {
     for pane in &app.backdrop {
         let area = pane.area.intersection(f.area());
@@ -588,7 +580,6 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
     let name_width =
         column(|a| &a.name).max(renaming.as_ref().map_or(0, |typed| typed.chars().count()));
     let group_width = column(|a| &a.session);
-    let place_width = column(place);
     let row_width = list_area.width.saturating_sub(2) as usize;
     let items: Vec<ListItem> = sidebar
         .agents
@@ -630,10 +621,9 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                 search,
                 Style::default().fg(group_colour(&sidebar.all_agents, &a.session)),
             ));
-            spans.extend([
-                Span::raw(" ".repeat(group_width.saturating_sub(a.session.chars().count()) + 1)),
-                Span::styled(format!("{:<place_width$}  ", place(a)), OVERLAY),
-            ]);
+            spans.push(Span::raw(
+                " ".repeat(group_width.saturating_sub(a.session.chars().count()) + 2),
+            ));
             spans.extend(marked(task, usize::MAX, search, task_style));
             let mut line = Line::from(spans);
             if is_selected {
@@ -1750,7 +1740,8 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let shown = screen(&terminal);
-        assert!(shown.contains("zeta 2.1") && !shown.contains("zeta:2.1"));
+        // The row names its session and leaves out the window and pane numbers.
+        assert!(shown.contains("zeta") && !shown.contains("2.1"), "{shown}");
         let buffer = terminal.backend().buffer().clone();
         let cell = (0..buffer.area.height)
             .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))

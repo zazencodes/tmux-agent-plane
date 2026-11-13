@@ -13,7 +13,7 @@ use crate::navigation::{CLIENT_FORMAT, Client, guard_destination, parse_client};
 use crate::tmux;
 use crate::ui::family;
 use crate::ui::{
-    LAVENDER, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, daemon_down, fill_viewport,
+    LAVENDER, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, daemon_down, fill, fill_viewport,
     group_colour, hints, icon, list_title, marked, message, name_style, no_agents, panel, rank,
     search_matches, state_style, task, truncate,
 };
@@ -1912,7 +1912,7 @@ pub(crate) fn status_footer(sidebar: &Sidebar, width: usize) -> Option<Line<'sta
 }
 
 /// One item per agent, grouped under a heading per tmux session in that session's picker colour,
-/// with a blank line between agents. The selected agent gets an accent bar and a background; its
+/// with a blank line between sessions. The selected agent gets an accent bar and a background; its
 /// heading does not. `all` is every agent, filtered out or not, so no search recolours a session.
 fn items<'a>(
     agents: &'a [Agent],
@@ -1929,11 +1929,11 @@ fn items<'a>(
         .enumerate()
         .map(|(i, a)| {
             let mut lines = Vec::new();
-            if i > 0 {
-                lines.push(Line::default());
-            }
             if session != Some(&a.session) {
                 session = Some(&a.session);
+                if i > 0 {
+                    lines.push(Line::default());
+                }
                 let name = truncate(&a.session, width.saturating_sub(4));
                 let rule = "─".repeat(width.saturating_sub(name.chars().count() + 3));
                 let mut heading = vec![Span::raw(" ")];
@@ -1982,21 +1982,14 @@ fn items<'a>(
             let first = Line::from(first);
             let first = right(first, Span::styled(status, state_style(a.state)), width);
 
-            // The window and pane: the session is in the heading.
-            let place = a
-                .location
-                .strip_prefix(&format!("{}:", a.session))
-                .unwrap_or(&a.location);
             let (task, task_style) = task(a);
-            let task_width = width.saturating_sub(place.chars().count() + 6);
             let mut second = vec![bar, Span::raw("  ")];
-            second.extend(marked(task, task_width, search, task_style));
+            second.extend(marked(task, width.saturating_sub(4), search, task_style));
             let second = Line::from(second);
-            let second = right(second, Span::styled(format!("{place} "), OVERLAY), width);
 
             for line in [first, second] {
                 lines.push(if is_selected {
-                    line.style(Style::default().bg(SURFACE0))
+                    fill(line, width).style(Style::default().bg(SURFACE0))
                 } else {
                     line
                 });
@@ -3063,6 +3056,34 @@ mod tests {
         sidebar.rebuild();
         assert_eq!(order(&sidebar), ["%2"]);
         assert_eq!(heading_colour(&mut sidebar), zeta);
+    }
+
+    #[test]
+    fn agents_sit_together_under_their_session_with_a_gap_only_between_sessions() {
+        let mut second = agent("%2", State::Working);
+        second.title = "A long description that runs past the right edge".into();
+        let mut other = agent("%3", State::Idle);
+        other.session = "zeta".into();
+        other.location = "zeta:4.2".into();
+        let mut sidebar = showing(vec![agent("%1", State::Idle), second, other]);
+        let screen = rendered(&mut sidebar);
+        let rows: Vec<&str> = screen.lines().collect();
+        let top = rows.iter().position(|r| r.contains("work ─")).unwrap();
+        assert!(rows[top + 1].contains("agent-%1"), "{screen}");
+        assert!(rows[top + 2].contains("Review payment flow"), "{screen}");
+        assert!(rows[top + 3].contains("agent-%2"), "{screen}");
+        // With no window and pane numbers, the description runs to the edge.
+        assert!(
+            rows[top + 4].contains("A long description that runs pa… │"),
+            "{screen}"
+        );
+        assert_eq!(rows[top + 5].trim_matches(['│', ' ']), "", "{screen}");
+        assert!(rows[top + 6].contains("zeta ─"), "{screen}");
+        assert!(rows[top + 7].contains("agent-%3"), "{screen}");
+        assert!(
+            !screen.contains("1.1") && !screen.contains("4.2"),
+            "{screen}"
+        );
     }
 
     #[test]

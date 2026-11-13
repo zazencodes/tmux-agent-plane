@@ -22,6 +22,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- A tighter sidebar: agents in a session sit on consecutive rows, with a blank line only between sessions, so more agents fit on screen. The window and pane numbers (such as `14.2`) are gone from sidebar and picker rows, which gives sidebar descriptions the full width.
 - Turning Agent Plane keys off preserves open sidebars and their normal navigation. Opening or closing a sidebar is blocked until keys are back on. Global navigation, sidebar and picker keys return to their original tmux bindings, including `prefix + Space` for layouts. The status bar keeps an enable reminder visible; `prefix + o` turns the keys back on.
 - Use lowercase `prefix + o` to turn global navigation keys off or on, so you can pass them through to Codex and other programs.
 
