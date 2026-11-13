@@ -790,16 +790,11 @@ pub(crate) fn no_agents(sidebar: &Sidebar) -> [String; 2] {
     }
 }
 
-/// The list's title, in the sidebar and the picker: once there are several workspaces, it names
-/// the one listed.
+/// The list's title names the workspace it lists, `main` included, in the sidebar and picker.
 pub(crate) fn list_title(sidebar: &Sidebar) -> Line<'static> {
     match &sidebar.workspace {
-        Some(workspace) if sidebar.workspaces.len() > 1 => Line::from(vec![
-            Span::raw(" agents · "),
-            Span::styled(workspace.clone(), Style::default().fg(WORKSPACE).bold()),
-            Span::raw(" "),
-        ]),
-        _ => Line::from(" agents "),
+        Some(workspace) => Line::from(format!(" agents · {workspace} ")),
+        None => Line::from(" agents "),
     }
 }
 
@@ -810,8 +805,6 @@ pub(crate) const OVERLAY: Color = Color::Rgb(0x6c, 0x70, 0x86);
 pub(crate) const SURFACE2: Color = Color::Rgb(0x58, 0x5b, 0x70);
 pub(crate) const SURFACE0: Color = Color::Rgb(0x31, 0x32, 0x44);
 pub(crate) const LAVENDER: Color = Color::Rgb(0xb4, 0xbe, 0xfe);
-/// Workspace names, as the status bar shows them.
-pub(crate) const WORKSPACE: Color = Color::Rgb(0x89, 0xb4, 0xfa);
 /// Dark text on yellow, as Vim highlights a search.
 pub(crate) const SEARCH_MATCH: Style = Style::new()
     .fg(Color::Rgb(0x1e, 0x1e, 0x2e))

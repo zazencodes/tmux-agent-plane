@@ -4,7 +4,7 @@
 
 use super::{Origin, Sidebar, cancels, clients, delete_word, input_client};
 use crate::index::State;
-use crate::ui::{OVERLAY, SUBTEXT, SURFACE0, TEXT, WORKSPACE, colour, hints, icon, truncate};
+use crate::ui::{OVERLAY, SUBTEXT, SURFACE0, TEXT, colour, hints, icon, truncate};
 use crate::{sessions, tmux, workspaces};
 use anyhow::{Context, Result, bail};
 use ratatui::Frame;
@@ -276,10 +276,7 @@ impl Sidebar {
                 );
                 let mut line = vec![
                     Span::raw(" "),
-                    Span::styled(
-                        if here { "• " } else { "  " },
-                        Style::default().fg(WORKSPACE),
-                    ),
+                    Span::styled(if here { "• " } else { "  " }, Style::default().fg(TEXT)),
                     Span::styled(name.clone(), Style::default().fg(TEXT).bold()),
                     Span::styled(label, OVERLAY),
                 ];
@@ -577,6 +574,21 @@ mod tests {
         assert!(sidebar.menu.view.as_ref().unwrap().closing.is_none());
         sidebar.action_key(ctrl_c, POPUP);
         assert!(!sidebar.menu.is_open());
+    }
+
+    #[test]
+    fn the_title_names_the_workspace_even_when_it_is_the_only_one_in_the_heading_colour() {
+        let mut sidebar = sidebar();
+        sidebar.workspaces.truncate(1);
+        let title = crate::ui::list_title(&sidebar);
+        assert_eq!(title.to_string(), " agents · main ");
+        // One span: panel() styles it like the rest of the heading.
+        assert_eq!(title.spans.len(), 1);
+        sidebar.workspace = Some("client-x".into());
+        assert_eq!(
+            crate::ui::list_title(&sidebar).to_string(),
+            " agents · client-x "
+        );
     }
 
     #[test]

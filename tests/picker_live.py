@@ -303,13 +303,16 @@ try:
     wait('help closed, picker open', lambda: 'j/k browse' in client.text())
     client.key(b'd')
     wait('filter', lambda: 'agents · blocked' in client.text())
-    # d skips states with no agents, so press until the cycle reaches All.
+    # d skips states with no agents, so press until the cycle reaches All. The popup's frame names
+    # the workspace; the state filter shows on the list inside it.
+    filtered = lambda: any(f'agents · {state}' in client.text()
+                           for state in ('blocked', 'done', 'working', 'idle'))
     for _ in range(5):
-        if 'agents · ' not in client.text():
+        if not filtered():
             break
         client.key(b'd')
         time.sleep(.15)
-    wait('filter off', lambda: 'agents · ' not in client.text())
+    wait('filter off', lambda: not filtered())
     assert 'j/k browse' in client.text()
     client.key(b'\x03')
     wait('ctrl-c cancel', lambda: 'filter names / projects / descriptions' not in client.text() and '▌' not in client.text())
