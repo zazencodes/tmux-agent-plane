@@ -302,10 +302,10 @@ try:
     client.key(b'q')
     wait('help closed, picker open', lambda: 'j/k browse' in client.text())
     client.key(b'd')
-    wait('filter', lambda: 'agents · blocked' in client.text())
+    wait('filter', lambda: ' d blocked ' in client.text())
     # d skips states with no agents, so press until the cycle reaches All. The popup's frame names
     # the workspace; the state filter shows on the list inside it.
-    filtered = lambda: any(f'agents · {state}' in client.text()
+    filtered = lambda: any(f' d {state} ' in client.text()
                            for state in ('blocked', 'done', 'working', 'idle'))
     for _ in range(5):
         if not filtered():

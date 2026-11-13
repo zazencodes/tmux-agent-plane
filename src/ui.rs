@@ -642,17 +642,22 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
             ListItem::new(line)
         })
         .collect();
-    let mut title = " agents".to_string();
+    // The popup's frame already says agents and names the workspace; the list's own title shows
+    // only a state filter or search, as the sidebar's top line spells them.
+    let mut title = Vec::new();
     if let Some(state) = sidebar.navigation.filter {
-        title += &format!(" · {}", state.as_str());
+        title.push(format!("d {}", state.as_str()));
     }
     let typing = sidebar.navigation.jump.is_some();
     if typing || !sidebar.navigation.pattern.is_empty() {
-        title += &format!(" · / {}", sidebar.navigation.pattern);
-        title += if typing { "▏" } else { "" };
+        let cursor = if typing { "▏" } else { "" };
+        title.push(format!("/ {}{cursor}", sidebar.navigation.pattern));
     }
-    title.push(' ');
-    let block = panel(Line::from(title));
+    let title = match title.is_empty() {
+        true => Line::default(),
+        false => Line::from(format!(" {} ", title.join(" · "))),
+    };
+    let block = panel(title);
     fill_viewport(&mut sidebar.list, &items, block.inner(list_area).height);
     let list = List::new(items).block(block);
     f.render_stateful_widget(list, list_area, &mut sidebar.list);
@@ -1661,7 +1666,10 @@ mod tests {
         assert_eq!(app.sidebar.agents.len(), 1);
         let mut terminal = Terminal::new(TestBackend::new(120, 35)).unwrap();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert!(screen(&terminal).contains("agents · blocked"));
+        let text = screen(&terminal);
+        assert!(text.contains(" d blocked "), "{text}");
+        // "agents" once, in the frame that names the workspace.
+        assert_eq!(text.matches("agents").count(), 1, "{text}");
         let _ = press(&mut app, KeyCode::Char('?'));
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         assert!(screen(&terminal).contains("Keyboard shortcuts"));
