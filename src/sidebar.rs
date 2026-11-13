@@ -35,6 +35,9 @@ pub(crate) const WIDTH: &str = "38";
 /// How often a sidebar reads the index. Reading a file spawns nothing; the daemon rewrites it
 /// once a second.
 const REFRESH: Duration = Duration::from_millis(500);
+/// How often a sidebar checks whether the daemon has written the index, which it reads at once.
+/// A move made outside the sidebar, such as the agent keys, shows without waiting for REFRESH.
+const WATCH: Duration = Duration::from_millis(100);
 /// Pane option marking a sidebar pane, so the toggle finds it.
 const MARK: &str = "@agent-plane-sidebar";
 /// Global option set while the sidebar is open, in every window of every session.
@@ -1399,6 +1402,23 @@ impl Screen<'_> {
     }
 }
 
+/// True when input is waiting; false when the index is due a read: REFRESH is up or the daemon
+/// has written it since `written`. Only a read redraws, so watching costs a stat, not a frame.
+fn wait_for_input(next_read: Instant, written: Option<std::time::SystemTime>) -> Result<bool> {
+    loop {
+        let now = Instant::now();
+        if now >= next_read {
+            return Ok(false);
+        }
+        if event::poll(next_read.min(now + WATCH) - now)? {
+            return Ok(true);
+        }
+        if index::modified() != written {
+            return Ok(false);
+        }
+    }
+}
+
 /// Runs until `q`. Idle, this runs no tmux command: only keys and a wrong width do.
 fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
     // This is the native sidebar process's own pane, never a caller inferred by the CLI.
@@ -1417,10 +1437,12 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
         Err(error) => sidebar.notice = Some(format!("{error:#}")),
     }
     let mut next_read = Instant::now();
+    let mut written = None;
     let mut check_width = true;
     loop {
         if Instant::now() >= next_read {
             // Refresh may change selection when an agent vanishes. Only input triggers preview.
+            written = index::modified();
             sidebar.refresh(origin);
             follow_graph(&mut sidebar);
             next_read = Instant::now() + REFRESH;
@@ -1433,7 +1455,8 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             tmux::run(&["resize-pane", "-t", &own, "-x", WIDTH])?;
         }
         screen.show(&mut sidebar)?;
-        if !event::poll(next_read.saturating_duration_since(Instant::now()))? {
+        if !wait_for_input(next_read, written)? {
+            next_read = next_read.min(Instant::now());
             continue;
         }
         let mut focus = false;

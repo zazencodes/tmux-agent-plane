@@ -173,7 +173,9 @@ pub fn cycle(direction: Direction, name: &str) -> Result<()> {
         "-t",
         &format!("{}:{}.{}", pane.session, pane.window, pane.id),
     ])?;
-    Ok(())
+    // Sidebars highlight the active pane the daemon publishes. A move within a window changes
+    // nothing else on screen, so publish it now rather than on the next scan.
+    crate::lifecycle::run(crate::lifecycle::Action::Tick)
 }
 
 #[cfg(test)]

@@ -295,6 +295,13 @@ pub fn read_any() -> Result<Option<Index>> {
     }
 }
 
+/// When the index was last written, so a reader can notice a write without parsing it. `None`
+/// when it cannot be read; reading the index itself reports why.
+pub fn modified() -> Option<SystemTime> {
+    let path = index_path().ok()?;
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
 /// The current index. Fails when the daemon is not keeping it fresh.
 pub fn read() -> Result<Index> {
     let not_running = format!(

@@ -17,6 +17,7 @@ before 1.0, a breaking change bumps the minor version.
 ### Fixed
 
 - Starting an agent with `c` in the sidebar opens one sidebar in the new window instead of two side by side.
+- The sidebar highlights the agent you move to with the agent keys (such as Shift + Up / Down) within a fraction of a second, as it does for its own arrow keys. Moving between agents in the same window used to leave the old row highlighted for up to a second and a half.
 - Turning the graph off with `p` in one sidebar turns it off in every sidebar, including ones opened later, instead of only the sidebar you pressed it in. The picker's `p` still applies to that picker only.
 - Ctrl+C behaves like Escape throughout the UI, backing out one screen at a time, including workspace menus, configuration editors and quota.
 - Configuration shows whether automatic naming is on or off, labels the background command as saved, and selects the naming switch after you save a command.
