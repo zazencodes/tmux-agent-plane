@@ -17,7 +17,7 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 - `src/commands.rs`: `list`, `read`, `send`, `keys`, `focus`, `kill`, `wait`, `spawn`. Agents are told never to use raw tmux on agent panes, so every agent job needs a command here.
 - `src/sessions.rs`: session/project inventory and creation, exact spawn destinations and guarded native agent-pane moves.
 - `src/projects.rs`: a hand-started agent joins the session named after its folder, once per pane, from the daemon's tick.
-- `src/workspaces.rs`: workspaces, named groups of sessions above tmux: the daemon labels new sessions, and the `workspace` commands. `src/sidebar/workspace_menu.rs` is `w`.
+- `src/workspaces.rs`: workspaces, named groups of sessions above tmux: the daemon labels new sessions and returns clients whose session closed, and the `workspace` commands. `src/sidebar/workspace_menu.rs` is `w`.
 - `src/ui.rs`: the picker popup (`prefix + a`, or `prefix + f` to start searching): the sidebar's list and actions, drawn with a large preview and ranked search.
 - `src/ui/family.rs`: `p`, the selected agent's family drawn as boxes and connectors; one widget for the sidebar's panel and the picker's preview area.
 - `src/sidebar.rs`: the always-on agent list in a sidebar pane (`prefix + S`), and its toggle. Idle, a sidebar runs no tmux commands: it learns everything from the index, and only keys run tmux. The plugin’s layout hook closes lone sidebars.

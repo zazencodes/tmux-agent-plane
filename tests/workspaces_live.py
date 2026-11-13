@@ -272,6 +272,17 @@ try:
     eventually('client in lab', lambda: workspaces()['lab']['current'])
     proof('w lists every workspace and Enter shows the highlighted one')
 
+    # Closing a session keeps its client in the workspace, though tmux picks another one's.
+    plane('sessions', 'create', 'doomed', '--cwd', ROOT / 'scratch', '--workspace', 'client-x')
+    infra('switch-client', '-c', client, '-t', '=lab-bench')
+    time.sleep(1.1)
+    infra('switch-client', '-c', client, '-t', '=doomed')
+    eventually('client in doomed', lambda: workspaces()['client-x']['current'])
+    infra('kill-session', '-t', '=doomed')
+    landed = eventually('client back in client-x', lambda: (s := infra(
+        'list-clients', '-F', '#{client_session}')) in ('api', 'fresh-folder') and s, timeout=4)
+    proof(f'a client whose session closes stays in its workspace ({landed})')
+
     plane('daemon', 'stop')
     DAEMON = False
     plane('daemon', 'start')

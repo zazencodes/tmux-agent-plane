@@ -160,6 +160,7 @@ pub struct Size {
 
 /// An attached client: what it shows, from which session, and when it was last used.
 pub struct ClientSize {
+    pub name: String,
     pub size: Size,
     /// The `window-size` option of the window on its screen.
     pub sizing: String,
@@ -186,7 +187,7 @@ pub struct Geometry {
     pub windows: Vec<WindowSize>,
 }
 
-const CLIENT_ROW: &str = "client\x1f#{window_width}\x1f#{window_height}\x1f#{window-size}\x1f#{session_id}\x1f#{client_activity}";
+const CLIENT_ROW: &str = "client\x1f#{client_name}\x1f#{window_width}\x1f#{window_height}\x1f#{window-size}\x1f#{session_id}\x1f#{client_activity}";
 const WINDOW_ROW: &str = "window\x1f#{window_id}\x1f#{window_width}\x1f#{window_height}\x1f#{window_zoomed_flag}\x1f#{window-size}\x1f#{window_layout}\x1f#{window_name}";
 
 fn parse_size(width: &str, height: &str) -> Result<Size> {
@@ -269,8 +270,9 @@ pub fn snapshot() -> Result<Snapshot> {
             continue;
         }
         match line.split(SEP).collect::<Vec<_>>().as_slice() {
-            ["client", width, height, sizing, session, activity] => {
+            ["client", name, width, height, sizing, session, activity] => {
                 geometry.clients.push(ClientSize {
+                    name: name.to_string(),
                     size: parse_size(width, height)?,
                     sizing: sizing.to_string(),
                     session: session.to_string(),

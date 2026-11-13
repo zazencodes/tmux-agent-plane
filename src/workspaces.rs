@@ -4,14 +4,15 @@
 //! workspace: the one you are looking from.
 //!
 //! A session the plane creates joins the workspace of whoever created it. Any other new session
-//! joins the workspace you are in, which is that of the client used last.
+//! joins the workspace you are in, which is that of the client used last. A client whose session
+//! closes stays in its workspace while that has sessions left.
 
 use crate::diagnostics::Issue;
 use crate::index::{self, Agent, Index, Workspace, WorkspaceSession};
 use crate::{commands, sessions, tasks, tmux};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Session option naming its workspace.
 pub const OPTION: &str = "@agent-plane-workspace";
@@ -45,7 +46,7 @@ pub fn run(action: Action) -> Result<()> {
     match action {
         Action::List { json } => list(json),
         Action::Switch { name } => {
-            let (client, session) = switch(&name, None)?;
+            let (client, _, session) = switch(&name, None)?;
             println!("{client} shows workspace {name} at session {session}");
             Ok(())
         }
@@ -81,6 +82,8 @@ pub fn validate(name: &str) -> Result<()> {
 /// The daemon's part: the workspace you are in, and one for every session and task without one.
 pub struct Tracker {
     current: String,
+    /// Each client's session id and workspace at the last tick, by client name.
+    seats: HashMap<String, (String, String)>,
 }
 
 pub struct Tick {
@@ -94,12 +97,27 @@ impl Tracker {
     pub fn start(previous: Option<&Index>) -> Self {
         Self {
             current: previous.map(|i| i.workspace.clone()).unwrap_or_default(),
+            seats: HashMap::new(),
         }
     }
 
-    /// Follow the client used last into its workspace, then give each new session the workspace
-    /// you were in when it appeared. The snapshot is updated to match.
+    /// Keep clients in their workspace when their session closes, follow the client used last
+    /// into its workspace, then give each new session the workspace you were in when it appeared.
+    /// The snapshot is updated to match.
     pub fn tick(&mut self, snapshot: &mut tmux::Snapshot) -> Tick {
+        let mut issues = Vec::new();
+        for (client, workspace) in self.strays(snapshot) {
+            match switch(&workspace, Some(&client)) {
+                Ok((_, session, _)) => {
+                    for seen in &mut snapshot.geometry.clients {
+                        if seen.name == client {
+                            seen.session.clone_from(&session);
+                        }
+                    }
+                }
+                Err(error) => issues.push(Issue::new("workspaces:return", error)),
+            }
+        }
         let last_used = snapshot
             .geometry
             .clients
@@ -131,7 +149,6 @@ impl Tracker {
                 )
             })
             .collect();
-        let mut issues = Vec::new();
         match tmux::for_each(&commands) {
             Ok(()) => {
                 for session in &mut snapshot.sessions {
@@ -147,11 +164,48 @@ impl Tracker {
             }
             Err(error) => issues.push(Issue::new("workspaces", error)),
         }
+        self.seats = snapshot
+            .geometry
+            .clients
+            .iter()
+            .filter_map(|client| {
+                let session = snapshot.sessions.iter().find(|s| s.id == client.session)?;
+                Some((
+                    client.name.clone(),
+                    (session.id.clone(), session.workspace.clone()),
+                ))
+            })
+            .collect();
         Tick {
             workspaces: views(&snapshot.sessions),
             current: self.current.clone(),
             issues,
         }
+    }
+
+    /// Clients whose session closed since the last tick, which tmux sent to a session of another
+    /// workspace while their own still has sessions: the workspace each goes back to.
+    fn strays(&self, snapshot: &tmux::Snapshot) -> Vec<(String, String)> {
+        let workspace_of = |id: &str| {
+            snapshot
+                .sessions
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| s.workspace.as_str())
+        };
+        snapshot
+            .geometry
+            .clients
+            .iter()
+            .filter_map(|client| {
+                let (session, workspace) = self.seats.get(&client.name)?;
+                let stray = !workspace.is_empty()
+                    && workspace_of(session).is_none()
+                    && workspace_of(&client.session) != Some(workspace)
+                    && snapshot.sessions.iter().any(|s| &s.workspace == workspace);
+                stray.then(|| (client.name.clone(), workspace.clone()))
+            })
+            .collect()
     }
 
     /// Tasks started before workspaces existed join the workspace you are in.
@@ -356,9 +410,9 @@ fn last_used_session(workspace: &str) -> Result<(String, String)> {
     }
 }
 
-/// Show a workspace in a client, the one used last unless named. Returns the client and the
-/// session it now shows.
-pub fn switch(workspace: &str, client: Option<&str>) -> Result<(String, String)> {
+/// Show a workspace in a client, the one used last unless named. Returns the client and the id
+/// and name of the session it now shows.
+pub fn switch(workspace: &str, client: Option<&str>) -> Result<(String, String, String)> {
     let (id, name) = last_used_session(workspace)?;
     let client = match client {
         Some(client) => client.to_owned(),
@@ -371,7 +425,7 @@ pub fn switch(workspace: &str, client: Option<&str>) -> Result<(String, String)>
         }
     };
     tmux::run(&["switch-client", "-c", &client, "-t", &id])?;
-    Ok((client, name))
+    Ok((client, id, name))
 }
 
 /// Put sessions in a workspace. Their windows, panes and clients stay as they are.
@@ -481,6 +535,69 @@ mod tests {
             name: name.into(),
             workspace: workspace.into(),
         }
+    }
+
+    fn snapshot(sessions: Vec<tmux::Session>, clients: &[(&str, &str)]) -> tmux::Snapshot {
+        tmux::Snapshot {
+            panes: Vec::new(),
+            geometry: tmux::Geometry {
+                clients: clients
+                    .iter()
+                    .map(|(name, session)| tmux::ClientSize {
+                        name: (*name).into(),
+                        size: tmux::Size {
+                            width: 80,
+                            height: 24,
+                        },
+                        sizing: "latest".into(),
+                        session: (*session).into(),
+                        activity: 0,
+                    })
+                    .collect(),
+                windows: Vec::new(),
+            },
+            keys: Default::default(),
+            sessions,
+        }
+    }
+
+    #[test]
+    fn a_client_whose_session_closed_goes_back_to_its_workspace_while_it_has_sessions() {
+        let tracker = Tracker {
+            current: "main".into(),
+            seats: [
+                ("/dev/a".to_owned(), ("$1".to_owned(), "main".to_owned())),
+                ("/dev/b".to_owned(), ("$2".to_owned(), "main".to_owned())),
+                ("/dev/c".to_owned(), ("$5".to_owned(), "solo".to_owned())),
+                ("/dev/d".to_owned(), ("$6".to_owned(), String::new())),
+            ]
+            .into(),
+        };
+        let sessions = vec![
+            session("$2", "web", "main"),
+            session("$3", "api", "main"),
+            session("$4", "client", "client-x"),
+        ];
+        // a: its session closed and tmux chose another workspace's. b: switched on purpose,
+        // its session is still open. c: its workspace has no session left. d: it was in the
+        // tasks session, which belongs to no workspace.
+        let snapshot = snapshot(
+            sessions,
+            &[
+                ("/dev/a", "$4"),
+                ("/dev/b", "$4"),
+                ("/dev/c", "$4"),
+                ("/dev/d", "$4"),
+            ],
+        );
+        assert_eq!(
+            tracker.strays(&snapshot),
+            [("/dev/a".to_owned(), "main".to_owned())]
+        );
+        // tmux chose a session of the same workspace: nothing to do.
+        let mut same = snapshot;
+        same.geometry.clients[0].session = "$3".into();
+        assert!(tracker.strays(&same).is_empty());
     }
 
     #[test]

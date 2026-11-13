@@ -30,6 +30,9 @@ tmux set-hook -g 'window-layout-changed[90]' \
 # sidebar has no scrollback to read. Other modes, such as prefix + w, end when used, so they stay.
 tmux set-hook -g 'pane-mode-changed[90]' \
   'run-shell -C "if-shell -F -t #{hook_pane} '\''##{&&:##{==:##{pane_mode},copy-mode},##{==:##{@agent-plane-sidebar},1}}'\'' '\''send-keys -t #{hook_pane} -X cancel'\''"'
+# A client whose session closes lands in the most recently active session, which may be in
+# another workspace. Waking the daemon takes it back to its own workspace right away.
+tmux set-hook -g 'session-closed[90]' "run-shell -b 'tmux-agent-plane daemon tick >/dev/null 2>&1 || true'"
 # Initial tmux.conf runs before the first session exists. Start from the session
 # hook once there are panes to scan; reloading the plugin also starts an existing
 # server's watcher. Start is idempotent and lifecycle failures go to daemon.log.

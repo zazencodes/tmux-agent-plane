@@ -132,6 +132,7 @@ mod tests {
 
     fn client(width: u32) -> ClientSize {
         ClientSize {
+            name: "/dev/ttys1".into(),
             size: Size { width, height: 50 },
             sizing: LATEST.into(),
             session: "$1".into(),
@@ -248,6 +249,7 @@ mod tests {
         geometry.clients = vec![];
         assert_eq!(target(&geometry), None);
         geometry.clients = vec![ClientSize {
+            name: "/dev/ttys1".into(),
             size: SCREEN,
             sizing: "manual".into(),
             session: "$1".into(),

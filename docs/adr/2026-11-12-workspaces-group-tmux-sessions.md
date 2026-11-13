@@ -6,6 +6,7 @@
 - Only the plane's own views are scoped: the sidebar, the picker, the agent keys, the sidebar's notices and tasks, and each session's status bar show the workspace being looked from. tmux is untouched: its session list, switching and detaching still see every session. The CLI lists every agent with its workspace, so agents coordinate across them.
 - A session joins the workspace of whoever creates it: the named one, else the creating agent's or pane's, else the one you are in (that of the client used last). Sessions made outside the plane join the one you are in.
 - Nothing moves work between workspaces on its own. Automatic folder projects stay inside the agent's workspace; organizing projects never crosses workspaces; agents change workspaces only when the user explicitly asks.
+- Closing a session keeps its clients in its workspace while that has sessions left.
 - The name is "workspace", because "project" already means a tmux session here.
 
 ## Why
