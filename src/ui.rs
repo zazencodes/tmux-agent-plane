@@ -256,6 +256,7 @@ impl App {
         let clients = clients()?;
         let client = input_client(&clients, Origin::Popup(&self.client))?;
         self.backdrop = backdrop(client)?;
+        self.sidebar.client_session = Some(client.session.clone());
         self.sidebar.navigation.pane = index::read()
             .ok()
             .and_then(|index| agent_in_view(&index, client));
@@ -360,6 +361,7 @@ impl App {
             && key.modifiers.contains(KeyModifiers::CONTROL)
             && self.sidebar.unfiltered()
             && !self.sidebar.auto_name.open
+            && !self.sidebar.menu.is_open()
         {
             return ControlFlow::Break(None);
         }
@@ -517,7 +519,7 @@ fn draw(f: &mut Frame, app: &mut App) {
     }
     let area = panel_area(f.area());
     f.render_widget(Clear, area);
-    let frame = panel(Line::from(" agents "));
+    let frame = panel(list_title(&app.sidebar));
     let inner = frame.inner(area);
     f.render_widget(frame, area);
     draw_panel(f, inner, app);
@@ -530,6 +532,10 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
     }
     if app.sidebar.auto_name.open {
         app.sidebar.auto_name.draw(f, area);
+        return;
+    }
+    if app.sidebar.menu.is_open() {
+        app.sidebar.draw_menu(f, area);
         return;
     }
     let sidebar = &mut app.sidebar;
@@ -684,17 +690,20 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
     };
     match (&app.sidebar.error, app.sidebar.selected()) {
         (Some(e), _) => daemon_down(f, preview_area, block, &app.sidebar, e),
-        (None, None) => message(
-            f,
-            preview_area,
-            block,
-            TEXT,
-            &if app.sidebar.all_agents.is_empty() {
-                NO_AGENTS
-            } else {
-                ["no matching agents", "d changes state · f edits filter"]
-            },
-        ),
+        (None, None) => {
+            let none = no_agents(&app.sidebar);
+            message(
+                f,
+                preview_area,
+                block,
+                TEXT,
+                &if app.sidebar.all_agents.is_empty() {
+                    [none[0].as_str(), none[1].as_str()]
+                } else {
+                    ["no matching agents", "d changes state · f edits filter"]
+                },
+            )
+        }
         (None, Some(selected)) if app.sidebar.navigation.family => {
             let family = family::family(&app.sidebar.all_agents, selected);
             let block = panel(Line::from(" graph "));
@@ -773,8 +782,33 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(Paragraph::new(footer), help_area);
 }
 
-/// The message for an empty list, in the sidebar and the picker.
-pub(crate) const NO_AGENTS: [&str; 2] = ["no agents running", "start an agent in any tmux pane"];
+/// The message for an empty list, in the sidebar and the picker. With several workspaces it names
+/// this one and how to reach the others.
+pub(crate) fn no_agents(sidebar: &Sidebar) -> [String; 2] {
+    match &sidebar.workspace {
+        Some(workspace) if sidebar.workspaces.len() > 1 => [
+            format!("no agents in {workspace}"),
+            "start one in any pane here · w for workspaces".into(),
+        ],
+        _ => [
+            "no agents running".into(),
+            "start an agent in any tmux pane".into(),
+        ],
+    }
+}
+
+/// The list's title, in the sidebar and the picker: once there are several workspaces, it names
+/// the one listed.
+pub(crate) fn list_title(sidebar: &Sidebar) -> Line<'static> {
+    match &sidebar.workspace {
+        Some(workspace) if sidebar.workspaces.len() > 1 => Line::from(vec![
+            Span::raw(" agents · "),
+            Span::styled(workspace.clone(), Style::default().fg(WORKSPACE).bold()),
+            Span::raw(" "),
+        ]),
+        _ => Line::from(" agents "),
+    }
+}
 
 // Catppuccin mocha.
 pub(crate) const SUBTEXT: Color = Color::Rgb(0xa6, 0xad, 0xc8);
@@ -783,6 +817,8 @@ pub(crate) const OVERLAY: Color = Color::Rgb(0x6c, 0x70, 0x86);
 pub(crate) const SURFACE2: Color = Color::Rgb(0x58, 0x5b, 0x70);
 pub(crate) const SURFACE0: Color = Color::Rgb(0x31, 0x32, 0x44);
 pub(crate) const LAVENDER: Color = Color::Rgb(0xb4, 0xbe, 0xfe);
+/// Workspace names, as the status bar shows them.
+pub(crate) const WORKSPACE: Color = Color::Rgb(0x89, 0xb4, 0xfa);
 /// Dark text on yellow, as Vim highlights a search.
 pub(crate) const SEARCH_MATCH: Style = Style::new()
     .fg(Color::Rgb(0x1e, 0x1e, 0x2e))
@@ -1052,6 +1088,7 @@ mod tests {
             detail: None,
             location: "work:1.1".into(),
             session: "work".into(),
+            workspace: "main".into(),
             window: "@1".into(),
             cwd: "/tmp/project".into(),
             parent: None,
@@ -1132,12 +1169,11 @@ mod tests {
                 active_pane: "%9".into(),
                 viewed: true,
                 sidebar: Some("%9".into()),
+                workspace: "main".into(),
             }],
             order: Vec::new(),
             last_agent: Some("%3".into()),
-            tasks: Vec::new(),
-            pending_restore: 0,
-            global_keys: Default::default(),
+            ..Index::default()
         };
         let client = |pane: &str| Client {
             name: "client".into(),

@@ -381,13 +381,7 @@ impl Runtime {
         let index = Index {
             updated_at: index::now_ms(),
             agents: agents.to_vec(),
-            recent_event: None,
-            windows: Vec::new(),
-            order: Vec::new(),
-            last_agent: None,
-            tasks: Vec::new(),
-            pending_restore: 0,
-            global_keys: Default::default(),
+            ..Index::default()
         };
         let rejected = |reason: String| {
             Outcome::Rejected(Rejection {
@@ -459,6 +453,7 @@ mod tests {
             title: "Fix payment tests".into(),
             location: "s:1.1".into(),
             session: "s".into(),
+            workspace: "main".into(),
             window: "@1".into(),
             cwd: "/tmp".into(),
             parent: None,
@@ -583,9 +578,7 @@ mod tests {
             windows: Vec::new(),
             order: Vec::new(),
             last_agent: None,
-            tasks: Vec::new(),
-            pending_restore: 0,
-            global_keys: Default::default(),
+            ..Index::default()
         };
         for name in [
             "payment-tests",

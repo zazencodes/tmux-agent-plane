@@ -1,12 +1,13 @@
 //! A tmux session is a project. Resolve exact destinations and move physical panes.
 use crate::index::{self, Agent};
+use crate::tmux::command_string as command;
 use crate::{detect, navigation, tasks, tmux};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::path::PathBuf;
 
 const SEP: char = '\x1f';
-const SNAPSHOT: &str = "#{session_id}\x1f#{session_name}\x1f#{session_attached}\x1f#{session_group}\x1f#{window_id}\x1f#{pane_id}\x1f#{@agent-plane-sidebar}";
+const SNAPSHOT: &str = "#{session_id}\x1f#{session_name}\x1f#{session_attached}\x1f#{session_group}\x1f#{window_id}\x1f#{pane_id}\x1f#{@agent-plane-sidebar}\x1f#{@agent-plane-workspace}";
 
 #[derive(clap::Subcommand)]
 pub enum Action {
@@ -21,13 +22,20 @@ pub enum Action {
         /// Working directory (default: current directory)
         #[arg(long)]
         cwd: Option<PathBuf>,
+        /// The workspace it joins (default: the caller's, else the one you are in)
+        #[arg(long)]
+        workspace: Option<String>,
     },
 }
 
 pub fn run(action: Action) -> Result<()> {
     match action {
         Action::List { json } => list(json),
-        Action::Create { name, cwd } => create(&name, cwd),
+        Action::Create {
+            name,
+            cwd,
+            workspace,
+        } => create(&name, cwd, workspace.as_deref()),
     }
 }
 
@@ -35,8 +43,10 @@ pub fn run(action: Action) -> Result<()> {
 pub struct Session {
     pub id: String,
     pub name: String,
+    /// Empty only for the tasks session and a session too new to have one.
+    pub workspace: String,
     attached: u32,
-    group: Option<String>,
+    pub(crate) group: Option<String>,
     /// Physical window ids make links between projects explicit.
     windows: Vec<String>,
     agents: Vec<String>,
@@ -49,13 +59,13 @@ struct PaneLink {
     sidebar: bool,
 }
 
-struct Snapshot {
-    sessions: Vec<Session>,
+pub(crate) struct Snapshot {
+    pub(crate) sessions: Vec<Session>,
     panes: Vec<PaneLink>,
 }
 
 impl Snapshot {
-    fn load() -> Result<Self> {
+    pub(crate) fn load() -> Result<Self> {
         Self::parse(&tmux::run(&["list-panes", "-a", "-F", SNAPSHOT])?)
     }
 
@@ -66,10 +76,10 @@ impl Snapshot {
         };
         for line in output.lines() {
             let fields: Vec<_> = line.split(SEP).collect();
-            if fields.len() != 7 {
+            if fields.len() != 8 {
                 bail!("unexpected session/pane snapshot row: {line:?}");
             }
-            let [id, name, attached, group, window, pane, sidebar] = fields[..] else {
+            let [id, name, attached, group, window, pane, sidebar, workspace] = fields[..] else {
                 unreachable!()
             };
             let session = match snapshot.sessions.iter().position(|s| s.id == id) {
@@ -78,6 +88,7 @@ impl Snapshot {
                     snapshot.sessions.push(Session {
                         id: id.into(),
                         name: name.into(),
+                        workspace: workspace.into(),
                         attached: attached.parse().context("session_attached")?,
                         group: Some(group.into()).filter(|g: &String| !g.is_empty()),
                         windows: Vec::new(),
@@ -100,7 +111,7 @@ impl Snapshot {
         Ok(snapshot)
     }
 
-    fn find(&self, target: &str) -> Result<&Session> {
+    pub(crate) fn find(&self, target: &str) -> Result<&Session> {
         let matches: Vec<_> = self
             .sessions
             .iter()
@@ -128,9 +139,10 @@ fn list(json: bool) -> Result<()> {
     } else {
         for session in sessions {
             println!(
-                "{} {}  {} windows  {} clients  agents: {}{}",
+                "{} {}  workspace {}  {} windows  {} clients  agents: {}{}",
                 session.name,
                 session.id,
+                session.workspace,
                 session.windows.len(),
                 session.attached,
                 session.agents.join(", "),
@@ -178,13 +190,15 @@ pub fn validate_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn create(name: &str, cwd: Option<PathBuf>) -> Result<()> {
-    let id = create_project(name, cwd)?;
-    println!("{name} {id}");
+fn create(name: &str, cwd: Option<PathBuf>, workspace: Option<&str>) -> Result<()> {
+    let workspace = crate::workspaces::for_new(workspace, None, &index::read()?)?;
+    let id = create_project(name, cwd, &workspace)?;
+    println!("{name} {id} {workspace}");
     Ok(())
 }
 
-pub fn create_project(name: &str, cwd: Option<PathBuf>) -> Result<String> {
+/// A detached session with a login shell, in a workspace.
+pub fn create_project(name: &str, cwd: Option<PathBuf>, workspace: &str) -> Result<String> {
     validate_name(name)?;
     let cwd = match cwd {
         Some(cwd) => cwd,
@@ -208,7 +222,9 @@ pub fn create_project(name: &str, cwd: Option<PathBuf>) -> Result<String> {
         &shell,
         "-il",
     ])?;
-    Ok(created.trim().to_owned())
+    let id = created.trim().to_owned();
+    crate::workspaces::assign(&id, workspace)?;
+    Ok(id)
 }
 
 /// Agents go to projects; the tasks session holds only tasks.
@@ -291,15 +307,6 @@ fn plan_move<'a>(
         pane_count: window_panes.len(),
         final_window,
     })
-}
-
-// tmux's command parser accepts shell-style single-quoted strings. Keep every
-// nested command argument literal, including names containing quotes or formats.
-fn command(args: &[&str]) -> String {
-    args.iter()
-        .map(|arg| format!("'{}'", arg.replace('\'', r"'\''")))
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 pub fn move_agent(agent: &Agent, target: &str) -> Result<()> {
@@ -429,8 +436,9 @@ enum Placement<'a> {
     New,
 }
 
-/// A window shared with other work, shared sessions, and a client already busy in the project
-/// keep the agent where it started. Those are the user's arrangement, not faults.
+/// A window shared with other work, shared sessions, a client already busy in the project and a
+/// project in another workspace keep the agent where it started. Those are the user's
+/// arrangement, not faults.
 fn plan_placement<'a>(
     snapshot: &'a Snapshot,
     pane: &str,
@@ -448,11 +456,18 @@ fn plan_placement<'a>(
         .panes
         .iter()
         .any(|p| p.window == link.window && p.id != pane && !p.sidebar);
-    if shared_window || snapshot.find(&link.session)?.group.is_some() {
+    let source = snapshot.find(&link.session)?;
+    if shared_window || source.group.is_some() {
         return Ok(Placement::Stay);
     }
     Ok(match snapshot.sessions.iter().find(|s| s.name == project) {
-        Some(s) if s.group.is_some() || (followers > 0 && s.attached > 0) => Placement::Stay,
+        Some(s)
+            if s.group.is_some()
+                || s.workspace != source.workspace
+                || (followers > 0 && s.attached > 0) =>
+        {
+            Placement::Stay
+        }
         Some(s) => Placement::Existing(s),
         None => Placement::New,
     })
@@ -472,7 +487,9 @@ pub fn place(agent: &Agent, pid: i32, project: &str) -> Result<Option<String>> {
     let destination = match plan_placement(&snapshot, &agent.pane, project, followers.len())? {
         Placement::Stay => return Ok(None),
         Placement::Existing(session) => session.id.clone(),
-        Placement::New => create_project(project, Some(agent.cwd.clone().into()))?,
+        Placement::New => {
+            create_project(project, Some(agent.cwd.clone().into()), &agent.workspace)?
+        }
     };
     relocate(agent, pid, &destination, &followers).map(Some)
 }
@@ -490,8 +507,22 @@ mod tests {
         pane: &str,
         sidebar: bool,
     ) -> String {
+        in_workspace(id, name, attached, group, window, pane, sidebar, "main")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn in_workspace(
+        id: &str,
+        name: &str,
+        attached: u32,
+        group: &str,
+        window: &str,
+        pane: &str,
+        sidebar: bool,
+        workspace: &str,
+    ) -> String {
         format!(
-            "{id}\x1f{name}\x1f{attached}\x1f{group}\x1f{window}\x1f{pane}\x1f{}\n",
+            "{id}\x1f{name}\x1f{attached}\x1f{group}\x1f{window}\x1f{pane}\x1f{}\x1f{workspace}\n",
             u8::from(sidebar)
         )
     }
@@ -645,6 +676,11 @@ mod tests {
         ));
         assert!(stays(
             agent() + &row("$2", "alias", 0, "", "@0", "%0", false),
+            1
+        ));
+        // A folder project in another workspace is someone else's arrangement.
+        assert!(stays(
+            agent() + &in_workspace("$1", "api", 0, "", "@1", "%1", false, "client-x"),
             1
         ));
     }

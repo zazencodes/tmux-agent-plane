@@ -177,6 +177,8 @@ mod tests {
             id: "%1".into(),
             pid,
             session: "s".into(),
+            session_id: "$1".into(),
+            workspace: "main".into(),
             window: "@1".into(),
             window_index: 1,
             pane_index: 1,

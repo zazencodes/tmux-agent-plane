@@ -22,6 +22,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("gg home G", "First / last agent"),
             ("{ }", "Previous / next project"),
             ("enter l →", "Go to the selected row"),
+            ("w", "Workspaces: switch, new"),
         ],
     ),
     (

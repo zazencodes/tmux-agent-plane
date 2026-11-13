@@ -1,4 +1,5 @@
-//! Direct, client-scoped agent navigation, in the sidebar's published order.
+//! Direct, client-scoped agent navigation, in the sidebar's published order, within the workspace
+//! the client is in.
 
 use crate::index::{self, Agent, Index};
 use crate::tmux;
@@ -113,16 +114,22 @@ impl ContextSnapshot {
     }
 }
 
-fn destination<'a>(index: &'a Index, current: &str, direction: Direction) -> Result<&'a Agent> {
+fn destination<'a>(
+    index: &'a Index,
+    workspace: &str,
+    current: &str,
+    direction: Direction,
+) -> Result<&'a Agent> {
     let mut agents: Vec<_> = index
         .order
         .iter()
         .filter_map(|pane| index.agents.iter().find(|agent| &agent.pane == pane))
+        .filter(|agent| agent.workspace == workspace)
         .collect();
     // The sidebar keeps session headings alphabetical while latching order within them.
     agents.sort_by(|a, b| a.session.cmp(&b.session));
     if agents.is_empty() {
-        bail!("no agents available in the published sidebar order");
+        bail!("no agents in workspace {workspace}");
     }
     let position = agents.iter().position(|agent| agent.pane == current);
     let selected = match (position, direction) {
@@ -149,7 +156,11 @@ pub fn cycle(direction: Direction, name: &str) -> Result<()> {
         "pane\x1f#{pane_id}\x1f#{window_id}\x1f#{session_id}\x1f#{session_name}",
     ])?)?;
     let client = context.client(name)?;
-    let agent = destination(&index, &client.pane, direction)?;
+    // A session without a workspace, such as the tasks session, goes through the one you are in.
+    let workspace = index
+        .workspace_of(&client.session)
+        .unwrap_or(&index.workspace);
+    let agent = destination(&index, workspace, &client.pane, direction)?;
     let pane = context.pane(agent)?;
     if client.pane == pane.id {
         return Ok(());
@@ -180,6 +191,7 @@ mod tests {
             title: String::new(),
             location: String::new(),
             session: if pane == "%3" { "alpha" } else { "zeta" }.into(),
+            workspace: "main".into(),
             window: "@1".into(),
             cwd: "/tmp".into(),
             parent: None,
@@ -194,13 +206,9 @@ mod tests {
         Index {
             updated_at: 0,
             agents: agents.into(),
-            recent_event: None,
-            windows: Vec::new(),
             order: ["%2", "%gone", "%1", "%3"].map(String::from).into(),
             last_agent: Some("%1".into()),
-            tasks: Vec::new(),
-            pending_restore: 0,
-            global_keys: Default::default(),
+            ..Index::default()
         }
     }
 
@@ -211,22 +219,26 @@ mod tests {
             [("%3", "%2", "%1"), ("%2", "%1", "%3"), ("%1", "%3", "%2")]
         {
             assert_eq!(
-                destination(&index, current, Direction::Next).unwrap().pane,
+                destination(&index, "main", current, Direction::Next)
+                    .unwrap()
+                    .pane,
                 next
             );
             assert_eq!(
-                destination(&index, current, Direction::Previous)
+                destination(&index, "main", current, Direction::Previous)
                     .unwrap()
                     .pane,
                 previous
             );
         }
         assert_eq!(
-            destination(&index, "%shell", Direction::Next).unwrap().pane,
+            destination(&index, "main", "%shell", Direction::Next)
+                .unwrap()
+                .pane,
             "%3"
         );
         assert_eq!(
-            destination(&index, "%sidebar", Direction::Previous)
+            destination(&index, "main", "%sidebar", Direction::Previous)
                 .unwrap()
                 .pane,
             "%1"
@@ -234,14 +246,36 @@ mod tests {
     }
 
     #[test]
+    fn agents_in_other_workspaces_are_skipped() {
+        let mut index = index();
+        index.agents[1].workspace = "client-x".into();
+        assert_eq!(
+            destination(&index, "main", "%3", Direction::Next)
+                .unwrap()
+                .pane,
+            "%1"
+        );
+        assert_eq!(
+            destination(&index, "client-x", "%3", Direction::Next)
+                .unwrap()
+                .pane,
+            "%2"
+        );
+        assert!(destination(&index, "empty", "%3", Direction::Next).is_err());
+    }
+
+    #[test]
     fn empty_and_single_agent_rosters_are_explicit() {
         let mut index = index();
         index.order = vec!["%1".into()];
         for direction in [Direction::Next, Direction::Previous] {
-            assert_eq!(destination(&index, "%1", direction).unwrap().pane, "%1");
+            assert_eq!(
+                destination(&index, "main", "%1", direction).unwrap().pane,
+                "%1"
+            );
         }
         index.agents.clear();
-        assert!(destination(&index, "%1", Direction::Next).is_err());
+        assert!(destination(&index, "main", "%1", Direction::Next).is_err());
     }
 
     #[test]

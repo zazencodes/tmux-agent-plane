@@ -106,6 +106,9 @@ pub struct Agent {
     /// `session:window.pane`
     pub location: String,
     pub session: String,
+    /// The workspace its session belongs to.
+    #[serde(default)]
+    pub workspace: String,
     /// tmux window id, e.g. `@104`.
     pub window: String,
     pub cwd: String,
@@ -130,7 +133,7 @@ pub struct Agent {
     pub visible: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Index {
     pub updated_at: u64,
     pub agents: Vec<Agent>,
@@ -155,6 +158,39 @@ pub struct Index {
     /// Whether the plugin's global keys are off, for the sidebar to say so.
     #[serde(default)]
     pub global_keys: crate::tmux::GlobalKeys,
+    /// Every workspace, by name, with its sessions.
+    #[serde(default)]
+    pub workspaces: Vec<Workspace>,
+    /// The workspace you are in: that of the client used last. New sessions join it. Survives a
+    /// daemon restart.
+    #[serde(default)]
+    pub workspace: String,
+}
+
+/// A named group of tmux sessions, above tmux: lists, agent keys and the status bar show the
+/// agents of one workspace at a time.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct Workspace {
+    pub name: String,
+    /// Its sessions, by name.
+    pub sessions: Vec<WorkspaceSession>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceSession {
+    /// tmux session id, e.g. `$3`.
+    pub id: String,
+    pub name: String,
+}
+
+impl Index {
+    /// The workspace a tmux session belongs to, by session id.
+    pub fn workspace_of(&self, session: &str) -> Option<&str> {
+        self.workspaces
+            .iter()
+            .find(|w| w.sessions.iter().any(|s| s.id == session))
+            .map(|w| w.name.as_str())
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -166,6 +202,9 @@ pub struct WindowView {
     pub viewed: bool,
     /// The window's sidebar pane, while it has one.
     pub sidebar: Option<String>,
+    /// The workspace of the window's session.
+    #[serde(default)]
+    pub workspace: String,
 }
 
 pub const EVENT_LIFETIME_MS: u64 = 5_000;
@@ -191,6 +230,9 @@ impl EventState {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RecentEvent {
     pub name: String,
+    /// Only lists of this workspace show it.
+    #[serde(default)]
+    pub workspace: String,
     pub state: EventState,
     pub occurred_at: u64,
     pub expires_at: u64,
@@ -205,6 +247,7 @@ impl RecentEvent {
         };
         Some(Self {
             name: agent.name.chars().take(128).collect(),
+            workspace: agent.workspace.clone(),
             state,
             occurred_at: now,
             expires_at: now.saturating_add(EVENT_LIFETIME_MS),
@@ -314,6 +357,7 @@ mod tests {
     fn absolute_event_expiry_rejects_future_and_unbounded_lifetimes() {
         let mut event = RecentEvent {
             name: "agent".into(),
+            workspace: "main".into(),
             state: EventState::Done,
             occurred_at: 100,
             expires_at: 5100,

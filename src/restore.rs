@@ -63,6 +63,9 @@ pub struct Roster {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Window {
     pub session: String,
+    /// The workspace of its session.
+    #[serde(default)]
+    pub workspace: String,
     pub index: u32,
     pub name: String,
     /// `#{window_layout}` without the sidebar.
@@ -162,6 +165,7 @@ fn record(
         let first = members.first().context("agent window without panes")?;
         recorded.push(Window {
             session: first.session.clone(),
+            workspace: first.workspace.clone(),
             index: first.window_index,
             name: window.name.clone(),
             layout: if sidebars.is_empty() {
@@ -393,6 +397,8 @@ pub struct Plan {
 #[derive(Debug)]
 pub struct WindowPlan {
     pub session: String,
+    /// The workspace a session created for it joins; empty in a roster from before workspaces.
+    pub workspace: String,
     pub index: u32,
     pub name: String,
     pub layout: String,
@@ -454,6 +460,7 @@ pub fn plan(pending: &Roster, live: &[Agent], exists: impl Fn(&str) -> bool) -> 
         if panes.iter().any(|p| p.agent.is_some()) {
             plan.windows.push(WindowPlan {
                 session: window.session.clone(),
+                workspace: window.workspace.clone(),
                 index: window.index,
                 name: window.name.clone(),
                 layout: window.layout.clone(),
@@ -655,7 +662,7 @@ impl Builder {
             [
                 "-P",
                 "-F",
-                "#{window_id}\x1f#{window_index}\x1f#{pane_id}",
+                "#{window_id}\x1f#{window_index}\x1f#{pane_id}\x1f#{session_id}",
                 "-n",
                 &window.name,
                 "-c",
@@ -665,9 +672,13 @@ impl Builder {
         );
         args.extend(self.command(first));
         let out = run(&args)?;
-        let [id, index, pane] = out.trim().split(SEP).collect::<Vec<_>>()[..] else {
+        let [id, index, pane, session] = out.trim().split(SEP).collect::<Vec<_>>()[..] else {
             bail!("unexpected new window output {out:?}");
         };
+        // A session that is back takes its workspace back; one already open keeps its own.
+        if new_session && !window.workspace.is_empty() {
+            crate::workspaces::assign(session, &window.workspace)?;
+        }
         let mut index: u32 = index.parse().context("window_index")?;
         // A new session opens on its first index; move the window to the one it had.
         if new_session && index != window.index {
@@ -897,6 +908,7 @@ mod tests {
             title: String::new(),
             location: "pro:1.0".into(),
             session: "pro".into(),
+            workspace: "main".into(),
             window: "@1".into(),
             cwd: "/work/pro".into(),
             parent: None,
@@ -915,6 +927,8 @@ mod tests {
             id: id.into(),
             pid: 1,
             session: "pro".into(),
+            session_id: "$1".into(),
+            workspace: "main".into(),
             window: window.into(),
             window_index: 2,
             pane_index: index,
@@ -972,6 +986,7 @@ mod tests {
                 cwd: "/work/pro".into(),
                 command: vec!["npm".into(), "run".into(), "dev".into()],
                 started_by: Some("reviewer".into()),
+                workspace: "main".into(),
             },
             pane: "%20".into(),
             session: tasks::SESSION.into(),

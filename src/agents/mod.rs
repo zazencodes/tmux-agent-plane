@@ -424,6 +424,8 @@ mod tests {
             id: "%fixture".into(),
             pid: std::process::id() as i32,
             session: "fixture".into(),
+            session_id: "$1".into(),
+            workspace: "main".into(),
             window: "@fixture".into(),
             window_index: 0,
             pane_index: 0,

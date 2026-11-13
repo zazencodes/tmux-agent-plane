@@ -2,17 +2,18 @@
 
 mod restore;
 mod tasks;
+mod workspace_menu;
 
 use crate::agents::{ProcessTable, RawState, ScanContext};
 use crate::commands;
-use crate::index::{self, Agent, Index, Kind, RecentEvent, State, WindowView};
+use crate::index::{self, Agent, Index, Kind, RecentEvent, State, WindowView, Workspace};
 use crate::lifecycle;
 use crate::navigation::{CLIENT_FORMAT, Client, guard_destination, parse_client};
 use crate::tmux;
 use crate::ui::family;
 use crate::ui::{
-    LAVENDER, NO_AGENTS, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, daemon_down,
-    fill_viewport, group_colour, hints, icon, marked, message, name_style, panel, rank,
+    LAVENDER, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, age, colour, daemon_down, fill_viewport,
+    group_colour, hints, icon, list_title, marked, message, name_style, no_agents, panel, rank,
     search_matches, state_style, task, truncate,
 };
 use anyhow::{Context, Result, bail};
@@ -459,6 +460,17 @@ pub(crate) struct Sidebar {
     pub(crate) restore: restore::Restore,
     /// The plugin's global keys, from the index: the footer says when they are off.
     pub(crate) global_keys: crate::tmux::GlobalKeys,
+    /// The workspace whose agents and tasks this list shows, once known: a sidebar's window's,
+    /// the picker's client's.
+    pub(crate) workspace: Option<String>,
+    /// Every workspace, for the title and `w`.
+    pub(crate) workspaces: Vec<Workspace>,
+    /// Every agent in every workspace, for `w`'s marks.
+    pub(crate) everyone: Vec<Agent>,
+    /// The session the picker's client shows, whose workspace it lists.
+    pub(crate) client_session: Option<String>,
+    /// `w`: the workspaces.
+    pub(crate) menu: workspace_menu::Menu,
 }
 
 impl Navigation {
@@ -536,6 +548,7 @@ impl Sidebar {
             Ok(index) => self.apply(index, origin),
             Err(e) => {
                 self.all_agents.clear();
+                self.everyone.clear();
                 self.tasks.clear();
                 self.restore.pending = 0;
                 self.recent_event = None;
@@ -546,15 +559,41 @@ impl Sidebar {
     }
 
     fn apply(&mut self, index: Index, origin: Origin<'_>) {
+        // A session without a workspace, such as the tasks session or one created this second,
+        // shows the workspace you are in.
+        let workspace = match origin {
+            Origin::Sidebar(own) => index
+                .windows
+                .iter()
+                .find(|w| w.sidebar.as_deref() == Some(own))
+                .map(|w| w.workspace.as_str())
+                .filter(|w| !w.is_empty()),
+            Origin::Popup(_) => self
+                .client_session
+                .as_deref()
+                .and_then(|session| index.workspace_of(session)),
+        }
+        .unwrap_or(&index.workspace);
+        self.workspace = Some(workspace.to_owned());
+        let here = |w: &String| self.workspace.as_ref() == Some(w);
         self.closed
             .retain(|pane| index.agents.iter().any(|a| &a.pane == pane));
-        self.all_agents = index
-            .agents
-            .into_iter()
-            .filter(|a| !self.closed.contains(&a.pane))
+        self.everyone = index.agents;
+        self.all_agents = self
+            .everyone
+            .iter()
+            .filter(|a| !self.closed.contains(&a.pane) && here(&a.workspace))
+            .cloned()
             .collect();
-        self.recent_event = index.recent_event;
-        self.tasks.apply(index.tasks);
+        self.recent_event = index.recent_event.filter(|e| here(&e.workspace));
+        self.tasks.apply(
+            index
+                .tasks
+                .into_iter()
+                .filter(|t| here(&t.definition.workspace))
+                .collect(),
+        );
+        self.workspaces = index.workspaces;
         self.restore.pending = index.pending_restore;
         self.global_keys = index.global_keys;
         self.error = None;
@@ -1014,8 +1053,9 @@ impl Sidebar {
         if key.code != KeyCode::Char('g') || !key.modifiers.is_empty() {
             self.navigation.first_g = false;
         }
-        // The restore view consumes every key while it is open.
+        // The restore view and the workspaces consume every key while open.
         let consumed = self.restore_key(key, origin)
+            || self.workspace_key(key, origin)
             || self.help_key(key)
             // Setup consumes its keys before navigation/kill, including Enter.
             || (self.killing.is_none()
@@ -1055,8 +1095,9 @@ impl Sidebar {
             && self.new_agent.is_none()
             && self.killing.is_none()
             && self.tasks.stopping.is_none()
-            && !self.restore.is_open();
-        let consumed = !self.help.open && self.quota.key(key, can_open);
+            && !self.restore.is_open()
+            && !self.menu.is_open();
+        let consumed = !self.help.open && !self.menu.is_open() && self.quota.key(key, can_open);
         if consumed {
             self.navigation.first_g = false;
         }
@@ -1520,6 +1561,10 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         sidebar.help.draw(f, f.area());
         return;
     }
+    if sidebar.menu.is_open() {
+        sidebar.draw_menu(f, f.area());
+        return;
+    }
     if sidebar.auto_name.open {
         sidebar.auto_name.draw(f, f.area());
         return;
@@ -1609,7 +1654,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     fill_viewport(&mut task_state, &task_items, tasks_area.height);
     f.render_stateful_widget(List::new(task_items), tasks_area, &mut task_state);
     let inner = list_area.width.saturating_sub(2) as usize;
-    let block = panel(Line::from(" agents "));
+    let block = panel(list_title(sidebar));
     let content = block.inner(list_area);
     f.render_widget(block, list_area);
     let restore = restore::top_lines(sidebar.restore.pending, inner);
@@ -1637,8 +1682,9 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
             e,
         );
     } else if sidebar.agents.is_empty() {
+        let none = no_agents(sidebar);
         let text = if sidebar.all_agents.is_empty() {
-            NO_AGENTS
+            [none[0].as_str(), none[1].as_str()]
         } else {
             ["no matching agents", "d changes state · esc clears filter"]
         };
@@ -2055,6 +2101,7 @@ mod tests {
             },
             recent_event: Some(RecentEvent {
                 name: "grok-support".into(),
+                workspace: "main".into(),
                 state: EventState::Done,
                 occurred_at: 100,
                 expires_at: 5100,
@@ -2083,6 +2130,7 @@ mod tests {
             notice: None,
             recent_event: Some(RecentEvent {
                 name: "grok-support".into(),
+                workspace: "main".into(),
                 state: EventState::Done,
                 occurred_at: 100,
                 expires_at: 5100,
@@ -2129,6 +2177,7 @@ mod tests {
             title: "Review payment flow".into(),
             location: "work:1.1".into(),
             session: "work".into(),
+            workspace: "main".into(),
             window: "@1".into(),
             cwd: "/tmp/checkout".into(),
             parent: None,
@@ -2150,6 +2199,7 @@ mod tests {
                 ..Navigation::default()
             },
             all_agents: agents,
+            workspace: Some("main".into()),
             ..Sidebar::default()
         };
         sidebar.rebuild();
@@ -2455,9 +2505,8 @@ mod tests {
             windows: Vec::new(),
             order: order.iter().map(|pane| pane.to_string()).collect(),
             last_agent: None,
-            tasks: Vec::new(),
-            pending_restore: 0,
-            global_keys: Default::default(),
+            workspace: "main".into(),
+            ..Index::default()
         }
     }
 
@@ -2517,6 +2566,7 @@ mod tests {
             active_pane: active.into(),
             viewed,
             sidebar: Some("%9".into()),
+            workspace: "main".into(),
         }
     }
 

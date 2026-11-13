@@ -99,8 +99,13 @@ pub fn list(json: bool) -> Result<()> {
         println!("no agents running");
         return Ok(());
     }
-    let rows: Vec<[String; 7]> = index
-        .agents
+    // One workspace needs no column; with more, agents are grouped by workspace.
+    let workspaces = index.workspaces.len() > 1;
+    let mut agents: Vec<&Agent> = index.agents.iter().collect();
+    if workspaces {
+        agents.sort_by(|a, b| a.workspace.cmp(&b.workspace));
+    }
+    let rows: Vec<Vec<String>> = agents
         .iter()
         .map(|a| {
             let mark = if me.as_deref() == Some(a.pane.as_str()) {
@@ -108,31 +113,41 @@ pub fn list(json: bool) -> Result<()> {
             } else {
                 " "
             };
-            [
-                format!("{mark}{}", a.name),
+            let mut row = vec![format!("{mark}{}", a.name)];
+            if workspaces {
+                row.push(a.workspace.clone());
+            }
+            row.extend([
                 a.kind.as_str().to_string(),
                 state_label(a),
                 a.location.clone(),
                 display_parent(&index, a),
                 home_relative(&a.cwd),
                 a.title.clone(),
-            ]
+            ]);
+            row
         })
         .collect();
-    let header = [" NAME", "KIND", "STATE", "WHERE", "PARENT", "CWD", "TASK"].map(String::from);
-    let mut widths = [0; 7];
+    let mut header = vec![" NAME"];
+    if workspaces {
+        header.push("WORKSPACE");
+    }
+    header.extend(["KIND", "STATE", "WHERE", "PARENT", "CWD", "TASK"]);
+    let header: Vec<String> = header.into_iter().map(String::from).collect();
+    let mut widths = vec![0; header.len()];
     for row in std::iter::once(&header).chain(&rows) {
         for (w, cell) in widths.iter_mut().zip(row) {
             *w = (*w).max(cell.chars().count());
         }
     }
+    let last = header.len() - 1;
     for row in std::iter::once(&header).chain(&rows) {
         let line: Vec<String> = row
             .iter()
-            .zip(widths)
+            .zip(&widths)
             .enumerate()
-            .map(|(i, (cell, w))| {
-                if i == 6 {
+            .map(|(i, (cell, &w))| {
+                if i == last {
                     cell.clone()
                 } else {
                     format!("{cell:<w$}")
@@ -335,6 +350,8 @@ pub struct Spawn {
     pub kind: Kind,
     pub placement: Placement,
     pub session: Option<String>,
+    /// The workspace a new session joins.
+    pub workspace: Option<String>,
     pub cwd: Option<PathBuf>,
     pub name: Option<String>,
     /// A Codex caller's own name. Other callers are identified by their pane.
@@ -352,6 +369,9 @@ pub fn spawn(mut s: Spawn) -> Result<()> {
     // Validate the interactive launch before creating a pane or contacting tmux.
     let launch = (s.kind.adapter().launch)(s.task.as_deref(), &s.agent_args)?;
     validate_session_placement(s.placement, s.session.as_deref())?;
+    if s.workspace.is_some() && !matches!(s.placement, Placement::Session) {
+        bail!("--workspace names the workspace of a new session; it requires --in session");
+    }
     let index = index::read()?;
     if let Some(name) = &s.name {
         check_name(&index, name, None)?;
@@ -432,12 +452,31 @@ pub fn spawn(mut s: Spawn) -> Result<()> {
             tmux::run(&args)?
         }
         (Placement::Session, _) => {
-            let mut args = vec!["new-session", "-d", "-P", "-F", "#{pane_id}", "-c", cwd];
+            // A new session joins the workspace of the agent starting it, or the one named.
+            let creator = parent
+                .as_ref()
+                .and_then(|pane| index.agents.iter().find(|a| &a.pane == pane));
+            let workspace = crate::workspaces::for_new(s.workspace.as_deref(), creator, &index)?;
+            let mut args = vec![
+                "new-session",
+                "-d",
+                "-P",
+                "-F",
+                "#{session_id} #{pane_id}",
+                "-c",
+                cwd,
+            ];
             if let Some(name) = s.session.as_ref().or(s.name.as_ref()) {
                 args.extend(["-s", name]);
             }
             args.extend(shell_args);
-            tmux::run(&args)?
+            let created = tmux::run(&args)?;
+            let (session, pane) = created
+                .trim()
+                .split_once(' ')
+                .with_context(|| format!("unexpected new-session output {created:?}"))?;
+            crate::workspaces::assign(session, &workspace)?;
+            pane.to_owned()
         }
     };
     let pane = pane.trim().to_string();

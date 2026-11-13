@@ -134,6 +134,8 @@ mod tests {
         ClientSize {
             size: Size { width, height: 50 },
             sizing: LATEST.into(),
+            session: "$1".into(),
+            activity: 0,
         }
     }
 
@@ -154,6 +156,7 @@ mod tests {
             active_pane: "%0".into(),
             viewed,
             sidebar: sidebar.map(Into::into),
+            workspace: "main".into(),
         }
     }
 
@@ -247,6 +250,8 @@ mod tests {
         geometry.clients = vec![ClientSize {
             size: SCREEN,
             sizing: "manual".into(),
+            session: "$1".into(),
+            activity: 0,
         }];
         assert_eq!(target(&geometry), None);
     }

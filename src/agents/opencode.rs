@@ -178,6 +178,8 @@ mod tests {
             id: id.into(),
             pid,
             session: "test".into(),
+            session_id: "$1".into(),
+            workspace: "main".into(),
             window: "@1".into(),
             window_index: 1,
             pane_index: 1,

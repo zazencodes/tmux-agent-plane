@@ -23,6 +23,7 @@ mod sidebar_help;
 mod tasks;
 mod tmux;
 mod ui;
+mod workspaces;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -91,6 +92,11 @@ enum Cmd {
     Sessions {
         #[command(subcommand)]
         action: sessions::Action,
+    },
+    /// Workspaces: named groups of sessions. Lists, agent keys and the status bar show one at a time
+    Workspace {
+        #[command(subcommand)]
+        action: workspaces::Action,
     },
     /// Move a running agent into an existing project without restarting it
     Move {
@@ -190,6 +196,9 @@ enum Cmd {
         /// Exact existing session for --in window; new session name for --in session
         #[arg(long)]
         session: Option<String>,
+        /// The workspace of a new session (--in session); default: the caller's
+        #[arg(long)]
+        workspace: Option<String>,
         /// Working directory (default: current directory)
         #[arg(long)]
         cwd: Option<PathBuf>,
@@ -224,6 +233,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::List { json } => commands::list(json),
         Cmd::Quota { json } => quota::command(json),
         Cmd::Sessions { action } => sessions::run(action),
+        Cmd::Workspace { action } => workspaces::run(action),
         Cmd::Move { target, session } => commands::move_agent(&target, &session),
         Cmd::Read { target, lines } => commands::read(&target, lines),
         Cmd::Send {
@@ -250,6 +260,7 @@ fn main() -> anyhow::Result<()> {
             task,
             placement,
             session,
+            workspace,
             cwd,
             name,
             parent,
@@ -260,6 +271,7 @@ fn main() -> anyhow::Result<()> {
             kind,
             placement,
             session,
+            workspace,
             cwd,
             name,
             parent,

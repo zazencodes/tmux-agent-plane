@@ -1,7 +1,7 @@
 ---
 name: tmux-agent-plane
 description: >-
-  The system-wide index of the user's coding agents (Claude Code, Codex, Pi, OpenCode, Antigravity, Grok Build) across every tmux session, and the only way to work with them, through the `tmux-agent-plane` CLI. Load it first, before any tmux command, whenever a task touches another agent: the user names an agent (`claude-154`, `codex-26`, `reviewer`) or a pane, asks how an agent is doing or what agents are running, wants to check on, read, message, answer, wait for, show, close, start or spawn an agent (in a pane, window or session), wants work delegated to another agent, or wants a super agent that coordinates others, or asks to organize tmux sessions, clean up tmux projects or organize work into projects.
+  The system-wide index of the user's coding agents (Claude Code, Codex, Pi, OpenCode, Antigravity, Grok Build) across every tmux session, and the only way to work with them, through the `tmux-agent-plane` CLI. Load it first, before any tmux command, whenever a task touches another agent: the user names an agent (`claude-154`, `codex-26`, `reviewer`) or a pane, asks how an agent is doing or what agents are running, wants to check on, read, message, answer, wait for, show, close, start or spawn an agent (in a pane, window or session), wants work delegated to another agent, or wants a super agent that coordinates others, or asks to organize tmux sessions, clean up tmux projects or organize work into projects, or asks to start, switch to, rename or break work off into a workspace (an Agent Plane session above tmux).
 ---
 
 # tmux-agent-plane
@@ -51,8 +51,12 @@ Do every agent job through `tmux-agent-plane`: finding agents, reading their scr
 ```bash
 tmux-agent-plane list                     # all agents: name, kind, state, where, parent, cwd, task
 tmux-agent-plane list --json              # the same with every field
-tmux-agent-plane sessions list [--json]   # projects: exact name/id, windows, clients, group, agents
-tmux-agent-plane sessions create <name> [--cwd DIR] # new detached project with a shell
+tmux-agent-plane sessions list [--json]   # projects: exact name/id, workspace, windows, clients, group, agents
+tmux-agent-plane sessions create <name> [--cwd DIR] [--workspace W] # new detached project with a shell
+tmux-agent-plane workspace list [--json]  # workspaces: their sessions and agents; * is the one the user is in
+tmux-agent-plane workspace switch <name>  # show it in the user's tmux client
+tmux-agent-plane workspace move <session>... --to <name>  # move whole sessions; a new name starts a workspace
+tmux-agent-plane workspace rename <name> <new-name>
 tmux-agent-plane move <agent> --session <session>  # existing exact session name or id
 tmux-agent-plane read <agent> [--lines N] # its screen, plus N lines of scrollback
 tmux-agent-plane send <agent> "<prompt>" [--answer] [--wait] [--timeout S]
@@ -63,7 +67,7 @@ tmux-agent-plane focus <agent>            # bring it on screen for the user
 tmux-agent-plane toggle-sidebar self  # requires known caller identity; opens/closes every sidebar
 tmux-agent-plane kill <agent>             # close its pane, ending it
 tmux-agent-plane quota [--json]           # how much of each plan is left (Claude, Codex, agy, Grok), read fresh
-tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|window|session] [--session SESSION] [--cwd DIR] [--name NAME] [--parent NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]
+tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|window|session] [--session SESSION] [--workspace W] [--cwd DIR] [--name NAME] [--parent NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]
 tmux-agent-plane task list [--json]       # background tasks: state, ports, cwd, starter, command
 tmux-agent-plane task start <name> [--cwd DIR] -- <command>...  # reuses a running task with the same command
 tmux-agent-plane task read <name> [--lines N]
@@ -146,9 +150,22 @@ Before **any status or escalation message**, inspect the target's current state 
 
 When coordinating several agents: spawn each with a self-contained task and a name, `send --wait` or `wait` on them, `read` their results, and check `list` for anything `blocked` or `done`. Give each agent its own files or worktree so they do not edit the same files. When the user wants to look at an agent, `focus` it. Close a finished agent only when the user wants it gone: `kill <agent>`.
 
+## Workspaces
+
+A workspace is a named group of tmux sessions, one level above tmux; the user may call it an "Agent Plane session". Every session belongs to one; `main` is the first. The user's sidebar, picker, agent keys and status bar show only the workspace they are in, so they can set work aside the way they detach from tmux. tmux itself still shows every session. `list` shows every agent with its `workspace`; yours is on your own row (or your `--parent` name's row, for Codex).
+
+**Never create, switch, rename or move between workspaces on your own initiative**, not even while organizing, cleaning up or coordinating helpers. Do it only when the user explicitly asks for that workspace operation. Moving work into another workspace takes it out of the user's view, which is confusing when they did not ask for it.
+
+- New work stays in your workspace without any flag: helpers you spawn into your session or a new window share it, and `sessions create` or `spawn --in session` puts a new session in your workspace. Pass `--workspace` only when the user names a workspace. Codex callers cannot be identified from their shell, so pass `--workspace <your workspace>` to `sessions create`.
+- "Start a new workspace (for X)": `sessions create <name> --workspace <name> --cwd <dir>` for a plain shell, or `spawn <kind> "<task>" --in session --session <name> --workspace <name> --cwd <dir> --name <agent>` to start it with an agent. Then `workspace switch <name>` only if the user wants to go there.
+- "Break these off into a workspace": move whole sessions with `workspace move <session>... --to <name>` (a new name starts the workspace). For single agents, create a session in the target workspace, then `move <agent> --session <that session>`. Report what moved where.
+- "Switch me to X": `workspace switch X`. "Rename X to Y": `workspace rename X Y`.
+
 ## Organizing projects
 
 Treat requests such as “organize my tmux sessions”, “clean up my tmux projects” or “organize my work into projects” as requests to organize the existing session/sidebar hierarchy. Each tmux session is one project, with its orchestrator and helpers inside it.
+
+Organize within workspaces: keep every session and agent in the workspace it is in, unless the user explicitly asks to move work between workspaces.
 
 1. Inspect `sessions list --json` and `list --json`. The session inventory includes shell-only sessions, attached-client counts, window IDs, group membership and agent names. Linked agents appear in every session containing their window; `list` retains one canonical agent row. Use tasks, names, directories and parent links to understand the work and choose appropriate existing or new sessions. Read an agent if its task is unclear.
 2. Create any needed project with `sessions create api --cwd /path/to/api`. Choose short, meaningful session names. Keep the user's established session/project boundaries.

@@ -99,6 +99,8 @@ mod tests {
             id: id.into(),
             pid,
             session: "s".into(),
+            session_id: "$1".into(),
+            workspace: "main".into(),
             window: "@1".into(),
             window_index: 0,
             pane_index: 0,

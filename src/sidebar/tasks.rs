@@ -309,6 +309,7 @@ mod tests {
                 cwd: "/Users/a/pro/site".into(),
                 command: vec!["npm".into(), "run".into(), "dev".into()],
                 started_by: Some("agent-%1".into()),
+                workspace: "main".into(),
             },
             pane: format!("%{}", 50 + name.len()),
             session: tasks::SESSION.into(),

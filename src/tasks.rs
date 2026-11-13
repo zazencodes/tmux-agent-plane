@@ -25,6 +25,8 @@ const COMMAND: &str = "@agent-plane-task-command";
 const BY: &str = "@agent-plane-task-by";
 /// Unix ms of the last start.
 const SINCE: &str = "@agent-plane-task-since";
+/// The workspace whose sidebars list it.
+pub const WORKSPACE: &str = "@agent-plane-task-workspace";
 /// Listening ports are looked up at most this often.
 const PORTS_EVERY_MS: u64 = 5_000;
 const SEP: char = '\x1f';
@@ -71,6 +73,9 @@ pub struct Definition {
     pub command: Vec<String>,
     /// The agent that started it, when the caller was a known agent.
     pub started_by: Option<String>,
+    /// The workspace it was started from, whose sidebars list it.
+    #[serde(default)]
+    pub workspace: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,6 +139,7 @@ pub fn run(action: Action) -> Result<()> {
                 cwd: cwd.to_str().context("task cwd is not UTF-8")?.to_owned(),
                 command,
                 started_by: caller_agent()?,
+                workspace: crate::workspaces::for_new(None, None, &index::read()?)?,
             };
             let (task, outcome) = start(&definition)?;
             let note = match outcome {
@@ -379,6 +385,7 @@ fn options(definition: &Definition, since: u64) -> Result<Vec<(&'static str, Str
         (CWD, definition.cwd.clone()),
         (COMMAND, serde_json::to_string(&definition.command)?),
         (BY, definition.started_by.clone().unwrap_or_default()),
+        (WORKSPACE, definition.workspace.clone()),
         (SINCE, since.to_string()),
         (NAME, definition.name.clone()),
     ])
@@ -416,7 +423,7 @@ fn launch(pane: &str, definition: &Definition) -> Result<()> {
     tmux::run(&args).map(drop)
 }
 
-const FIELDS: [&str; 15] = [
+const FIELDS: [&str; 16] = [
     "#{pane_id}",
     "#{pane_pid}",
     "#{session_name}",
@@ -428,6 +435,7 @@ const FIELDS: [&str; 15] = [
     "#{@agent-plane-task-command}",
     "#{@agent-plane-task-by}",
     "#{@agent-plane-task-since}",
+    "#{@agent-plane-task-workspace}",
     "#{pane_dead}",
     "#{pane_dead_status}",
     "#{pane_dead_signal}",
@@ -448,6 +456,7 @@ fn parse_row(line: &str) -> Result<Live> {
         command,
         by,
         since,
+        workspace,
         dead,
         status,
         signal,
@@ -479,6 +488,7 @@ fn parse_row(line: &str) -> Result<Live> {
                 command: serde_json::from_str(command)
                     .with_context(|| format!("task {name} command {command:?}"))?,
                 started_by: Some(by.to_owned()).filter(|by| !by.is_empty()),
+                workspace: workspace.into(),
             },
             pane: pane.into(),
             session: session.into(),
@@ -593,7 +603,8 @@ fn find(name: &str) -> Result<Live> {
 }
 
 fn list(json: bool) -> Result<()> {
-    let tasks = index::read()?.tasks;
+    let index = index::read()?;
+    let tasks = index.tasks;
     if json {
         println!("{}", serde_json::to_string_pretty(&tasks)?);
         return Ok(());
@@ -602,12 +613,22 @@ fn list(json: bool) -> Result<()> {
         println!("no tasks running");
         return Ok(());
     }
-    let header = ["NAME", "STATE", "PORTS", "CWD", "BY", "STARTED", "COMMAND"].map(String::from);
-    let rows: Vec<[String; 7]> = tasks
+    // One workspace needs no column.
+    let workspaces = index.workspaces.len() > 1;
+    let mut header = vec!["NAME"];
+    if workspaces {
+        header.push("WORKSPACE");
+    }
+    header.extend(["STATE", "PORTS", "CWD", "BY", "STARTED", "COMMAND"]);
+    let header: Vec<String> = header.into_iter().map(String::from).collect();
+    let rows: Vec<Vec<String>> = tasks
         .iter()
         .map(|task| {
-            [
-                task.definition.name.clone(),
+            let mut row = vec![task.definition.name.clone()];
+            if workspaces {
+                row.push(task.definition.workspace.clone());
+            }
+            row.extend([
                 task.status.label(),
                 ports_label(&task.ports, ",").unwrap_or_else(|| "-".into()),
                 commands::home_relative(&task.definition.cwd),
@@ -617,10 +638,11 @@ fn list(json: bool) -> Result<()> {
                     .unwrap_or_else(|| "-".into()),
                 format!("{} ago", crate::ui::age(task.started_at)),
                 display_command(&task.definition.command),
-            ]
+            ]);
+            row
         })
         .collect();
-    let mut widths = [0; 7];
+    let mut widths = vec![0; header.len()];
     for row in std::iter::once(&header).chain(&rows) {
         for (w, cell) in widths.iter_mut().zip(row) {
             *w = (*w).max(cell.chars().count());
@@ -629,8 +651,8 @@ fn list(json: bool) -> Result<()> {
     for row in std::iter::once(&header).chain(&rows) {
         let line: Vec<String> = row
             .iter()
-            .zip(widths)
-            .map(|(cell, w)| format!("{cell:<w$}"))
+            .zip(&widths)
+            .map(|(cell, &w)| format!("{cell:<w$}"))
             .collect();
         println!("{}", line.join("  ").trim_end());
     }
@@ -807,6 +829,7 @@ mod tests {
             cwd: "/tmp".into(),
             command: vec!["python3".into(), "-m".into(), "http.server".into()],
             started_by: Some("claude-3".into()),
+            workspace: "main".into(),
         }
     }
 
@@ -825,6 +848,7 @@ mod tests {
             &values[COMMAND],
             &values[BY],
             &values[SINCE],
+            &values[WORKSPACE],
             dead[0],
             dead[1],
             dead[2],

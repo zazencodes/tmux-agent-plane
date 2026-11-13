@@ -43,6 +43,7 @@ Claude Code, Codex and Antigravity use native signals. Add Pi, OpenCode or Grok 
 - **Names you can read.** Rename agents with `r`, name helpers when you spawn them, or enable [optional AI naming](#optional-ai-naming) through `o` → Configure.
 - **See who spawned whom.** Press `p` for the selected agent's parent and children, with their current states.
 - **Sessions are projects.** Agents started by hand join a session named after their folder. Create project sessions, launch helpers into them, and move running agents between projects. See [Project sessions](#project-sessions).
+- **Workspaces above tmux.** Group sessions into workspaces and set one aside the way you detach from tmux: the sidebar, the picker, the agent keys and the status bar show only the workspace you are in, while tmux still shows every session. Press `w` to switch, or ask an agent to start a workspace or break work off into one. See [Workspaces](#workspaces).
 - **Stay in tmux when a session closes.** Closing its last pane switches you to the most recently active remaining session. Closing the final session exits tmux.
 - **Background tasks every agent can see.** Keep dev servers, watchers and tunnels in a shared list with their ports, output and exit status. Tasks outlive their agents and can be restarted after they stop. See [Background tasks](#background-tasks).
 - **Restore after tmux restarts.** Review saved agents and layouts, then choose whether to bring back their conversations and background tasks. Codex conversations cannot currently be resumed. See [Restore](#restore).
@@ -203,6 +204,7 @@ set -g @agent-plane-keys-toggle-key e
 | `gg` / `Home` | First agent |
 | `G` | Last agent |
 | `{` / `}` | First agent in the previous / next project |
+| `w` | [Workspaces](#workspaces): `Enter` switches to one, `c` starts one, `r` renames one, `m` moves the selected agent's project into one |
 | `/` | Search names, projects and tasks without hiding rows; `Enter` keeps the search |
 | `n` / `N` | Next / previous match in a kept search |
 | `f` | Fuzzy-filter names, projects, tasks and blocked details; `/` freezes matches so keys become commands, `f` resumes editing |
@@ -326,13 +328,32 @@ tmux-agent-plane spawn codex "Review the API changes" --in window --session api 
 tmux-agent-plane spawn claude "Plan the website" --in session --session website --cwd /path/to/website --name website-lead
 ```
 
-`sessions list` includes every session, even one with only shells: exact name and ID, attached-client count, window IDs, session group and agent names. Linked agents appear in each containing session. Existing destinations use exact names or IDs; new session names reject dots, colons, control characters and surrounding whitespace so tmux cannot silently rewrite them. `sessions create` opens a detached interactive shell. `spawn --in session --session NAME` creates the project with its first agent; `--name` names that agent separately. `spawn --in window --session NAME` uses an existing project's configured shell. An unknown destination fails before launching anything.
+`sessions list` includes every session, even one with only shells: exact name and ID, workspace, attached-client count, window IDs, session group and agent names. Linked agents appear in each containing session. Existing destinations use exact names or IDs; new session names reject dots, colons, control characters and surrounding whitespace so tmux cannot silently rewrite them. `sessions create` opens a detached interactive shell. `spawn --in session --session NAME` creates the project with its first agent; `--name` names that agent separately. `spawn --in window --session NAME` uses an existing project's configured shell. An unknown destination fails before launching anything.
 
 `move` uses a native detached pane move: the process keeps running, with the same pane ID, native identity, name, parent and completion history. No input is sent to the agent. Only the chosen pane moves, leaving other agents and shells in a mixed source window. The destination's current window and clients stay in place. The command prints the new location; the daemon publishes it on its next scan.
 
 A source window or detached session may disappear when it has no remaining content; the normal sidebar hook closes a lone sidebar. Moves that would end an attached source session are refused. Linked source windows and grouped source/destination sessions are also refused because those share windows across projects. The CLI checks the live agent identity and rechecks topology in tmux's command queue before moving. Existing shell-only windows remain for the user. The skill's project organization workflow covers inspecting work, creating sessions, moving each team member and verifying the result.
 
 An agent you start by hand joins a project by itself. Within a second of appearing it moves to the session named after its folder, which is created if needed, and any client viewing it moves too, so you keep working in it without interruption. The folder is the one the agent runs in, so a subfolder or worktree gets its own project; `.` and `:` in a folder name become `-`. This happens once per pane, so a later `move` sticks. Agents already running when the daemon starts, agents from `spawn` or the sidebar's `c`, and agents sharing a window with other panes stay put, as do moves into a session another client is using and any move involving grouped sessions or linked windows.
+
+### Workspaces
+
+A workspace is a group of tmux sessions, one level above tmux. Every session belongs to exactly one. While you only have one, called `main`, nothing changes. Once you start a second, everything Agent Plane shows is scoped to the workspace you are in: the sidebar lists its agents and tasks, the picker and Alt + k / j go through its agents only, sidebar notices come from it, and each session's status bar counts its own workspace's agents after the workspace's name. tmux itself is untouched: `prefix + s`, `tmux ls`, switching and detaching see every session, as always. Agents in other workspaces keep running; desktop notifications still reach you from all of them.
+
+Press `w` in the sidebar or the picker to see your workspaces, marked `◆` or `✓` when an agent there is blocked or done. `Enter` takes you to the session you used last in the highlighted workspace. `c` starts a new workspace: type its name, and you land in a fresh session of the same name, in the folder the list runs in. `r` renames the highlighted workspace. `m` moves the project (the whole session) of the agent selected in the list into the highlighted workspace. `Esc` or `w` closes it.
+
+Your agents can manage workspaces too, when you ask them to:
+
+```bash
+tmux-agent-plane workspace list [--json]                 # each workspace's sessions and agents; * is the one you are in
+tmux-agent-plane workspace switch research               # show its most recently used session in your client
+tmux-agent-plane workspace move api web --to client-x    # move whole sessions; a new name starts a workspace
+tmux-agent-plane workspace rename client-x acme
+tmux-agent-plane sessions create notes --workspace research --cwd ~/notes
+tmux-agent-plane spawn claude "Plan the launch" --in session --session launch --workspace research --name launch-lead
+```
+
+New work joins the workspace it starts in. `spawn` into a pane or window stays in the caller's session, and a session created by `sessions create` or `spawn --in session` joins the caller's workspace unless `--workspace` names another. A session you make by hand (`tmux new`, a script) joins the workspace you are in, that of the tmux client you used last. An agent moves to another workspace only by moving its session (`workspace move`) or by moving it into a session there (`move <agent> --session <session>`); automatic folder projects never cross workspaces, so an agent whose folder's session lives in another workspace stays put. `list` shows every agent with its workspace, and restore brings sessions back into theirs. The workspace is a tmux option on each session, `@agent-plane-workspace`, so it lasts as long as the session.
 
 ### Background tasks
 
@@ -346,13 +367,13 @@ tmux-agent-plane task restart web
 tmux-agent-plane task stop web
 ```
 
-In the sidebar, `t` lists tasks below the agents, where `Enter` opens one, `x` asks to stop it and `R` restarts it; see [Sidebar and agent list](#sidebar-and-agent-list). Each task runs in its own window, named after it, in a detached session called `agent-plane-tasks` that is created on first use. Its command runs the way `spawn` runs an agent, through an interactive login shell in tmux's `default-shell`, so your PATH and aliases apply. The first word after `--` is the program, one plain word such as `npm`; every later word reaches it verbatim. For pipes or other shell syntax, run `sh -c '...'`.
+In the sidebar, `t` lists the tasks started from its [workspace](#workspaces) below the agents, where `Enter` opens one, `x` asks to stop it and `R` restarts it; see [Sidebar and agent list](#sidebar-and-agent-list). Each task runs in its own window, named after it, in a detached session called `agent-plane-tasks` that is created on first use. Its command runs the way `spawn` runs an agent, through an interactive login shell in tmux's `default-shell`, so your PATH and aliases apply. The first word after `--` is the program, one plain word such as `npm`; every later word reaches it verbatim. For pipes or other shell syntax, run `sh -c '...'`.
 
 Names are one word of letters, digits, `-`, `_` and `.`, unique across tmux. `task start` with a name that is already running the same command in the same folder reuses it and prints `(already running)`; if that task has exited, it runs it again. The same name with a different command or folder fails and shows what the existing task runs, where and who started it. `task start` returns at once and prints `<name> <pane> <state>`.
 
 A task keeps running when the agent that started it exits; only `task stop` (or `x` in the sidebar) ends it, and it then leaves the list. When a task's command ends, its window stays with its output and the list shows `exited <code>`; a command ended by a signal shows 128 plus the signal number, as a shell reports it. `task restart` runs the command again in the same window, clearing the earlier output.
 
-`task list` shows each task's state, the TCP ports its processes listen on, folder, the agent that started it, how long ago it started, and its command; `--json` gives every field. The daemon looks up ports with `lsof` at most every five seconds, only while tasks run. A task is never an agent, even when its command is an agent CLI, and projects and automatic placement leave the tasks session alone. The definition lives on the task's tmux pane, so tasks and their state survive a daemon restart.
+`task list` shows every task's state, the TCP ports its processes listen on, folder, the agent that started it, how long ago it started, and its command, with its workspace once there are several; `--json` gives every field. A task belongs to the workspace it was started from. The daemon looks up ports with `lsof` at most every five seconds, only while tasks run. A task is never an agent, even when its command is an agent CLI, and projects and automatic placement leave the tasks session alone. The definition lives on the task's tmux pane, so tasks and their state survive a daemon restart.
 
 ### Restore
 
@@ -418,7 +439,11 @@ For a custom command, enter a JSON array of an executable and literal arguments,
 | --- | --- |
 | `list [--json]` | All agents. `*` (or `"self": true`) marks a known caller |
 | `sessions list [--json]` | Every project session: name/ID, windows, attached clients, group and agents |
-| `sessions create <name> [--cwd DIR]` | Create a detached named project with an interactive shell |
+| `sessions create <name> [--cwd DIR] [--workspace W]` | Create a detached named project with an interactive shell, in the caller's workspace or `W` |
+| `workspace list [--json]` | Every workspace with its sessions and agents; `*` marks the one you are in |
+| `workspace switch <name>` | Show the workspace's most recently used session in your tmux client |
+| `workspace move <session>... --to <name>` | Move whole sessions, with their agents, into a workspace, starting it if the name is new |
+| `workspace rename <name> <new-name>` | Rename a workspace |
 | `move <agent> --session SESSION` | Move the running agent pane to an existing project, preserving its process and metadata |
 | `read <agent> [--lines N]` | The agent's screen, plus N lines of scrollback |
 | `send <agent> "<prompt>" [--answer] [--wait] [--timeout S]` | Paste a prompt and press Enter. Refuses blocked agents unless `--answer` deliberately replies to their question; `--answer` requires a blocked target. `--wait` follows the submitted turn until it ends or blocks |
@@ -429,7 +454,7 @@ For a custom command, enter a JSON array of an executable and literal arguments,
 | `cycle next\|previous --client CLIENT` | Direct key binding: focus the adjacent agent in global sidebar order for the exact invoking tmux client |
 | `kill <agent>` | Close the agent's pane |
 | `quota [--json]` | Read how much of each plan is left, fresh, through the daemon. `--json` adds each group's remaining percent, limiting window and runway, and each window's pace |
-| `spawn claude\|codex\|pi\|opencode\|agy\|grok ["<task>"] [--in pane\|window\|session] [--session SESSION] [--cwd DIR] [--name NAME] [--parent NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]` | Start an agent. Arguments after `--` go verbatim to the agent CLI. `--in pane` (default) splits the caller's pane; `--session` selects an existing project with `--in window`, or names a new one with `--in session` |
+| `spawn claude\|codex\|pi\|opencode\|agy\|grok ["<task>"] [--in pane\|window\|session] [--session SESSION] [--workspace W] [--cwd DIR] [--name NAME] [--parent NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]` | Start an agent. Arguments after `--` go verbatim to the agent CLI. `--in pane` (default) splits the caller's pane; `--session` selects an existing project with `--in window`, or names a new one with `--in session`, which joins the caller's workspace or `--workspace` |
 | `task start <name> [--cwd DIR] -- <command>...` | Start a long-running command in the background, or reuse the running task of that name and command. Different work under a taken name fails |
 | `task list [--json]` | Background tasks: state (`running` or `exited <code>`), listening ports, cwd, starter, age and command |
 | `task read <name> [--lines N]` | The task's screen, plus N lines of scrollback |
@@ -457,6 +482,7 @@ Read a blocked question before replying: `tmux-agent-plane read reviewer`, then 
 - **OpenCode** publishes its active TUI session and native status, permission and question snapshots through the opt-in TUI publisher plugin in `extensions/opencode/`. Its default TUI has no external HTTP listener.
 - **Grok Build** uses the official leader roster's `working`, `needs_input` and `idle` states. Native active-session records tie each local resident session to its live TUI process. The blinking terminal title is not used for state.
 - **The daemon** scans all enabled kinds once a second for every pane on the tmux server. It marks a turn that ends off screen as `done` until the pane is on screen, writes the index to `~/.local/state/tmux-agent-plane/agents.json` along with each window's active pane, the sidebar row order and the last agent used, sets the `@agent_plane_status` tmux option, and sends notifications. It also keeps hidden windows at the size they will be shown at, so moving between agents resizes nothing: about two seconds after your terminal changes size, each hidden window gets one resize to its final layout, and tmux's global `default-size` follows so new windows start right. Agents redraw once per size change, off screen; idle, this runs nothing. Windows on screen, zoomed windows and any `window-size` other than tmux's default `latest` are left alone, as is everything while attached clients show different sizes. It runs detached from tmux jobs, exits with the tmux server, and starting it again keeps the existing watcher. Lifecycle and daemon errors are appended to `daemon.log` alongside the index (`$XDG_STATE_HOME/tmux-agent-plane/daemon.log` when set).
+- **Workspaces** are a tmux user option on each session. The daemon gives every new session one, sets each session's own `@agent_plane_status`, and publishes each agent's, window's and task's workspace in the index, which the sidebar, picker and agent keys filter by.
 - **Background tasks** are panes in the `agent-plane-tasks` session whose tmux pane options hold the task's name, folder, command, starter and start time, with `remain-on-exit` so a finished task keeps its exit status. The daemon adds them to the index each second, never as agents, with their listening ports from `lsof` on each task's process tree at most every five seconds.
 - **The CLI, the sidebars and the agent list** read the index. They fail with a clear error when the daemon is not running.
 - **`send`** pastes with bracketed paste, then presses Enter, so a multi-line prompt arrives as one message.

@@ -63,6 +63,10 @@ pub struct Pane {
     pub id: String,
     pub pid: i32,
     pub session: String,
+    /// tmux session id, e.g. `$3`.
+    pub session_id: String,
+    /// The session's workspace, empty until it has one.
+    pub workspace: String,
     pub window: String,
     pub window_index: u32,
     pub pane_index: u32,
@@ -93,10 +97,12 @@ impl Pane {
     }
 }
 
-const PANE_FIELDS: [&str; 15] = [
+const PANE_FIELDS: [&str; 17] = [
     "#{pane_id}",
     "#{pane_pid}",
     "#{session_name}",
+    "#{session_id}",
+    "#{@agent-plane-workspace}",
     "#{window_id}",
     "#{window_index}",
     "#{pane_index}",
@@ -120,18 +126,20 @@ fn parse_pane(line: &str) -> Result<Pane> {
         id: f[0].to_string(),
         pid: f[1].parse().context("pane_pid")?,
         session: f[2].to_string(),
-        window: f[3].to_string(),
-        window_index: f[4].parse().context("window_index")?,
-        pane_index: f[5].parse().context("pane_index")?,
-        cwd: f[6].to_string(),
-        title: f[7].to_string(),
-        active: f[8] == "1",
-        viewed: f[9] == "1",
-        sidebar: f[10] == "1",
-        name: f[11].to_string(),
-        parent: f[12].to_string(),
-        placed: f[13] == "1",
-        task: f[14] == "1",
+        session_id: f[3].to_string(),
+        workspace: f[4].to_string(),
+        window: f[5].to_string(),
+        window_index: f[6].parse().context("window_index")?,
+        pane_index: f[7].parse().context("pane_index")?,
+        cwd: f[8].to_string(),
+        title: f[9].to_string(),
+        active: f[10] == "1",
+        viewed: f[11] == "1",
+        sidebar: f[12] == "1",
+        name: f[13].to_string(),
+        parent: f[14].to_string(),
+        placed: f[15] == "1",
+        task: f[16] == "1",
     })
 }
 
@@ -150,11 +158,15 @@ pub struct Size {
     pub height: u32,
 }
 
-/// What an attached client is showing.
+/// An attached client: what it shows, from which session, and when it was last used.
 pub struct ClientSize {
     pub size: Size,
     /// The `window-size` option of the window on its screen.
     pub sizing: String,
+    /// The id of the session it shows.
+    pub session: String,
+    /// Unix seconds of its last keyboard or mouse input.
+    pub activity: u64,
 }
 
 pub struct WindowSize {
@@ -174,7 +186,7 @@ pub struct Geometry {
     pub windows: Vec<WindowSize>,
 }
 
-const CLIENT_ROW: &str = "client\x1f#{window_width}\x1f#{window_height}\x1f#{window-size}";
+const CLIENT_ROW: &str = "client\x1f#{window_width}\x1f#{window_height}\x1f#{window-size}\x1f#{session_id}\x1f#{client_activity}";
 const WINDOW_ROW: &str = "window\x1f#{window_id}\x1f#{window_width}\x1f#{window_height}\x1f#{window_zoomed_flag}\x1f#{window-size}\x1f#{window_layout}\x1f#{window_name}";
 
 fn parse_size(width: &str, height: &str) -> Result<Size> {
@@ -196,7 +208,24 @@ pub struct GlobalKeys {
 const KEYS_OPTION: &str = "@agent-plane-keys";
 const TOGGLE_OPTION: &str = "@agent-plane-bound-keys-toggle-key";
 
-pub fn snapshot() -> Result<(Vec<Pane>, Geometry, GlobalKeys)> {
+/// The daemon's view of tmux each tick.
+pub struct Snapshot {
+    pub panes: Vec<Pane>,
+    pub geometry: Geometry,
+    pub keys: GlobalKeys,
+    /// Every session, including one whose windows are all linked from another, in tmux's order.
+    pub sessions: Vec<Session>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Session {
+    pub id: String,
+    pub name: String,
+    /// Empty until it has one.
+    pub workspace: String,
+}
+
+pub fn snapshot() -> Result<Snapshot> {
     let format = PANE_FIELDS.join(&SEP.to_string());
     let out = run(&[
         "list-panes",
@@ -240,10 +269,14 @@ pub fn snapshot() -> Result<(Vec<Pane>, Geometry, GlobalKeys)> {
             continue;
         }
         match line.split(SEP).collect::<Vec<_>>().as_slice() {
-            ["client", width, height, sizing] => geometry.clients.push(ClientSize {
-                size: parse_size(width, height)?,
-                sizing: sizing.to_string(),
-            }),
+            ["client", width, height, sizing, session, activity] => {
+                geometry.clients.push(ClientSize {
+                    size: parse_size(width, height)?,
+                    sizing: sizing.to_string(),
+                    session: session.to_string(),
+                    activity: activity.parse().context("client_activity")?,
+                })
+            }
             ["window", id, width, height, zoomed, sizing, layout, name] => {
                 geometry.windows.push(WindowSize {
                     id: id.to_string(),
@@ -257,7 +290,22 @@ pub fn snapshot() -> Result<(Vec<Pane>, Geometry, GlobalKeys)> {
             _ => panes.push(parse_pane(line)?),
         }
     }
-    Ok((physical_panes(panes), geometry, keys))
+    let mut sessions: Vec<Session> = Vec::new();
+    for pane in &panes {
+        if !sessions.iter().any(|s| s.id == pane.session_id) {
+            sessions.push(Session {
+                id: pane.session_id.clone(),
+                name: pane.session.clone(),
+                workspace: pane.workspace.clone(),
+            });
+        }
+    }
+    Ok(Snapshot {
+        panes: physical_panes(panes),
+        geometry,
+        keys,
+        sessions,
+    })
 }
 
 /// A linked window is listed once per session, but its processes belong to one
@@ -294,6 +342,47 @@ pub fn clients() -> Result<Vec<Client>> {
             })
         })
         .collect()
+}
+
+/// A tmux command as one string, for tmux to parse inside another command (`if-shell`). Every
+/// argument stays literal, including names containing quotes or formats.
+pub fn command_string(args: &[&str]) -> String {
+    args.iter()
+        .map(|arg| format!("'{}'", arg.replace('\'', r"'\''")))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// One tmux command for each target (a session or pane id), run in one tmux process. A target can
+/// close between the snapshot that chose it and the command; then the commands for the targets
+/// still open run again, and only a failure among those is an error.
+pub fn for_each(commands: &[(String, Vec<String>)]) -> Result<()> {
+    let run_all = |commands: &[&(String, Vec<String>)]| -> Result<()> {
+        let mut args: Vec<&str> = Vec::new();
+        for (_, command) in commands {
+            if !args.is_empty() {
+                args.push(";");
+            }
+            args.extend(command.iter().map(String::as_str));
+        }
+        if args.is_empty() {
+            return Ok(());
+        }
+        run(&args).map(drop)
+    };
+    let all: Vec<_> = commands.iter().collect();
+    let Err(error) = run_all(&all) else {
+        return Ok(());
+    };
+    let open = run(&["list-panes", "-a", "-F", "#{session_id}\n#{pane_id}"])?;
+    let open: Vec<_> = all
+        .into_iter()
+        .filter(|(target, _)| open.lines().any(|id| id == target))
+        .collect();
+    if open.len() == commands.len() {
+        return Err(error);
+    }
+    run_all(&open)
 }
 
 /// Spawned and moved agents chose their project; a marked pane is never placed automatically.
@@ -342,6 +431,8 @@ mod tests {
             id: "%1".into(),
             pid: 10,
             session: "alpha".into(),
+            session_id: "$1".into(),
+            workspace: "main".into(),
             window: "@1".into(),
             window_index: 1,
             pane_index: 0,

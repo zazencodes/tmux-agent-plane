@@ -5,7 +5,7 @@ use crate::agents::{ProcessTable, RawState};
 use crate::detect::{self, Detected};
 use crate::diagnostics::{self, Active, Batch, Issue};
 use crate::fit::Fit;
-use crate::index::{self, Agent, Index, RecentEvent, State, WindowView};
+use crate::index::{self, Agent, Index, RecentEvent, State, WindowView, Workspace};
 use crate::links;
 use crate::popup::{self, Announcements};
 use crate::tmux;
@@ -61,6 +61,21 @@ pub fn report_fatal(error: &anyhow::Error) -> Result<()> {
         STATUS_OPTION,
         "#[fg=#f38ba8]⚠ daemon stopped; see daemon.log#[default] ",
     ]);
+    // Each session's own status would hide the global one.
+    if let Ok(sessions) = tmux::run(&["list-sessions", "-F", "#{session_id}"]) {
+        let unset: Vec<_> = sessions
+            .lines()
+            .map(|id| {
+                (
+                    id.to_owned(),
+                    ["set-option", "-u", "-t", id, STATUS_OPTION]
+                        .map(String::from)
+                        .to_vec(),
+                )
+            })
+            .collect();
+        let _ = tmux::for_each(&unset);
+    }
     if let Ok(clients) = tmux::clients() {
         for client in clients {
             // The popup outlives the exiting daemon and is shown at once: nothing will retry it.
@@ -104,6 +119,7 @@ fn run_inner() -> Result<()> {
     }
     diagnostics::record("daemon", "active")?;
     let previous = index::read_any()?;
+    let mut workspaces = crate::workspaces::Tracker::start(previous.as_ref());
     let mut order = previous.as_ref().map_or_else(Vec::new, |i| i.order.clone());
     let mut last_agent = previous.as_ref().and_then(|i| i.last_agent.clone());
     let mut prev: HashMap<String, Agent> = previous
@@ -129,7 +145,15 @@ fn run_inner() -> Result<()> {
         // Stamp the index before reading anything, so `updated_at` never postdates what it says:
         // a sidebar compares it with the moment of a key press.
         let now = index::now_ms();
-        let (panes, geometry, keys) = tmux::snapshot().context("listing tmux panes")?;
+        let mut snapshot = tmux::snapshot().context("listing tmux panes")?;
+        // First, so every session and agent below has its workspace.
+        let workspace = workspaces.tick(&mut snapshot);
+        let tmux::Snapshot {
+            panes,
+            geometry,
+            keys,
+            ..
+        } = snapshot;
         let before = prev.clone();
         // A shared process-table failure invalidates the whole scan and is fatal.
         let processes = ProcessTable::load().context("loading process table")?;
@@ -142,6 +166,7 @@ fn run_inner() -> Result<()> {
         let batch = fold(&mut prev, detected, &panes, now);
         let mut agents = batch.values;
         let mut issues = batch.issues;
+        issues.extend(workspace.issues);
         issues.extend(links::resolve(&mut agents, &pids, &panes, |pane, link| {
             match link {
                 Some(link) => tmux::run(&["set-option", "-p", "-t", pane, links::OPTION, link]),
@@ -171,8 +196,9 @@ fn run_inner() -> Result<()> {
         issues.extend(notifications.deliver());
         // A failed popup is retried while its client is idle. Its failure never announces itself.
         issues.extend(announcements.deliver());
-        let tasks = tasks.tick(&panes, &processes, now);
+        let mut tasks = tasks.tick(&panes, &processes, now);
         issues.extend(tasks.issues);
+        issues.extend(workspaces.label_tasks(&mut tasks.values));
         let clean = !issues
             .iter()
             .any(|i| i.component.starts_with("scan:") || i.component.starts_with("advance:"));
@@ -191,17 +217,21 @@ fn run_inner() -> Result<()> {
             tasks: tasks.values,
             pending_restore: restore.pending,
             global_keys: keys.clone(),
+            workspaces: workspace.workspaces.clone(),
+            workspace: workspace.current.clone(),
         })
         .context("writing agent index")?;
         // Last, so everything above saw one consistent placement of the agents.
         issues.extend(placer.tick(&agents, &panes)?);
         // Use the last diagnostic snapshot for presentation, then fold this attempt's issues
         // exactly once. A new fault/recovery reaches the status on the next tick.
-        let segment = active.status()
-            + &crate::restore::status(restore.pending)
-            + &keys_status(&keys)
-            + &status_segment(&agents);
-        issues.extend(presentation.update(&segment));
+        let segments = status_segments(
+            &(active.status() + &crate::restore::status(restore.pending) + &keys_status(&keys)),
+            &agents,
+            &workspace.workspaces,
+            &workspace.current,
+        );
+        issues.extend(presentation.update(&segments));
         let changes = active.update(&issues)?;
         let changes: Vec<_> = changes
             .into_iter()
@@ -231,6 +261,7 @@ fn windows(panes: &[tmux::Pane]) -> Vec<WindowView> {
                 .iter()
                 .find(|p| p.window == pane.window && p.sidebar)
                 .map(|p| p.id.clone()),
+            workspace: pane.workspace.clone(),
         })
         .collect()
 }
@@ -263,17 +294,21 @@ fn last_used(
         .or_else(|| visible().next().map(|a| a.pane.clone()))
 }
 
+/// The status bar text for each session (`Some(id)`), and the global text (`None`) a session
+/// shows until it has a workspace.
+type Segments = Vec<(Option<String>, String)>;
+
 /// Status writes and client refreshes are presentation; none can invalidate tracking.
 #[derive(Default)]
 struct Presentation {
-    completed: Option<String>,
+    completed: Option<Segments>,
 }
 
 impl Presentation {
-    fn update(&mut self, segment: &str) -> Vec<Issue> {
+    fn update(&mut self, segments: &Segments) -> Vec<Issue> {
         self.update_with(
-            segment,
-            |segment| tmux::run(&["set-option", "-g", STATUS_OPTION, segment]).map(|_| ()),
+            segments,
+            set_status,
             || Ok(tmux::clients()?.into_iter().map(|c| c.name).collect()),
             |client| tmux::run(&["refresh-client", "-S", "-t", client]).map(|_| ()),
         )
@@ -281,16 +316,26 @@ impl Presentation {
 
     fn update_with(
         &mut self,
-        segment: &str,
-        mut set_status: impl FnMut(&str) -> Result<()>,
+        segments: &Segments,
+        mut set_status: impl FnMut(&Segments) -> Result<()>,
         mut clients: impl FnMut() -> Result<Vec<String>>,
         mut refresh: impl FnMut(&str) -> Result<()>,
     ) -> Vec<Issue> {
-        if self.completed.as_deref() == Some(segment) {
+        // Only what changed is written.
+        let changed: Segments = segments
+            .iter()
+            .filter(|segment| {
+                self.completed
+                    .as_ref()
+                    .is_none_or(|completed| !completed.contains(segment))
+            })
+            .cloned()
+            .collect();
+        if changed.is_empty() {
             return Vec::new();
         }
         let mut issues = Vec::new();
-        if let Err(error) = set_status(segment) {
+        if let Err(error) = set_status(&changed) {
             issues.push(Issue::new("presentation:status", error));
         }
         match clients() {
@@ -303,10 +348,27 @@ impl Presentation {
             }
             Err(error) => issues.push(Issue::new("presentation:clients", error)),
         }
-        // An incomplete attempt is retried even when the requested segment stays unchanged.
-        self.completed = issues.is_empty().then(|| segment.to_owned());
+        // An incomplete attempt is retried even when the requested segments stay unchanged.
+        self.completed = issues.is_empty().then(|| segments.clone());
         issues
     }
+}
+
+/// The global text, then each session's, in one tmux process each.
+fn set_status(segments: &Segments) -> Result<()> {
+    let mut sessions = Vec::new();
+    for (session, segment) in segments {
+        match session {
+            None => tmux::run(&["set-option", "-g", STATUS_OPTION, segment]).map(drop)?,
+            Some(id) => sessions.push((
+                id.clone(),
+                ["set-option", "-t", id, STATUS_OPTION, segment]
+                    .map(String::from)
+                    .to_vec(),
+            )),
+        }
+    }
+    tmux::for_each(&sessions)
 }
 
 /// Retain last good counters/unseen state only internally while their live pane is faulted.
@@ -410,6 +472,7 @@ fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Result<Agent> {
         state,
         detail: d.detail,
         title,
+        workspace: d.pane.workspace,
         session: d.pane.session,
         window: d.pane.window,
         cwd: d.pane.cwd,
@@ -529,6 +592,40 @@ fn keys_status(keys: &tmux::GlobalKeys) -> String {
     }
 }
 
+/// Every session's status bar shows its own workspace: `global` (faults, restore, keys), the
+/// workspace's name once there is more than one, then the states of its agents. A session without
+/// a workspace yet shows the one you are in.
+fn status_segments(
+    global: &str,
+    agents: &[Agent],
+    workspaces: &[Workspace],
+    current: &str,
+) -> Segments {
+    let segment = |workspace: &str| {
+        let mut segment = global.to_owned();
+        if workspaces.len() > 1 {
+            segment += &format!("#[fg=#89b4fa]{}#[default] ", workspace.replace('#', "##"));
+        }
+        let here: Vec<Agent> = agents
+            .iter()
+            .filter(|a| a.workspace == workspace)
+            .cloned()
+            .collect();
+        segment + &status_segment(&here)
+    };
+    let mut segments = vec![(None, segment(current))];
+    for workspace in workspaces {
+        let text = segment(&workspace.name);
+        segments.extend(
+            workspace
+                .sessions
+                .iter()
+                .map(|s| (Some(s.id.clone()), text.clone())),
+        );
+    }
+    segments
+}
+
 pub fn status_segment(agents: &[Agent]) -> String {
     let count = |s: State| agents.iter().filter(|a| a.state == s).count();
     [
@@ -571,6 +668,8 @@ mod tests {
             id: "%1".into(),
             pid: 1,
             session: "s".into(),
+            session_id: "$1".into(),
+            workspace: "main".into(),
             window: "@1".into(),
             window_index: 1,
             pane_index: 1,
@@ -602,12 +701,19 @@ mod tests {
         advance(before, observation(state, visible), 0).unwrap()
     }
 
+    fn segment() -> Segments {
+        vec![
+            (None, "segment".into()),
+            (Some("$1".into()), "segment".into()),
+        ]
+    }
+
     #[test]
     fn refresh_failure_is_scoped_retried_and_recovers_without_replaying_completed_presentation() {
         let mut presentation = Presentation::default();
         let mut attempts = Vec::new();
         let issues = presentation.update_with(
-            "segment",
+            &segment(),
             |_| Ok(()),
             || Ok(vec!["bad".into(), "good".into()]),
             |client| {
@@ -623,17 +729,17 @@ mod tests {
         assert_eq!(attempts, ["bad", "good"]);
         assert!(presentation.completed.is_none());
         let issues = presentation.update_with(
-            "segment",
+            &segment(),
             |_| Ok(()),
             || Ok(vec!["good".into()]),
             |_| Ok(()),
         );
         assert!(issues.is_empty());
-        assert_eq!(presentation.completed.as_deref(), Some("segment"));
+        assert_eq!(presentation.completed, Some(segment()));
         assert!(
             presentation
                 .update_with(
-                    "segment",
+                    &segment(),
                     |_| panic!("already completed"),
                     || panic!("already completed"),
                     |_| panic!("already completed")
@@ -646,7 +752,7 @@ mod tests {
     fn status_and_roster_failures_remain_visible_until_successful_presentation() {
         let mut presentation = Presentation::default();
         let issues = presentation.update_with(
-            "segment",
+            &segment(),
             |_| anyhow::bail!("status write failed"),
             || anyhow::bail!("client roster failed"),
             |_| unreachable!(),
@@ -662,7 +768,7 @@ mod tests {
         // A fresh roster/refresh is still attempted when the status write fails.
         let mut refreshed = false;
         let issues = presentation.update_with(
-            "segment",
+            &segment(),
             |_| anyhow::bail!("status write failed"),
             || Ok(vec!["client".into()]),
             |_| {
@@ -674,7 +780,12 @@ mod tests {
         assert_eq!(issues.len(), 1);
         assert!(
             presentation
-                .update_with("segment", |_| Ok(()), || Ok(Vec::new()), |_| unreachable!())
+                .update_with(
+                    &segment(),
+                    |_| Ok(()),
+                    || Ok(Vec::new()),
+                    |_| unreachable!()
+                )
                 .is_empty()
         );
     }
@@ -715,12 +826,14 @@ mod tests {
                     active_pane: "%1".into(),
                     viewed: true,
                     sidebar: Some("%2".into()),
+                    workspace: "main".into(),
                 },
                 WindowView {
                     id: "@2".into(),
                     active_pane: "%3".into(),
                     viewed: false,
                     sidebar: Some("%3".into()),
+                    workspace: "main".into(),
                 },
             ]
         );
@@ -1003,6 +1116,8 @@ mod tests {
                 id: before.pane.clone(),
                 pid: 1,
                 session: "s".into(),
+                session_id: "$1".into(),
+                workspace: "main".into(),
                 window: "@1".into(),
                 window_index: 1,
                 pane_index: 1,

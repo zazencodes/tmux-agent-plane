@@ -17,6 +17,7 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 - `src/commands.rs`: `list`, `read`, `send`, `keys`, `focus`, `kill`, `wait`, `spawn`. Agents are told never to use raw tmux on agent panes, so every agent job needs a command here.
 - `src/sessions.rs`: session/project inventory and creation, exact spawn destinations and guarded native agent-pane moves.
 - `src/projects.rs`: a hand-started agent joins the session named after its folder, once per pane, from the daemon's tick.
+- `src/workspaces.rs`: workspaces, named groups of sessions above tmux: the daemon labels new sessions, and the `workspace` commands. `src/sidebar/workspace_menu.rs` is `w`.
 - `src/ui.rs`: the picker popup (`prefix + a`, or `prefix + f` to start searching): the sidebar's list and actions, drawn with a large preview and ranked search.
 - `src/ui/family.rs`: `p`, the selected agent's family drawn as boxes and connectors; one widget for the sidebar's panel and the picker's preview area.
 - `src/sidebar.rs`: the always-on agent list in a sidebar pane (`prefix + S`), and its toggle. Idle, a sidebar runs no tmux commands: it learns everything from the index, and only keys run tmux. The plugin’s layout hook closes lone sidebars.
@@ -34,6 +35,11 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 - The sidebar and the picker stay separate programs with their own layouts and previews, but look and read as one product: session colours, state and blocked styles, and shared messages stay in sync, using shared components in `src/ui.rs`. A change to one that shows in both goes in both.
 - Agent counts live only in the status bar, which stays visible whatever else is open and also shows faults. Lists do not repeat them.
 - After every fix or change lands, without waiting to be asked, run `cargo install --path . --force` and `tmux-agent-plane daemon restart` so the user can test it on their system. There are no exceptions: do this for plugin-only or docs-adjacent changes, and when other agents have uncommitted work in the checkout. Open sidebars keep the code they started with, so tell the user to close and reopen them with the sidebar key.
+
+## Decisions
+
+- Every sidebar and picker key is lowercase: `docs/adr/0001-lowercase-keys.md`.
+- Workspaces group whole tmux sessions, and only the plane's views are scoped: `docs/adr/2026-11-12-workspaces-group-tmux-sessions.md`.
 
 ## Next steps
 

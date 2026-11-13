@@ -5,6 +5,13 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Added
+
+- Workspaces: named groups of tmux sessions, one level above tmux, so you can set a body of work aside the way you detach from tmux. The sidebar, the picker, Alt + k / j, sidebar notices and tasks, and each session's status bar show only the workspace you are in; tmux still shows every session. Every existing session starts in `main`, and nothing changes until you start a second workspace.
+- `w` in the sidebar and picker lists your workspaces, marking the ones with blocked or done agents: `Enter` switches, `c` starts a new one, `r` renames, `m` moves the selected agent's project into the highlighted workspace.
+- `tmux-agent-plane workspace list|switch|move|rename`, and `--workspace` on `sessions create` and `spawn --in session`, so you and your agents can start workspaces and break work off into them. The skill tells agents to do this only when you ask.
+- New sessions join the workspace you are in, automatic folder projects stay inside their workspace, and restore brings sessions back into theirs.
+
 ### Fixed
 
 - Configuration shows whether automatic naming is on or off, labels the background command as saved, and selects the naming switch after you save a command.

@@ -320,6 +320,7 @@ mod tests {
                 cwd: "/work/pro".into(),
                 command: vec!["npm".into()],
                 started_by: Some("reviewer".into()),
+                workspace: "main".into(),
             }],
         }
     }
