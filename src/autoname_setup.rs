@@ -59,19 +59,13 @@ impl Setup {
 
     /// True consumes the key, so setup Enter never jumps to an agent behind the screen.
     pub fn key(&mut self, key: KeyEvent) -> bool {
+        let key = crate::ui::escape_key(key);
         if !self.open {
             if key.modifiers.is_empty() && key.code == KeyCode::Char('o') {
                 self.open_menu();
                 return true;
             }
             return false;
-        }
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.open = false;
-            self.command = None;
-            self.custom = None;
-            self.editing = None;
-            return true;
         }
         if key.code == KeyCode::Esc && self.editing.take().is_some() {
             return true;
@@ -602,7 +596,9 @@ mod tests {
         setup.key(KeyEvent::from(KeyCode::Char(' ')));
         assert!(setup.editing.is_some());
         setup.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
-        assert!(!setup.open && setup.editing.is_none());
+        assert!(setup.open && setup.editing.is_none());
+        setup.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(!setup.open);
     }
 
     #[test]

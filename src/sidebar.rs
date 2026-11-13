@@ -1050,6 +1050,7 @@ impl Sidebar {
     /// Help, setup, new agent and kill, in priority order. True when one consumed
     /// the key.
     pub(crate) fn action_key(&mut self, key: KeyEvent, origin: Origin<'_>) -> bool {
+        let key = crate::ui::escape_key(key);
         if key.code != KeyCode::Char('g') || !key.modifiers.is_empty() {
             self.navigation.first_g = false;
         }
@@ -1131,6 +1132,7 @@ impl Sidebar {
     }
 
     pub(crate) fn key(&mut self, key: KeyEvent) -> bool {
+        let key = crate::ui::escape_key(key);
         let first_g = std::mem::take(&mut self.navigation.first_g);
         if self.help_key(key) {
             return false;
@@ -2922,7 +2924,9 @@ mod tests {
         sidebar.key(ctrl_c);
         assert!(sidebar.navigation.pattern.is_empty());
         assert_eq!(sidebar.selected().unwrap().pane, "%4");
-        sidebar.key(ctrl_c);
+        // With nothing left to clear, Escape and Ctrl-C leave the sidebar open: q closes it.
+        assert!(!sidebar.key(ctrl_c));
+        assert!(!sidebar.key(KeyEvent::from(KeyCode::Esc)));
         assert!(!sidebar.auto_name.open);
     }
 

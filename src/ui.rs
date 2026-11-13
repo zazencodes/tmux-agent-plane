@@ -356,15 +356,7 @@ impl App {
             }
             return ControlFlow::Continue(());
         }
-        // Ctrl-C clears what Esc clears; the picker closes once nothing is left.
-        if key.code == KeyCode::Char('c')
-            && key.modifiers.contains(KeyModifiers::CONTROL)
-            && self.sidebar.unfiltered()
-            && !self.sidebar.auto_name.open
-            && !self.sidebar.menu.is_open()
-        {
-            return ControlFlow::Break(None);
-        }
+        let key = escape_key(key);
         self.sidebar.pressed(index::now_ms());
         if self.sidebar.action_key(key, Origin::Popup(&self.client)) {
             return if self.sidebar.left {
@@ -949,6 +941,15 @@ pub(crate) fn task(agent: &Agent) -> (&str, Style) {
     match (agent.state, &agent.detail) {
         (State::Blocked, Some(detail)) => (detail, Style::default().fg(colour(State::Blocked))),
         _ => (&agent.title, Style::default().fg(SUBTEXT)),
+    }
+}
+
+/// UI cancellation uses the same path for Escape and Ctrl-C.
+pub(crate) fn escape_key(key: KeyEvent) -> KeyEvent {
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
+    } else {
+        key
     }
 }
 

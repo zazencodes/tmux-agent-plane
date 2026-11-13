@@ -461,6 +461,22 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_c_leaves_workspace_menu_and_naming_one_level_at_a_time() {
+        let mut sidebar = sidebar();
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        press(&mut sidebar, KeyCode::Char('w'));
+        assert!(sidebar.action_key(ctrl_c, POPUP));
+        assert!(!sidebar.menu.is_open());
+        press(&mut sidebar, KeyCode::Char('w'));
+        press(&mut sidebar, KeyCode::Char('c'));
+        sidebar.action_key(ctrl_c, POPUP);
+        assert!(sidebar.menu.view.as_ref().unwrap().naming.is_none());
+        assert!(sidebar.menu.is_open());
+        sidebar.action_key(ctrl_c, POPUP);
+        assert!(!sidebar.menu.is_open());
+    }
+
+    #[test]
     fn m_refuses_a_project_already_there_and_w_needs_no_edit_in_progress() {
         let mut sidebar = sidebar();
         press(&mut sidebar, KeyCode::Char('w'));

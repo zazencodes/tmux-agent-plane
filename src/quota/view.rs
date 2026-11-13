@@ -114,6 +114,7 @@ impl View {
     /// `u` expands or collapses quota. Browsing stays live while compact quota shows.
     /// While details are open, every key but `?` is the view's; Esc returns to the panel.
     pub fn key(&mut self, key: KeyEvent, can_open: bool) -> bool {
+        let key = crate::ui::escape_key(key);
         if can_open && key.code == KeyCode::Char('u') && key.modifiers.is_empty() {
             if self.open {
                 self.open = false;

@@ -14,6 +14,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Ctrl+C behaves like Escape throughout the UI, backing out one screen at a time, including workspace menus, configuration editors and quota.
+
 - Configuration shows whether automatic naming is on or off, labels the background command as saved, and selects the naming switch after you save a command.
 
 ### Changed
