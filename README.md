@@ -340,7 +340,7 @@ An agent you start by hand joins a project by itself. Within a second of appeari
 
 A workspace is a group of tmux sessions, one level above tmux. Every session belongs to exactly one. While you only have one, called `main`, nothing changes. Once you start a second, everything Agent Plane shows is scoped to the workspace you are in: the sidebar lists its agents and tasks, the picker and Alt + k / j go through its agents only, sidebar notices come from it, and each session's status bar counts its own workspace's agents after the workspace's name. tmux itself is untouched: `prefix + s`, `tmux ls`, switching and detaching see every session, as always. Agents in other workspaces keep running; desktop notifications still reach you from all of them.
 
-Press `w` in the sidebar or the picker to see your workspaces, marked `◆` or `✓` when an agent there is blocked or done. `Enter` takes you to the session you used last in the highlighted workspace. `c` starts a new workspace: type its name, and you land in a fresh session of the same name, in the folder the list runs in. `r` renames the highlighted workspace. `m` moves the project (the whole session) of the agent selected in the list into the highlighted workspace. `Esc` or `w` closes it.
+Press `w` in the sidebar or the picker to see your workspaces, marked `◆` or `✓` when an agent there is blocked or done. `Enter` takes you to the session you used last in the highlighted workspace. `c` starts a new workspace: type its name, and you land in a fresh session of the same name, in the folder the list runs in. `r` renames the highlighted workspace. `m` moves the project (the whole session) of the agent selected in the list into the highlighted workspace. `x` closes the highlighted workspace and asks first: `Enter` moves its sessions intact into `main`, agents still running; `n` asks again, and `Enter` there ends all of its sessions and their agents. `Esc` or `Ctrl+C` cancels either question. Its background tasks keep running and move to `main` either way. `main` cannot be renamed or closed, and no other workspace can take its name. `Esc`, `Ctrl+C` or `w` closes the menu.
 
 Your agents can manage workspaces too, when you ask them to:
 
@@ -349,6 +349,8 @@ tmux-agent-plane workspace list [--json]                 # each workspace's sess
 tmux-agent-plane workspace switch research               # show its most recently used session in your client
 tmux-agent-plane workspace move api web --to client-x    # move whole sessions; a new name starts a workspace
 tmux-agent-plane workspace rename client-x acme
+tmux-agent-plane workspace close acme                    # move its sessions to main
+tmux-agent-plane workspace close acme --terminate-sessions # end its sessions and agents
 tmux-agent-plane sessions create notes --workspace research --cwd ~/notes
 tmux-agent-plane spawn claude "Plan the launch" --in session --session launch --workspace research --name launch-lead
 ```
@@ -443,7 +445,8 @@ For a custom command, enter a JSON array of an executable and literal arguments,
 | `workspace list [--json]` | Every workspace with its sessions and agents; `*` marks the one you are in |
 | `workspace switch <name>` | Show the workspace's most recently used session in your tmux client |
 | `workspace move <session>... --to <name>` | Move whole sessions, with their agents, into a workspace, starting it if the name is new |
-| `workspace rename <name> <new-name>` | Rename a workspace |
+| `workspace rename <name> <new-name>` | Rename a workspace; `main` keeps its name, and no other can take it |
+| `workspace close <name> [--terminate-sessions]` | Move a workspace's sessions and tasks into `main`; with `--terminate-sessions`, end its sessions and their agents instead. `main` cannot be closed |
 | `move <agent> --session SESSION` | Move the running agent pane to an existing project, preserving its process and metadata |
 | `read <agent> [--lines N]` | The agent's screen, plus N lines of scrollback |
 | `send <agent> "<prompt>" [--answer] [--wait] [--timeout S]` | Paste a prompt and press Enter. Refuses blocked agents unless `--answer` deliberately replies to their question; `--answer` requires a blocked target. `--wait` follows the submitted turn until it ends or blocks |

@@ -24,6 +24,7 @@ struct View {
     selected: String,
     /// A name being typed.
     naming: Option<Naming>,
+    closing: Option<(workspaces::ClosePlan, bool)>,
     /// Why the last action failed, until the next key.
     error: Option<String>,
 }
@@ -58,6 +59,7 @@ impl Sidebar {
                 self.menu.view = Some(View {
                     selected: self.workspace.clone().unwrap_or_default(),
                     naming: None,
+                    closing: None,
                     error: None,
                 });
             }
@@ -65,6 +67,40 @@ impl Sidebar {
         }
         let view = self.menu.view.as_mut().expect("menu is open");
         view.error = None;
+        // Cancellation has priority over character shortcuts, including Ctrl-C.
+        if cancels(key) {
+            if view.naming.take().is_none() && view.closing.take().is_none() {
+                self.menu.view = None;
+            }
+            return true;
+        }
+        if let Some((_, terminate)) = &mut view.closing {
+            match key.code {
+                KeyCode::Char('n') if key.modifiers.is_empty() => {
+                    if *terminate {
+                        view.closing = None;
+                    } else {
+                        *terminate = true;
+                    }
+                }
+                KeyCode::Enter | KeyCode::Char('y') if key.modifiers.is_empty() => {
+                    let (plan, terminate) = view.closing.take().expect("closing");
+                    match plan.apply(terminate) {
+                        Ok(()) => {
+                            if self.workspace.as_deref() == Some(&plan.name) {
+                                self.workspace = Some(workspaces::FIRST.into());
+                            }
+                            self.menu.view = None;
+                            self.notice = Some(format!("closed {}", plan.name));
+                            self.left = terminate && matches!(origin, Origin::Popup(_));
+                        }
+                        Err(error) => self.menu_error(error),
+                    }
+                }
+                _ => {}
+            }
+            return true;
+        }
         if let Some(naming) = &mut view.naming {
             let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
             match key.code {
@@ -114,7 +150,13 @@ impl Sidebar {
                     name: String::new(),
                 })
             }
-            KeyCode::Char('r') if position.is_some() => {
+            KeyCode::Char('x') if position.is_some() => {
+                match workspaces::ClosePlan::new(&view.selected) {
+                    Ok(plan) => view.closing = Some((plan, false)),
+                    Err(error) => view.error = Some(format!("{error:#}")),
+                }
+            }
+            KeyCode::Char('r') if position.is_some() && view.selected != workspaces::FIRST => {
                 view.naming = Some(Naming {
                     renaming: true,
                     name: view.selected.clone(),
@@ -164,6 +206,9 @@ impl Sidebar {
     /// and the client goes there.
     fn new_workspace(&mut self, name: &str, origin: Origin<'_>) -> Result<()> {
         workspaces::validate(name)?;
+        if name == workspaces::FIRST {
+            bail!("main is reserved");
+        }
         if self.workspaces.iter().any(|w| w.name == name) {
             bail!("workspace {name} exists");
         }
@@ -249,6 +294,33 @@ impl Sidebar {
                 }
             })
             .collect();
+        if let Some((plan, terminate)) = &view.closing {
+            let (sessions, move_) = match plan.sessions.len() {
+                1 => ("1 session".to_owned(), "moves"),
+                n => (format!("{n} sessions"), "move"),
+            };
+            body = if *terminate {
+                vec![
+                    Line::styled(
+                        truncate(&format!(" end {sessions} of {}?", plan.name), width),
+                        Style::default().fg(colour(State::Blocked)).bold(),
+                    ),
+                    Line::default(),
+                    Line::styled(" Every agent in them stops.", TEXT),
+                    Line::styled(" Background tasks move to main.", SUBTEXT),
+                ]
+            } else {
+                vec![
+                    Line::styled(
+                        truncate(&format!(" close {}?", plan.name), width),
+                        Style::default().fg(TEXT).bold(),
+                    ),
+                    Line::default(),
+                    Line::styled(format!(" Its {sessions} {move_} to main,"), TEXT),
+                    Line::styled(" with their agents still running.", TEXT),
+                ]
+            };
+        }
         if let Some(naming) = &view.naming {
             body.push(Line::default());
             let prompt = if naming.renaming {
@@ -272,7 +344,16 @@ impl Sidebar {
             ));
         }
         let project = self.selected().map(|a| a.session.clone());
-        let footer = if view.naming.is_some() {
+        let footer = if let Some((_, terminate)) = &view.closing {
+            if *terminate {
+                vec![hints(&[("⏎", "end sessions"), ("n/esc", "cancel")])]
+            } else {
+                vec![
+                    hints(&[("⏎", "move to main"), ("n", "end them")]),
+                    hints(&[("esc", "cancel")]),
+                ]
+            }
+        } else if view.naming.is_some() {
             vec![hints(&[("⏎", "save"), ("esc", "cancel")])]
         } else {
             let mut second = Vec::new();
@@ -281,10 +362,12 @@ impl Sidebar {
             }
             second.push(("esc", "close".to_owned()));
             let second: Vec<(&str, &str)> = second.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            vec![
-                hints(&[("⏎", "switch"), ("c", "new"), ("r", "rename")]),
-                hints(&second),
-            ]
+            let mut footer = vec![hints(&[("⏎", "switch"), ("c", "new")])];
+            if view.selected != workspaces::FIRST {
+                footer.push(hints(&[("r", "rename"), ("x", "close")]));
+            }
+            footer.push(hints(&second));
+            footer
         };
         let [title_area, body_area, footer_area] = Layout::vertical([
             Constraint::Length(2),
@@ -454,14 +537,13 @@ mod tests {
         press(&mut sidebar, KeyCode::Esc);
         assert!(sidebar.menu.is_open());
         press(&mut sidebar, KeyCode::Char('r'));
-        assert!(screen(&sidebar).contains(" rename main: main▏"));
-        press(&mut sidebar, KeyCode::Esc);
+        assert!(sidebar.menu.view.as_ref().unwrap().naming.is_none());
         press(&mut sidebar, KeyCode::Enter);
         assert!(!sidebar.menu.is_open() && !sidebar.left);
     }
 
     #[test]
-    fn ctrl_c_leaves_workspace_menu_and_naming_one_level_at_a_time() {
+    fn ctrl_c_leaves_each_workspace_screen_without_creating_one() {
         let mut sidebar = sidebar();
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
         press(&mut sidebar, KeyCode::Char('w'));
@@ -472,6 +554,27 @@ mod tests {
         sidebar.action_key(ctrl_c, POPUP);
         assert!(sidebar.menu.view.as_ref().unwrap().naming.is_none());
         assert!(sidebar.menu.is_open());
+        sidebar.menu.view.as_mut().unwrap().closing = Some((
+            workspaces::ClosePlan {
+                name: "client-x".into(),
+                sessions: vec!["$web".into()],
+            },
+            false,
+        ));
+        let text = screen(&sidebar);
+        assert!(text.contains(" close client-x?"), "{text}");
+        assert!(text.contains(" Its 1 session moves to main,"), "{text}");
+        assert!(text.contains(" with their agents still running."), "{text}");
+        assert!(
+            text.contains("⏎ move to main") && text.contains("n end them"),
+            "{text}"
+        );
+        press(&mut sidebar, KeyCode::Char('n'));
+        let text = screen(&sidebar);
+        assert!(text.contains(" end 1 session of client-x?"), "{text}");
+        assert!(text.contains("⏎ end sessions"), "{text}");
+        sidebar.action_key(ctrl_c, POPUP);
+        assert!(sidebar.menu.view.as_ref().unwrap().closing.is_none());
         sidebar.action_key(ctrl_c, POPUP);
         assert!(!sidebar.menu.is_open());
     }

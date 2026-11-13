@@ -1725,14 +1725,9 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
                 } else if sidebar.navigation.jump.is_some() {
                     hints(&[("type", "find a row"), ("^w ^u", "clear")])
                 } else if sidebar.tasks.exist() {
-                    hints(&[
-                        ("c", "new"),
-                        ("o", "configure"),
-                        ("t", "tasks"),
-                        ("u", "quota"),
-                    ])
+                    hints(&[("c", "new"), ("t", "tasks"), ("w", "workspaces")])
                 } else {
-                    hints(&[("c", "new"), ("o", "configure"), ("u", "quota")])
+                    hints(&[("c", "new"), ("o", "configure"), ("w", "workspaces")])
                 },
                 footer(sidebar, inner + 2, index::now_ms()),
             ])

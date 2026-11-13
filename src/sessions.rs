@@ -48,7 +48,7 @@ pub struct Session {
     attached: u32,
     pub(crate) group: Option<String>,
     /// Physical window ids make links between projects explicit.
-    windows: Vec<String>,
+    pub(crate) windows: Vec<String>,
     agents: Vec<String>,
 }
 

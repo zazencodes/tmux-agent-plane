@@ -749,6 +749,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
             } else {
                 status_footer(sidebar, width).unwrap_or_else(|| {
                     let mut line = hints(&[
+                        ("w", "workspaces"),
                         ("j/k", "browse"),
                         ("/", "search"),
                         ("⏎", "focus"),

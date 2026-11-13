@@ -7,6 +7,7 @@
 - A session joins the workspace of whoever creates it: the named one, else the creating agent's or pane's, else the one you are in (that of the client used last). Sessions made outside the plane join the one you are in.
 - Nothing moves work between workspaces on its own. Automatic folder projects stay inside the agent's workspace; organizing projects never crosses workspaces; agents change workspaces only when the user explicitly asks.
 - Closing a session keeps its clients in its workspace while that has sessions left.
+- `main` is home: it cannot be renamed or closed, and no other workspace takes its name. Closing a workspace moves its sessions there intact; ending them takes a second, explicit confirmation.
 - The name is "workspace", because "project" already means a tmux session here.
 
 ## Why

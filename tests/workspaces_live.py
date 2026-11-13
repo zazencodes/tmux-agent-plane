@@ -229,7 +229,7 @@ try:
     eventually('renamed', lambda: 'lab' in workspaces() and 'research' not in workspaces())
     assert label('lab-bench') == label('hand-x') == 'lab'
     reject = plane('workspace', 'rename', 'lab', 'main', check=False)
-    assert reject.returncode and 'exists' in reject.stderr, reject
+    assert reject.returncode and 'reserved' in reject.stderr, reject
     proof('workspace rename relabels its sessions and refuses an existing name')
 
     # Automatic folder projects stay inside the agent's workspace.
@@ -261,6 +261,7 @@ try:
     proof('the sidebar lists only its own workspace and names it')
 
     # w opens the workspaces; Enter on another shows it.
+    infra('switch-client', '-c', client, '-t', '=api')
     infra('select-pane', '-t', sidebar)
     infra('send-keys', '-t', sidebar, 'w')
     eventually('menu open', lambda: screen().startswith('workspaces') and '• client-x  here' in screen())
@@ -290,8 +291,61 @@ try:
     eventually('restarted daemon keeps labels', lambda: sorted(workspaces()) == ['client-x', 'lab', 'main'])
     proof('labels live on tmux sessions and survive a daemon restart')
 
+    # Close a workspace through the UI, preserving its sessions and agent identities.
+    infra('switch-client', '-c', client, '-t', '=api')
+    infra('select-pane', '-t', sidebar)
+    infra('send-keys', '-t', sidebar, 'w')
+    eventually('close menu', lambda: 'workspaces' in screen() and 'here' in screen())
+    infra('send-keys', '-t', sidebar, 'C-c')
+    eventually('ctrl-c exits menu', lambda: 'agents · client-x' in screen())
+    infra('send-keys', '-t', sidebar, 'w', 'x')
+    eventually('move prompt', lambda: 'close client-x?' in screen() and 'move to main' in screen())
+    infra('send-keys', '-t', sidebar, 'n')
+    eventually('terminate prompt', lambda: 'of client-x?' in screen() and 'Every agent in them stops' in screen())
+    infra('send-keys', '-t', sidebar, 'C-c')
+    eventually('cancelled close', lambda: '• client-x  here' in screen())
+    before = agent('x-helper')
+    infra('send-keys', '-t', sidebar, 'x', 'Enter')
+    eventually('moved to main', lambda: 'client-x' not in workspaces() and label('api') == 'main')
+    after = agent('x-helper')
+    assert before['pane'] == after['pane'] and before['session'] == after['session']
+    eventually('main named with workspace hint', lambda: 'w workspaces' in screen() and 'agents · main' in screen())
+    assert plane('workspace', 'close', 'main', check=False).returncode
+    assert plane('workspace', 'rename', 'main', 'other', check=False).returncode
+    proof('close defaults to moving intact sessions; Ctrl-C cancels both screens; main is protected')
+
+    # Terminate a workspace while viewing it, returning its client to main.
+    plane('sessions', 'create', 'close-a', '--workspace', 'closing')
+    plane('sessions', 'create', 'close-b', '--workspace', 'closing')
+    infra('switch-client', '-c', client, '-t', '=close-a')
+    eventually('closing workspace indexed', lambda: 'closing' in workspaces())
+    window = infra('display-message', '-p', '-t', '=close-a', '#{window_id}')
+    plane('enter-sidebar', window)
+    sidebar = eventually('closing sidebar', lambda: next(
+        (line.split()[0] for line in infra('list-panes', '-t', window, '-F',
+                                           '#{pane_id} #{@agent-plane-sidebar}').splitlines()
+         if line.endswith(' 1')), None))
+    eventually('closing workspace UI', lambda: 'agents · closing' in screen())
+    infra('select-pane', '-t', sidebar)
+    infra('send-keys', '-t', sidebar, 'w', 'x')
+    eventually('closing move prompt', lambda: 'close closing?' in screen() and 'Its 2 sessions move to main,' in screen())
+    infra('send-keys', '-t', sidebar, 'n')
+    eventually('closing terminate prompt', lambda: 'end 2 sessions of closing?' in screen())
+    infra('send-keys', '-t', sidebar, 'Enter')
+    eventually('terminated workspace gone', lambda: 'closing' not in workspaces())
+    remaining = infra('list-sessions', '-F', '#{session_name}').splitlines()
+    assert 'close-a' not in remaining and 'close-b' not in remaining
+    assert label(infra('list-clients', '-F', '#{client_session}')) == 'main'
+    proof('explicit termination closes every session and returns the attached client to main')
+
     (ROOT / 'results.json').write_text(json.dumps(dict(passed=True, cases=RESULTS), indent=2))
 finally:
+    if sys.exc_info()[0] is not None and 'sidebar' in globals():
+        try:
+            print('UI at failure:', screen(), flush=True)
+            print('Clients:', infra('list-clients', '-F', '#{client_name} #{client_session}'), flush=True)
+        except Exception as error:
+            print('UI unavailable:', error, flush=True)
     if DAEMON:
         try:
             for a in agents():

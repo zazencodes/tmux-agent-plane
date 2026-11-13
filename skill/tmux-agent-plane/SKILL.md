@@ -57,6 +57,7 @@ tmux-agent-plane workspace list [--json]  # workspaces: their sessions and agent
 tmux-agent-plane workspace switch <name>  # show it in the user's tmux client
 tmux-agent-plane workspace move <session>... --to <name>  # move whole sessions; a new name starts a workspace
 tmux-agent-plane workspace rename <name> <new-name>
+tmux-agent-plane workspace close <name> [--terminate-sessions] # default: move sessions to main
 tmux-agent-plane move <agent> --session <session>  # existing exact session name or id
 tmux-agent-plane read <agent> [--lines N] # its screen, plus N lines of scrollback
 tmux-agent-plane send <agent> "<prompt>" [--answer] [--wait] [--timeout S]
@@ -159,6 +160,7 @@ A workspace is a named group of tmux sessions, one level above tmux; the user ma
 - New work stays in your workspace without any flag: helpers you spawn into your session or a new window share it, and `sessions create` or `spawn --in session` puts a new session in your workspace. Pass `--workspace` only when the user names a workspace. Codex callers cannot be identified from their shell, so pass `--workspace <your workspace>` to `sessions create`.
 - "Start a new workspace (for X)": `sessions create <name> --workspace <name> --cwd <dir>` for a plain shell, or `spawn <kind> "<task>" --in session --session <name> --workspace <name> --cwd <dir> --name <agent>` to start it with an agent. Then `workspace switch <name>` only if the user wants to go there.
 - "Break these off into a workspace": move whole sessions with `workspace move <session>... --to <name>` (a new name starts the workspace). For single agents, create a session in the target workspace, then `move <agent> --session <that session>`. Report what moved where.
+- "Close workspace X": `workspace close X` moves its sessions and background tasks to `main`. Use `--terminate-sessions` only when the user explicitly asks to end its sessions and agents; background tasks still move to `main`. `main` is reserved and cannot be closed or renamed.
 - "Switch me to X": `workspace switch X`. "Rename X to Y": `workspace rename X Y`.
 
 ## Organizing projects

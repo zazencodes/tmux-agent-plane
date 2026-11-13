@@ -38,6 +38,13 @@ pub enum Action {
         #[arg(long)]
         to: String,
     },
+    /// Close a workspace, moving its sessions to main
+    Close {
+        name: String,
+        /// End every session in the workspace, including running agents
+        #[arg(long)]
+        terminate_sessions: bool,
+    },
     /// Rename a workspace
     Rename { name: String, new_name: String },
 }
@@ -54,6 +61,15 @@ pub fn run(action: Action) -> Result<()> {
             for line in move_sessions(&sessions, &to)? {
                 println!("{line}");
             }
+            Ok(())
+        }
+        Action::Close {
+            name,
+            terminate_sessions,
+        } => {
+            let plan = ClosePlan::new(&name)?;
+            plan.apply(terminate_sessions)?;
+            println!("closed workspace {name}");
             Ok(())
         }
         Action::Rename { name, new_name } => {
@@ -472,8 +488,132 @@ pub fn move_sessions(targets: &[String], workspace: &str) -> Result<Vec<String>>
         .collect())
 }
 
+/// A close confirmation pins the exact sessions the user reviewed.
+pub(crate) struct ClosePlan {
+    pub name: String,
+    pub sessions: Vec<String>,
+}
+
+impl ClosePlan {
+    pub fn new(name: &str) -> Result<Self> {
+        if name == FIRST {
+            bail!("main cannot be closed");
+        }
+        let snapshot = sessions::Snapshot::load()?;
+        let sessions: Vec<_> = snapshot
+            .sessions
+            .iter()
+            .filter(|s| s.workspace == name && s.name != tasks::SESSION)
+            .map(|s| s.id.clone())
+            .collect();
+        if sessions.is_empty() {
+            bail!("no workspace named {name:?}");
+        }
+        Ok(Self {
+            name: name.into(),
+            sessions,
+        })
+    }
+
+    pub fn apply(&self, terminate: bool) -> Result<()> {
+        let snapshot = sessions::Snapshot::load()?;
+        let members: Vec<_> = snapshot
+            .sessions
+            .iter()
+            .filter(|s| s.workspace == self.name && s.name != tasks::SESSION)
+            .collect();
+        let mut current: Vec<_> = members.iter().map(|s| s.id.clone()).collect();
+        current.sort();
+        let mut expected = self.sessions.clone();
+        expected.sort();
+        if current != expected {
+            bail!("workspace sessions changed; reopen the close confirmation");
+        }
+        for member in &members {
+            if member.group.is_some() {
+                bail!("session {:?} is grouped; close refused", member.name);
+            }
+            if terminate
+                && snapshot.sessions.iter().any(|other| {
+                    other.workspace != self.name
+                        && other.windows.iter().any(|w| member.windows.contains(w))
+                })
+            {
+                bail!(
+                    "session {:?} shares windows outside this workspace; close refused",
+                    member.name
+                );
+            }
+        }
+        let mut commands: Vec<Vec<String>> = Vec::new();
+        // Tasks are independent of project sessions and remain running in main.
+        for task in index::read()?
+            .tasks
+            .iter()
+            .filter(|t| t.definition.workspace == self.name)
+        {
+            commands.push(
+                [
+                    "set-option",
+                    "-p",
+                    "-t",
+                    &task.pane,
+                    tasks::WORKSPACE,
+                    FIRST,
+                ]
+                .map(String::from)
+                .to_vec(),
+            );
+        }
+        if terminate {
+            let destination = match snapshot
+                .sessions
+                .iter()
+                .find(|s| s.workspace == FIRST && s.name != tasks::SESSION)
+            {
+                Some(session) => session.id.clone(),
+                None => sessions::create_project(FIRST, None, FIRST)?,
+            };
+            let clients = tmux::run(&["list-clients", "-F", "#{client_name}\x1f#{session_id}"])?;
+            for row in clients.lines() {
+                let (client, session) = row.split_once(SEP).context("invalid client row")?;
+                if self.sessions.iter().any(|id| id == session) {
+                    commands.push(
+                        ["switch-client", "-c", client, "-t", &destination]
+                            .map(String::from)
+                            .to_vec(),
+                    );
+                }
+            }
+            for member in members {
+                commands.push(vec!["kill-session".into(), "-t".into(), member.id.clone()]);
+            }
+        } else {
+            for member in members {
+                commands.push(
+                    ["set-option", "-t", &member.id, OPTION, FIRST]
+                        .map(String::from)
+                        .to_vec(),
+                );
+            }
+        }
+        // Queue the whole operation before a session containing this UI can end.
+        let mut args = Vec::new();
+        for command in &commands {
+            if !args.is_empty() {
+                args.push(";");
+            }
+            args.extend(command.iter().map(String::as_str));
+        }
+        tmux::run(&args).map(drop)
+    }
+}
+
 /// Rename a workspace: each of its sessions and tasks takes the new name.
 pub fn rename(workspace: &str, new_name: &str) -> Result<()> {
+    if workspace == FIRST || new_name == FIRST {
+        bail!("main is reserved and cannot be renamed");
+    }
     validate(new_name)?;
     let snapshot = sessions::Snapshot::load()?;
     let members: Vec<_> = snapshot
