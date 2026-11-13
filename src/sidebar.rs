@@ -1348,7 +1348,12 @@ fn switch_to(
     guard_destination(&context.clients, client, &context.session, window)?;
     let destination = match context.sidebar {
         Some(pane) => pane,
-        None => add(&window_target)?,
+        // A new window's hook may be adding its sidebar right now; the lock makes one of us
+        // find the other's.
+        None => {
+            let _lock = Lock::take()?;
+            add(&window_target)?
+        }
     };
     // Enter lands on the agent. Preview stays in this sidebar, so neither agent keys nor seen
     // state are manufactured.
