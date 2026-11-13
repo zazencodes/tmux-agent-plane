@@ -53,6 +53,7 @@ tmux-agent-plane list                     # all agents: name, kind, state, where
 tmux-agent-plane list --json              # the same with every field
 tmux-agent-plane sessions list [--json]   # projects: exact name/id, workspace, windows, clients, group, agents
 tmux-agent-plane sessions create [name] [--cwd DIR] [--workspace W] # new detached project with a shell; no name: its folder's
+tmux-agent-plane sessions rename <session> <new-name>  # rename a project (only when the user asks)
 tmux-agent-plane workspace list [--json]  # workspaces: their sessions and agents; * is the one the user is in, (here) yours
 tmux-agent-plane workspace switch <name>  # show it in the user's tmux client
 tmux-agent-plane workspace move <session>... --to <name>  # move whole sessions; a new name starts a workspace
@@ -170,7 +171,7 @@ Treat requests such as “organize my tmux sessions”, “clean up my tmux proj
 Organize within workspaces: keep every session and agent in the workspace it is in, unless the user explicitly asks to move work between workspaces.
 
 1. Inspect `sessions list --json` and `list --json`. The session inventory includes shell-only sessions, attached-client counts, window IDs, group membership and agent names. Linked agents appear in every session containing their window; `list` retains one canonical agent row. Use tasks, names, directories and parent links to understand the work and choose appropriate existing or new sessions. Read an agent if its task is unclear.
-2. Create any needed project with `sessions create --cwd /path/to/api`, which names it after its folder, or `sessions create api --cwd ...` to choose a short, meaningful name. Keep the user's established session/project boundaries.
+2. Create any needed project with `sessions create --cwd /path/to/api`, which names it after its folder, or `sessions create api --cwd ...` to choose a short, meaningful name. Rename a project with `sessions rename` only when the user asks. Keep the user's established session/project boundaries.
 3. Move each existing agent with `move reviewer --session api`. Move its orchestrator and helpers individually when they belong together. Each move detaches only that agent pane into a destination window; other agents and shells in a mixed source window stay there. Moving preserves the process, pane ID, name, parent and completion history, and sends no prompt or keys. It prints the new location immediately; the index/sidebar follows on the next daemon scan.
 4. Start future helpers directly in that project: `spawn codex "<full task>" --in window --session api --cwd /path/to/worktree --name api-review`. Check `sessions list` and `list` to verify the result, then report the organization.
 

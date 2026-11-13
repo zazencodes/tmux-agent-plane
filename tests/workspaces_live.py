@@ -247,7 +247,13 @@ try:
     assert out.startswith('notes '), out
     out = plane('sessions', 'create', '--cwd', folder('notes'), '--workspace', 'lab').stdout
     assert out.startswith('notes-2 ') and label('notes-2') == 'lab', out
-    proof('a new project is named after its folder, -2 when taken')
+    out = plane('sessions', 'rename', 'notes-2', 'jot').stdout
+    assert 'notes-2 is now jot' in out and label('jot') == 'lab' and 'notes-2' not in sessions_named()
+    reject = plane('sessions', 'rename', 'jot', 'notes', check=False)
+    assert reject.returncode and 'exists' in reject.stderr, reject
+    reject = plane('sessions', 'rename', 'jot', 'bad.name', check=False)
+    assert reject.returncode and 'session name' in reject.stderr, reject
+    proof('a new project is named after its folder, -2 when taken, and can be renamed')
 
     # A hand-started agent joins its folder's project in its own workspace. shared-folder is
     # main's, so client-x gets shared-folder-2, and the next agent from there joins it.
@@ -279,6 +285,22 @@ try:
     text = eventually('sidebar lists client-x agents', lambda: (s := screen()) and 'x-helper' in s and s)
     assert 'main-lead' not in text and 'r-lead' not in text and 'x-second' not in text, text
     proof('the sidebar lists only its own workspace and names it')
+
+    # e renames the selected agent's project from the sidebar; its letters are text.
+    infra('switch-client', '-c', client, '-t', '=api')
+    infra('select-pane', '-t', sidebar)
+    infra('send-keys', '-t', sidebar, 'e')
+    eventually('rename prompt', lambda: 'rename project api' in screen() and '› api▏' in screen())
+    infra('send-keys', '-t', sidebar, 'C-u')
+    infra('send-keys', '-t', sidebar, '-l', 'qwcx')
+    eventually('typed', lambda: '› qwcx▏' in screen())
+    infra('send-keys', '-t', sidebar, 'Enter')
+    eventually('renamed', lambda: 'qwcx' in sessions_named() and 'api' not in sessions_named())
+    eventually('index follows the rename', lambda: agent('x-helper')['session'] == 'qwcx')
+    assert label('qwcx') == 'client-x'
+    plane('sessions', 'rename', 'qwcx', 'api')
+    eventually('renamed back', lambda: agent('x-helper')['session'] == 'api')
+    proof('e renames the selected agent\'s project; its agents and workspace stay')
 
     # w opens the workspaces; Enter on another shows it.
     infra('switch-client', '-c', client, '-t', '=api')

@@ -212,6 +212,7 @@ set -g @agent-plane-keys-toggle-key e
 | `Enter`, `l`, `→` | Focus the selection; the picker closes and the sidebar stays open. When the daemon is stopped, `Enter` restarts it |
 | `Esc` / `Ctrl-C` | Cancel an edit, clear a kept search, clear filters, then close the picker |
 | `r` | Rename the selected agent; `Enter` saves, `Esc` cancels |
+| `e` | Rename the selected agent's project (its tmux session); `Enter` saves, `Esc` cancels |
 | `x` | Confirm killing an agent or stopping a task; `Enter` or lowercase `y` accepts, other keys cancel |
 | `c` | Start a new agent in the selected agent's project and folder |
 | `p` | Show or hide the selected agent's [graph](#parents) |
@@ -323,12 +324,13 @@ A tmux session is a project: its orchestrator and helpers live in the same sessi
 tmux-agent-plane sessions list --json
 tmux-agent-plane list --json
 tmux-agent-plane sessions create --cwd /path/to/api   # named after its folder: api
+tmux-agent-plane sessions rename api api-v2
 tmux-agent-plane move api-review --session api
 tmux-agent-plane spawn codex "Review the API changes" --in window --session api --cwd /path/to/api --name api-tests
 tmux-agent-plane spawn claude "Plan the website" --in session --session website --cwd /path/to/website --name website-lead
 ```
 
-`sessions list` includes every session, even one with only shells: exact name and ID, workspace, attached-client count, window IDs, session group and agent names. Linked agents appear in each containing session. Existing destinations use exact names or IDs; new session names reject dots, colons, control characters and surrounding whitespace so tmux cannot silently rewrite them. `sessions create` opens a detached interactive shell. Without a name, a project is named after its folder, or with `-2`, `-3`… when another session (perhaps in another workspace) already has that name, since tmux session names are unique. `spawn --in session --session NAME` creates the project with its first agent; `--name` names that agent separately. `spawn --in window --session NAME` uses an existing project's configured shell. An unknown destination fails before launching anything.
+`sessions list` includes every session, even one with only shells: exact name and ID, workspace, attached-client count, window IDs, session group and agent names. Linked agents appear in each containing session. Existing destinations use exact names or IDs; new session names reject dots, colons, control characters and surrounding whitespace so tmux cannot silently rewrite them. `sessions create` opens a detached interactive shell. Without a name, a project is named after its folder, or with `-2`, `-3`… when another session (perhaps in another workspace) already has that name, since tmux session names are unique. Rename a project with `sessions rename`, or `e` in the sidebar or picker; its agents, windows, clients and workspace stay as they are. `spawn --in session --session NAME` creates the project with its first agent; `--name` names that agent separately. `spawn --in window --session NAME` uses an existing project's configured shell. An unknown destination fails before launching anything.
 
 `move` uses a native detached pane move: the process keeps running, with the same pane ID, native identity, name, parent and completion history. No input is sent to the agent. Only the chosen pane moves, leaving other agents and shells in a mixed source window. The destination's current window and clients stay in place. The command prints the new location; the daemon publishes it on its next scan.
 
@@ -442,6 +444,7 @@ For a custom command, enter a JSON array of an executable and literal arguments,
 | `list [--json]` | All agents. `*` (or `"self": true`) marks a known caller |
 | `sessions list [--json]` | Every project session: name/ID, windows, attached clients, group and agents |
 | `sessions create [name] [--cwd DIR] [--workspace W]` | Create a detached project with an interactive shell, in the caller's workspace or `W`; without a name, named after its folder (`-2`, `-3`… when taken) |
+| `sessions rename <session> <new-name>` | Rename a project; its agents, windows and workspace stay |
 | `workspace list [--json]` | Every workspace with its sessions and agents; `*` marks the one you are in, `(here)` (`"here"` in JSON) the caller's |
 | `workspace switch <name>` | Show the workspace's most recently used session in your tmux client |
 | `workspace move <session>... --to <name>` | Move whole sessions, with their agents, into a workspace, starting it if the name is new |

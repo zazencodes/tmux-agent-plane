@@ -27,6 +27,12 @@ pub enum Action {
         #[arg(long)]
         workspace: Option<String>,
     },
+    /// Rename a project
+    Rename {
+        /// Exact session name or id
+        session: String,
+        new_name: String,
+    },
 }
 
 pub fn run(action: Action) -> Result<()> {
@@ -37,6 +43,11 @@ pub fn run(action: Action) -> Result<()> {
             cwd,
             workspace,
         } => create(name.as_deref(), cwd, workspace.as_deref()),
+        Action::Rename { session, new_name } => {
+            let old = rename_project(&session, &new_name)?;
+            println!("project {old} is now {new_name}");
+            Ok(())
+        }
     }
 }
 
@@ -221,6 +232,27 @@ pub fn create_folder_project(cwd: Option<PathBuf>, workspace: &str) -> Result<(S
 /// A folder's project names, in order: its name, then with -2, -3...
 fn candidates(folder: &str) -> impl Iterator<Item = String> + '_ {
     std::iter::once(folder.to_owned()).chain((2..).map(move |n| format!("{folder}-{n}")))
+}
+
+/// Rename a project: its agents, windows, clients and workspace stay as they are. Returns its old
+/// name.
+pub fn rename_project(target: &str, new_name: &str) -> Result<String> {
+    validate_name(new_name)?;
+    let snapshot = Snapshot::load()?;
+    let session = snapshot.find(target)?;
+    if session.name == tasks::SESSION {
+        bail!(
+            "{:?} holds background tasks and keeps its name",
+            session.name
+        );
+    }
+    if session.name != new_name {
+        if snapshot.sessions.iter().any(|s| s.name == new_name) {
+            bail!("a project named {new_name:?} exists; choose another name");
+        }
+        tmux::run(&["rename-session", "-t", &session.id, new_name])?;
+    }
+    Ok(session.name.clone())
 }
 
 /// A detached session with a login shell, in a workspace.

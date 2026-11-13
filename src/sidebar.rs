@@ -1,5 +1,6 @@
 //! A narrow, always-on agent list in a pane down the side of a window.
 
+mod project_rename;
 mod restore;
 mod tasks;
 mod workspace_menu;
@@ -471,6 +472,8 @@ pub(crate) struct Sidebar {
     pub(crate) client_session: Option<String>,
     /// `w`: the workspaces.
     pub(crate) menu: workspace_menu::Menu,
+    /// `e`: the selected agent's project, being renamed.
+    project_rename: Option<project_rename::ProjectRename>,
 }
 
 impl Navigation {
@@ -1054,13 +1057,15 @@ impl Sidebar {
         if key.code != KeyCode::Char('g') || !key.modifiers.is_empty() {
             self.navigation.first_g = false;
         }
-        // The restore view and the workspaces consume every key while open.
-        let consumed = self.restore_key(key, origin)
+        // A project name being typed, the restore view and the workspaces consume every key.
+        let consumed = self.project_key(key)
+            || self.restore_key(key, origin)
             || self.workspace_key(key, origin)
             || self.help_key(key)
             // Setup consumes its keys before navigation/kill, including Enter.
             || (self.killing.is_none()
                 && self.new_agent.is_none()
+                && self.project_rename.is_none()
                 && self.editing.is_none()
                 && !self.typing_query()
                 && self.auto_name.key(key))
@@ -1094,6 +1099,7 @@ impl Sidebar {
             && !self.typing_query()
             && !self.auto_name.open
             && self.new_agent.is_none()
+            && self.project_rename.is_none()
             && self.killing.is_none()
             && self.tasks.stopping.is_none()
             && !self.restore.is_open()
@@ -1127,7 +1133,8 @@ impl Sidebar {
             self.editing.is_none()
                 && !self.typing_query()
                 && !self.auto_name.open
-                && self.new_agent.is_none(),
+                && self.new_agent.is_none()
+                && self.project_rename.is_none(),
         )
     }
 
@@ -1755,6 +1762,12 @@ pub(crate) fn confirmation_footer(sidebar: &Sidebar, width: usize) -> Option<Vec
                 .stopping
                 .as_ref()
                 .map(|task| tasks::stop_footer(task, width))
+        })
+        .or_else(|| {
+            sidebar
+                .project_rename
+                .as_ref()
+                .map(|edit| project_rename::footer(edit, width))
         })
 }
 
