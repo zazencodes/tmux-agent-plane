@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/time.h>
 #include <termios.h>
 #include <unistd.h>
@@ -38,6 +39,7 @@ int main(void) {
             if (fscanf(input, "%31s %lu %lu", state, &count, &identity) < 2) return 5;
             fclose(input);
         }
+        if (strcmp(state, "exit") == 0) return 0;
         struct timeval now;
         gettimeofday(&now, NULL);
         unsigned long long ms = (unsigned long long)now.tv_sec * 1000 + now.tv_usec / 1000;

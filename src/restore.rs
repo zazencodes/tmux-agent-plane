@@ -913,6 +913,8 @@ mod tests {
             cwd: "/work/pro".into(),
             parent: None,
             parent_ended: false,
+            orchestrator: false,
+            process_id: 0,
             session_id: session_id.map(Into::into),
             state_since: 0,
             completions: 0,
@@ -939,6 +941,7 @@ mod tests {
             sidebar,
             name: name.into(),
             parent: String::new(),
+            orchestrator_role: String::new(),
             placed: true,
             task: false,
         }

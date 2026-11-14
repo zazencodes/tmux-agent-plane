@@ -18,6 +18,7 @@ use std::path::Path;
 pub(crate) struct Section {
     /// `t`: this sidebar lists its tasks. Each sidebar keeps its own.
     pub(crate) shown: bool,
+    pub(crate) only_agents: bool,
     /// Every task in the index, less those just stopped here.
     all: Vec<Task>,
     /// Stopped from this sidebar: hidden until the daemon drops them from the index.
@@ -47,7 +48,11 @@ impl Section {
 
     /// The task rows, below the agent rows.
     pub(crate) fn rows(&self) -> &[Task] {
-        if self.shown { &self.all } else { &[] }
+        if self.shown && !self.only_agents {
+            &self.all
+        } else {
+            &[]
+        }
     }
 }
 

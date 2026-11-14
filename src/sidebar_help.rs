@@ -31,6 +31,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("/ n N", "Search; next / previous"),
             ("f", "Filter by text"),
             ("d", "Filter by state"),
+            ("m", "Orchestrators only"),
             ("esc", "Clear or cancel"),
         ],
     ),

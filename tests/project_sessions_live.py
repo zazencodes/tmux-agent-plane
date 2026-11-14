@@ -34,6 +34,9 @@ ENV = dict(os.environ, HOME=str(ROOT / 'home'), XDG_STATE_HOME=str(ROOT / 's'),
            PLANE_NAV_ROOT=str(ROOT), PATH=str(BIN) + os.pathsep + os.environ['PATH'],
            TERM='xterm-256color', TMUX_PANE='%999999')
 ENV.pop('TMUX', None)
+# The test's isolated shell caller has no host Codex identity.
+for identity in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID'):
+    ENV.pop(identity, None)
 (BIN / 'tmux-agent-plane').symlink_to(CLI)
 WRAPPER = BIN / 'tmux'
 WRAPPER.write_text(

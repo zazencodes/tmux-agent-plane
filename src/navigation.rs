@@ -129,7 +129,7 @@ fn destination<'a>(
         .filter(|agent| agent.workspace == workspace)
         .collect();
     // The sidebar keeps session headings alphabetical while latching order within them.
-    agents.sort_by(|a, b| a.session.cmp(&b.session));
+    agents.sort_by(|a, b| crate::orchestrators::project_order(a, b));
     if agents.is_empty() {
         bail!("no agents in workspace {workspace}");
     }
@@ -220,6 +220,8 @@ mod tests {
             cwd: "/tmp".into(),
             parent: None,
             parent_ended: false,
+            orchestrator: false,
+            process_id: 0,
             session_id: None,
             state_since: 0,
             completions: 0,

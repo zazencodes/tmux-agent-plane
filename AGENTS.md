@@ -39,6 +39,7 @@ tmux-agent-plane: a Rust CLI, tmux plugin and agent skill that track and steer C
 
 ## Decisions
 
+- Projects have zero or one orchestrator, inferred at naming time or explicitly reported by agents: `docs/adr/2026-11-14-project-orchestrators.md`.
 - Every sidebar and picker key is lowercase: `docs/adr/0001-lowercase-keys.md`.
 - Workspaces group whole tmux sessions, and only the plane's views are scoped: `docs/adr/2026-11-12-workspaces-group-tmux-sessions.md`.
 

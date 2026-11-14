@@ -144,6 +144,8 @@ pub(crate) mod tests {
             cwd: "/tmp".into(),
             parent: None,
             parent_ended: false,
+            orchestrator: false,
+            process_id: 0,
             session_id: None,
             state_since: 0,
             completions: 0,
@@ -170,6 +172,7 @@ pub(crate) mod tests {
             sidebar: false,
             name: String::new(),
             parent: parent.into(),
+            orchestrator_role: String::new(),
             placed: false,
             task: false,
         }

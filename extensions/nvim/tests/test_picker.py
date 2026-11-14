@@ -54,7 +54,9 @@ ENV = dict(os.environ, HOME=str(ROOT / "home"), XDG_STATE_HOME=str(ROOT / "state
            TERM="xterm-256color", PICKER_TEST_ROOT=str(ROOT), PICKER_EXTENSION=str(SOURCE.parents[1]),
            PICKER_TELESCOPE=str(args.telescope.resolve()), PICKER_PLENARY=str(args.plenary.resolve()))
 ENV.pop("TMUX", None)
-# Preserve Codex identity guards; all target panes differ from the Neovim pane.
+# Neovim in this private server is an interactive caller, independent of host Codex.
+for identity in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID'):
+    ENV.pop(identity, None)
 ENV.pop("TMUX_PANE", None)
 if args.dotfiles:
     assert args.ui_select and args.ui_select.is_dir(), "--dotfiles requires --ui-select"
@@ -137,7 +139,7 @@ try:
                          state="blocked" if detail else "idle", location="destination:0.0",
                          session="destination", workspace="main", window=window, cwd=str(ROOT),
                          parent=None, session_id=None, state_since=0, completions=0,
-                         visible=False))
+                         visible=False, orchestrator=name == "cedar-review"))
     elsewhere = tmux("display-message", "-p", "-t", "other", "#{pane_id}")
     rows.append(dict(rows[0], name="quartz-elsewhere", title="Ship compiler elsewhere", pane=elsewhere,
                      detail=None, state="idle", location="other:0.0", session="other",

@@ -217,6 +217,8 @@ pub fn run() -> Result<()> {
 pub(crate) struct Navigation {
     /// `d`: the state rows must be in.
     pub(crate) filter: Option<State>,
+    /// `m`: show only project orchestrators.
+    pub(crate) orchestrators: bool,
     /// `f`: the text filter, which hides rows that do not match.
     pub(crate) query: String,
     pub(crate) pane: Option<String>,
@@ -619,17 +621,20 @@ impl Sidebar {
     }
 
     pub(crate) fn rebuild(&mut self) {
+        self.tasks.only_agents = self.navigation.orchestrators;
         let mut listed: Vec<Agent> = self
             .navigation
             .order
             .iter()
             .filter_map(|pane| self.all_agents.iter().find(|a| &a.pane == pane))
             .filter(|a| self.navigation.filter.is_none_or(|state| a.state == state))
+            .filter(|a| !self.navigation.orchestrators || a.orchestrator)
             .cloned()
             .collect();
         // Sessions by name: a stable sort keeps the list's order within each.
-        listed.sort_by(|a, b| a.session.cmp(&b.session));
+        listed.sort_by(crate::orchestrators::project_order);
         self.agents = rank(&mut self.matcher, &self.navigation.query, &listed);
+        crate::orchestrators::pin(&mut self.agents);
         let selected = self
             .navigation
             .pane
@@ -846,6 +851,7 @@ impl Sidebar {
             && self.navigation.pattern.is_empty()
             && self.navigation.query.is_empty()
             && self.navigation.filter.is_none()
+            && !self.navigation.orchestrators
     }
 
     /// Letters are query text, for the filter or the search.
@@ -1175,8 +1181,13 @@ impl Sidebar {
             KeyCode::Char('n') => self.next_match(1),
             KeyCode::Char('N') => self.next_match(-1),
             KeyCode::Char('d') => {
-                let matches = rank(&mut self.matcher, &self.navigation.query, &self.all_agents);
+                let mut matches = rank(&mut self.matcher, &self.navigation.query, &self.all_agents);
+                matches.retain(|a| !self.navigation.orchestrators || a.orchestrator);
                 self.navigation.cycle_filter(&matches);
+                self.rebuild();
+            }
+            KeyCode::Char('m') => {
+                self.navigation.orchestrators = !self.navigation.orchestrators;
                 self.rebuild();
             }
             KeyCode::Char('f') => self.start_search(),
@@ -1198,6 +1209,7 @@ impl Sidebar {
             _ if cancels(key) => {
                 self.navigation.query.clear();
                 self.navigation.filter = None;
+                self.navigation.orchestrators = false;
                 self.rebuild();
             }
             _ => {}
@@ -1753,8 +1765,9 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         " d {}",
         sidebar.navigation.filter.map_or("all", State::as_str)
     );
-    let room = inner.saturating_sub(mode.chars().count());
-    let mut top = vec![Span::styled(mode, LAVENDER)];
+    let role = crate::ui::orchestrator_filter(sidebar.navigation.orchestrators);
+    let room = inner.saturating_sub(mode.chars().count() + role.width());
+    let mut top = vec![Span::styled(mode, LAVENDER), role];
     top.extend(query_fields(&sidebar.navigation, room));
     f.render_widget(Paragraph::new(Line::from(top)), mode_area);
     if let Some(e) = &sidebar.error {
@@ -1770,7 +1783,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         let text = if sidebar.all_agents.is_empty() {
             [none[0].as_str(), none[1].as_str()]
         } else {
-            ["no matching agents", "d changes state · esc clears filter"]
+            ["no matching agents", "m orchestrators · esc clears filters"]
         };
         message(
             f,
@@ -2002,7 +2015,9 @@ fn items<'a>(
             let bar = Span::styled(if is_selected { "▌" } else { " " }, colour(a.state));
 
             let status = format!("{} {} ", a.state.as_str(), age(a.state_since));
-            let name_width = width.saturating_sub(status.len() + 4);
+            let badge = crate::ui::orchestrator_badge(a);
+            let name_width =
+                width.saturating_sub(status.len() + 4 + badge.as_ref().map_or(0, Span::width));
             let name = match renaming {
                 // Keep the end of a long name in view, where the cursor is.
                 Some(typed) => {
@@ -2030,6 +2045,7 @@ fn items<'a>(
                 Span::styled(format!("{} ", icon(a.state)), colour(a.state)),
             ];
             first.extend(name);
+            first.extend(badge);
             let first = Line::from(first);
             let first = right(first, Span::styled(status, state_style(a.state)), width);
 
@@ -2262,6 +2278,8 @@ mod tests {
             cwd: "/tmp/checkout".into(),
             parent: None,
             parent_ended: false,
+            orchestrator: false,
+            process_id: 0,
             session_id: None,
             state_since: 0,
             completions: 0,
@@ -3109,6 +3127,41 @@ mod tests {
         sidebar.rebuild();
         assert_eq!(order(&sidebar), ["%2"]);
         assert_eq!(heading_colour(&mut sidebar), zeta);
+    }
+
+    #[test]
+    fn orchestrators_lead_projects_without_losing_selection_and_filters_compose() {
+        let mut lead = agent("%2", State::Blocked);
+        lead.orchestrator = true;
+        let mut remote = agent("%3", State::Working);
+        remote.session = "zeta".into();
+        remote.orchestrator = true;
+        let mut sidebar = showing(vec![agent("%1", State::Blocked), lead, remote]);
+        assert_eq!(order(&sidebar), ["%2", "%1", "%3"]);
+        sidebar.select(Some(1));
+        sidebar.rebuild();
+        assert_eq!(sidebar.selected().unwrap().pane, "%1");
+        let shown = rendered(&mut sidebar);
+        assert!(shown.contains("agent-%2 orch"), "{shown}");
+        assert!(shown.contains("blocked"), "{shown}");
+        press(&mut sidebar, KeyCode::Char('m'));
+        assert_eq!(order(&sidebar), ["%2", "%3"]);
+        assert!(!sidebar.unfiltered());
+        press(&mut sidebar, KeyCode::Char('d'));
+        assert_eq!(order(&sidebar), ["%2"]);
+        sidebar.navigation.query = "zeta".into();
+        sidebar.rebuild();
+        assert!(sidebar.agents.is_empty());
+        // Clearing filters is one level, and Ctrl+C has exactly the same behavior.
+        for cancel in [
+            KeyEvent::from(KeyCode::Esc),
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        ] {
+            sidebar.key(cancel);
+            assert!(sidebar.unfiltered());
+            assert_eq!(order(&sidebar), ["%2", "%1", "%3"]);
+            press(&mut sidebar, KeyCode::Char('m'));
+        }
     }
 
     #[test]

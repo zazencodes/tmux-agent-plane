@@ -90,7 +90,7 @@ function M.agents(opts)
         return {
           value = agent,
           ordinal = agent.name .. " " .. agent.session .. " " .. agent.title .. " " .. detail,
-          display = agent.name .. "  " .. description .. "  [" .. agent.state .. " · " .. agent.location .. "]",
+          display = agent.name .. (agent.orchestrator and " [orch]" or "") .. "  " .. description .. "  [" .. agent.state .. " · " .. agent.location .. "]",
         }
       end,
     }),

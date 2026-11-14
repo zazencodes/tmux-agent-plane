@@ -189,6 +189,7 @@ mod tests {
             sidebar: false,
             name: String::new(),
             parent: String::new(),
+            orchestrator_role: String::new(),
             placed: false,
             task: false,
         }];

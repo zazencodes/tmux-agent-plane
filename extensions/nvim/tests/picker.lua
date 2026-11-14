@@ -76,6 +76,7 @@ local function test()
     write("config-checks", "PASS: local lazy plugin declaration; actual tele.lua extension load and Space f a callback; existing fs/fz mappings preserved")
   end
   local picker = open(2)
+  assert(picker:get_selection().display:find("cedar-review [orch]", 1, true), "orchestrator badge missing")
   -- Only the agents of Neovim's own workspace, which the title names.
   assert(picker.prompt_title == "Agents · main", picker.prompt_title)
   local first = picker:get_selection()

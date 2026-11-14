@@ -7,6 +7,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
+- Project orchestrators: zero or one per project, inferred during automatic naming or reported by agents through the skill and `orchestrator set|clear`. They appear first with an `orch` badge; `m` in the sidebar and picker filters to orchestrators and combines with state and text filters. Explicit handoffs take precedence over pending naming results.
 - Workspaces: named groups of tmux sessions, one level above tmux, so you can set a body of work aside the way you detach from tmux. The sidebar, the picker, the Neovim Telescope picker, Alt + k / j, sidebar notices and tasks, and each session's status bar show only the workspace you are in; tmux still shows every session. Every existing session starts in `main`. The sidebar and picker headings name the workspace they list, `main` included; the picker's list shows only its state filter or search above it. Nothing else changes until you start a second workspace.
 - `w` in the sidebar and picker lists your workspaces, marking the ones with blocked or done agents: `Enter` switches, `c` starts a new one, `r` renames, `m` moves the selected agent's project into the highlighted workspace, and `x` closes one. Closing asks first: `Enter` moves its sessions into `main` with their agents still running; `n` asks again, and `Enter` there ends its sessions and agents. Its background tasks move to `main` either way. `main` cannot be renamed or closed, and no other workspace can take its name. The sidebar footer shows `w workspaces`.
 - `tmux-agent-plane workspace list|switch|move|rename|close`, and `--workspace` on `sessions create` and `spawn --in session`, so you and your agents can start workspaces and break work off into them. `workspace close` ends sessions only with `--terminate-sessions`. The skill tells agents to do this only when you ask.
@@ -25,6 +26,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Automatic naming commands now return a JSON decision with `name` and `orchestrator` fields. Custom naming commands must return both fields.
 - A tighter sidebar: agents in a session sit on consecutive rows, with a blank line only between sessions, so more agents fit on screen. Each description is dimmer than the name above it, so the names read as a column, and an agent with no description takes one row. The window and pane numbers (such as `14.2`) are gone from sidebar and picker rows, which gives sidebar descriptions the full width.
 - Turning Agent Plane keys off preserves open sidebars and their normal navigation. Opening or closing a sidebar is blocked until keys are back on. Global navigation, sidebar and picker keys return to their original tmux bindings, including `prefix + Space` for layouts. The status bar keeps an enable reminder visible; `prefix + o` turns the keys back on.
 - Use lowercase `prefix + o` to turn global navigation keys off or on, so you can pass them through to Codex and other programs.

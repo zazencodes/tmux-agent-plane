@@ -117,6 +117,12 @@ pub struct Agent {
     /// The agent that spawned this one has exited.
     #[serde(default)]
     pub parent_ended: bool,
+    /// This project's designated orchestrator (at most one).
+    #[serde(default)]
+    pub orchestrator: bool,
+    /// The observed agent process; roles never pass to a replacement in the same pane.
+    #[serde(default)]
+    pub process_id: i32,
     /// Session identifier published by the agent, when available.
     pub session_id: Option<String>,
     /// Unix ms when `state` last changed.

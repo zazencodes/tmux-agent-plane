@@ -82,9 +82,14 @@ fn state_label(agent: &Agent) -> String {
 pub fn list(json: bool) -> Result<()> {
     let index = index::read()?;
     let me = if codex_caller() { None } else { self_pane()? };
+    let mut ordered: Vec<&Agent> = index.agents.iter().collect();
+    ordered.sort_by(|a, b| {
+        a.workspace
+            .cmp(&b.workspace)
+            .then_with(|| crate::orchestrators::project_order(a, b))
+    });
     if json {
-        let agents: Vec<serde_json::Value> = index
-            .agents
+        let agents: Vec<serde_json::Value> = ordered
             .iter()
             .map(|a| {
                 let mut v = serde_json::to_value(a).expect("agent serializes");
@@ -101,11 +106,7 @@ pub fn list(json: bool) -> Result<()> {
     }
     // One workspace needs no column; with more, agents are grouped by workspace.
     let workspaces = index.workspaces.len() > 1;
-    let mut agents: Vec<&Agent> = index.agents.iter().collect();
-    if workspaces {
-        agents.sort_by(|a, b| a.workspace.cmp(&b.workspace));
-    }
-    let rows: Vec<Vec<String>> = agents
+    let rows: Vec<Vec<String>> = ordered
         .iter()
         .map(|a| {
             let mark = if me.as_deref() == Some(a.pane.as_str()) {
@@ -113,7 +114,8 @@ pub fn list(json: bool) -> Result<()> {
             } else {
                 " "
             };
-            let mut row = vec![format!("{mark}{}", a.name)];
+            let badge = if a.orchestrator { " [orch]" } else { "" };
+            let mut row = vec![format!("{mark}{}{badge}", a.name)];
             if workspaces {
                 row.push(a.workspace.clone());
             }

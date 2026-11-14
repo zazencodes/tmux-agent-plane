@@ -387,6 +387,7 @@ pub fn move_agent(agent: &Agent, target: &str) -> Result<()> {
         live.pane.name.clone()
     };
     if live.kind != agent.kind
+        || live.pid != agent.process_id
         || live.session_id != agent.session_id
         || live.completion_epoch != agent.completion_epoch
         || name != agent.name
@@ -417,7 +418,9 @@ fn relocate(agent: &Agent, pid: i32, target: &str, followers: &[String]) -> Resu
             .map(|client| command(&["switch-client", "-c", client, "-t", target]))
             .collect()
     };
+    let role = crate::orchestrators::moving(agent, &plan.source.id, &plan.destination.id)?;
     let mut moving = switch(&destination_window);
+    moving.extend(role.before);
     moving.push(command(&[
         "break-pane",
         "-d",
@@ -439,12 +442,14 @@ fn relocate(agent: &Agent, pid: i32, target: &str, followers: &[String]) -> Resu
         tmux::PLACED_OPTION,
         "1",
     ]));
+    moving.extend(role.after);
     moving.extend(switch(&agent.pane));
     let moving = moving.join(" ; ");
     let refused = command(&["display-message", "-p", "move-refused"]);
     // Recheck tmux topology inside its command queue. A concurrent link, group,
     // attachment or pane/window removal must not broaden the move's effects.
     let mut checks = vec![
+        role.source_condition,
         format!("#{{==:#{{window_id}},{}}}", plan.window),
         format!("#{{==:#{{session_id}},{}}}", plan.source.id),
         format!("#{{==:#{{pane_pid}},{pid}}}"),
@@ -474,7 +479,10 @@ fn relocate(agent: &Agent, pid: i32, target: &str, followers: &[String]) -> Resu
         "-F",
         "-t",
         &plan.destination.id,
-        "#{==:#{session_grouped},0}",
+        &format!(
+            "#{{&&:#{{==:#{{session_grouped}},0}},{}}}",
+            role.destination_condition
+        ),
         &guarded,
         &refused,
     ])?;

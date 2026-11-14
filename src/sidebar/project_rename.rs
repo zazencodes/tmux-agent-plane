@@ -126,6 +126,8 @@ mod tests {
             cwd: "/tmp".into(),
             parent: None,
             parent_ended: false,
+            orchestrator: false,
+            process_id: 0,
             session_id: None,
             state_since: 0,
             completions: 0,

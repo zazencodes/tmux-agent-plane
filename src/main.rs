@@ -13,6 +13,7 @@ mod index;
 mod lifecycle;
 mod links;
 mod navigation;
+mod orchestrators;
 mod popup;
 mod projects;
 mod quota;
@@ -136,6 +137,11 @@ enum Cmd {
         #[arg(required = true)]
         keys: Vec<String>,
     },
+    /// Report that an agent has taken charge of its project or stepped down
+    Orchestrator {
+        #[command(subcommand)]
+        action: orchestrators::Action,
+    },
     /// Give an agent a name
     Rename {
         /// Agent name, pane id, or `self` when caller identity is available
@@ -244,6 +250,7 @@ fn main() -> anyhow::Result<()> {
             timeout,
         } => commands::send(&target, &text, answer, wait, timeout),
         Cmd::Keys { target, keys } => commands::keys(&target, &keys),
+        Cmd::Orchestrator { action } => orchestrators::run(action),
         Cmd::Rename { target, name } => commands::rename(&target, &name),
         Cmd::Focus { target } => commands::focus(&target),
         Cmd::Cycle { direction, client } => navigation::cycle(direction, &client),

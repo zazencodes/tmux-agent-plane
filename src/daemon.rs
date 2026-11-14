@@ -180,6 +180,7 @@ fn run_inner() -> Result<()> {
                 kept.parent_ended = agent.parent_ended;
             }
         }
+        issues.extend(crate::orchestrators::resolve(&mut agents, &panes, &issues));
         issues.extend(crate::autoname::tick(&mut auto_name, &agents, &panes, now));
         order = next_order(order, &agents, &panes);
         last_agent = last_used(last_agent, &before, &agents, &panes);
@@ -479,6 +480,8 @@ fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Result<Agent> {
         // Set from the pane's link by `links::resolve`, once the tick has every agent.
         parent: None,
         parent_ended: false,
+        orchestrator: false,
+        process_id: d.pid,
         session_id: d.session_id,
         state_since: match before {
             Some(a) if a.state == state => a.state_since,
@@ -680,6 +683,7 @@ mod tests {
             sidebar: false,
             name: String::new(),
             parent: String::new(),
+            orchestrator_role: String::new(),
             placed: false,
             task: false,
         };
@@ -1128,6 +1132,7 @@ mod tests {
                 sidebar: false,
                 name: String::new(),
                 parent: String::new(),
+                orchestrator_role: String::new(),
                 placed: false,
                 task: false,
             },

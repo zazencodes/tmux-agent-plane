@@ -1,7 +1,7 @@
 ---
 name: tmux-agent-plane
 description: >-
-  The system-wide index of the user's coding agents (Claude Code, Codex, Pi, OpenCode, Antigravity, Grok Build) across every tmux session, and the only way to work with them, through the `tmux-agent-plane` CLI. Load it first, before any tmux command, whenever a task touches another agent: the user names an agent (`claude-154`, `codex-26`, `reviewer`) or a pane, asks how an agent is doing or what agents are running, wants to check on, read, message, answer, wait for, show, close, start or spawn an agent (in a pane, window or session), wants work delegated to another agent, or wants a super agent that coordinates others, or asks to organize tmux sessions, clean up tmux projects or organize work into projects, or asks to start, switch to, rename or break work off into a workspace (an Agent Plane session above tmux).
+  The system-wide index of the user's coding agents (Claude Code, Codex, Pi, OpenCode, Antigravity, Grok Build) across every tmux session, and the only way to work with them, through the `tmux-agent-plane` CLI. Load it first, before any tmux command, whenever a task touches another agent: the user names an agent (`claude-154`, `codex-26`, `reviewer`) or a pane, asks how an agent is doing or what agents are running, wants to check on, read, message, answer, wait for, show, close, start or spawn an agent (in a pane, window or session), wants work delegated to another agent, or wants a super agent that coordinates others, is put in charge of a project, delegates and coordinates subagents, hands over leadership, steps down as orchestrator, or asks to organize tmux sessions, clean up tmux projects or organize work into projects, or asks to start, switch to, rename or break work off into a workspace (an Agent Plane session above tmux).
 ---
 
 # tmux-agent-plane
@@ -34,6 +34,28 @@ A name is one short kebab-case word for the work, 2 to 3 words joined by `-`, at
 
 Optional AI auto-naming is off by default and configured by the user with `o` in the sidebar. This bottom-left menu also sets per-kind launch model and effort defaults in config.json; the launcher and `spawn` apply them when no explicit agent arguments are supplied. Use arrows/j/k to select, Enter/Space to choose or toggle, Accept to close, and Esc/Ctrl+C to leave. It only names agents with a meaningful title and an unassigned default name. Explicit `--name`, `rename` and sidebar `r` assignments are always preserved.
 
+## Report project leadership
+
+Each project (a tmux session) has **zero or one orchestrator**. Most agents are ordinary workers. The orchestrator owns the overall work, delegates and coordinates helpers. The background naming agent can infer this role when it names an agent; later changes come from your conversation context.
+
+**Report a clear role change immediately, before continuing the work; do not ask for confirmation.** When the user says “you are the orchestrator now”, “you're in charge”, or asks you to spin up subagents and coordinate the project's work, promote yourself using your known agent name:
+
+```bash
+tmux-agent-plane orchestrator set api-lead
+```
+
+Promotion transfers the role from the project's previous holder. When the user hands leadership to a named successor, use `orchestrator set build-lead`; this transfers it in one operation. When you step down into an ordinary task and no successor is designated, report your own demotion:
+
+```bash
+tmux-agent-plane orchestrator clear api-lead
+```
+
+Clearing an old holder leaves a successor intact. Exiting leaves the project without an orchestrator; the system never elects a replacement. A standalone task or a helper seeking one review does not by itself establish project leadership. Having no parent, or having children, does not by itself establish leadership. Follow the user's actual assignment and coordination context.
+
+Use `list --json` to inspect each agent's `orchestrator` boolean; the text list marks it `[orch]`. Orchestrators lead their project in the sidebar and picker with an `orch` badge; `m` filters to orchestrators and combines with `d` and text filtering. The role survives naming, project renaming and daemon restarts. Moving an orchestrator into a vacant project carries its role; moving it into a project with another orchestrator is refused until leadership is resolved explicitly.
+
+**Codex identity rules still apply:** use the known name supplied in your task; never infer it from `TMUX_PANE`, a title or a likely-looking row. If your name is unknown, ask your lead or the user to identify/name you before reporting your role. Other reliably identified callers may use `self`. Role commands change metadata and never send input to an agent.
+
 ## Suspending Agent Plane keys
 
 `prefix + o` suspends global navigation, sidebar and picker bindings while preserving the sidebar's open or closed state. While suspended, sidebars cannot open or close (including with `q`), and the picker cannot open. Open sidebars stay usable, follow new windows, and accept their normal navigation keys. Use ordinary tmux pane navigation to move in and out; `enter-sidebar` can also focus an open sidebar. Original tmux bindings work (including `prefix + Space` for layouts when configured as the sidebar key). The status bar keeps an enable reminder visible. `prefix + o` remains available to reenable the keys. The toggle key is configurable with `@agent-plane-keys-toggle-key`.
@@ -63,6 +85,8 @@ tmux-agent-plane move <agent> --session <session>  # existing exact session name
 tmux-agent-plane read <agent> [--lines N] # its screen, plus N lines of scrollback
 tmux-agent-plane send <agent> "<prompt>" [--answer] [--wait] [--timeout S]
 tmux-agent-plane keys <agent> <key>...    # tmux key names: Enter Escape Up Down Tab 1 2 y n
+tmux-agent-plane orchestrator set <agent>   # take charge; transfers the project's role
+tmux-agent-plane orchestrator clear <agent> # step down; keeps any successor intact
 tmux-agent-plane rename <agent> <name>     # one word, unique; `self` requires reliable caller identity
 tmux-agent-plane wait <agent> [--timeout S]
 tmux-agent-plane focus <agent>            # bring it on screen for the user

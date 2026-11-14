@@ -53,6 +53,24 @@ pub(crate) fn age(since_ms: u64) -> String {
     }
 }
 
+/// A role stays distinct from the agent's working/blocked/done/idle state.
+pub(crate) fn orchestrator_badge(agent: &Agent) -> Option<Span<'static>> {
+    agent
+        .orchestrator
+        .then(|| Span::styled(" orch", Style::default().fg(LAVENDER).bold()))
+}
+
+pub(crate) fn orchestrator_filter(active: bool) -> Span<'static> {
+    Span::styled(
+        " m orch",
+        if active {
+            Style::default().fg(LAVENDER).bold()
+        } else {
+            Style::default().fg(OVERLAY1)
+        },
+    )
+}
+
 /// Search matches for `query`, best first. Stable ties preserve the given order. The one search:
 /// every list goes through here. Each word of the query can match any field, so a project,
 /// name and description can come in any order. An empty query matches every agent.
@@ -577,8 +595,13 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
             .max()
             .unwrap_or(0)
     };
-    let name_width =
-        column(|a| &a.name).max(renaming.as_ref().map_or(0, |typed| typed.chars().count()));
+    let name_width = sidebar
+        .agents
+        .iter()
+        .map(|a| a.name.chars().count() + orchestrator_badge(a).as_ref().map_or(0, Span::width))
+        .max()
+        .unwrap_or(0)
+        .max(renaming.as_ref().map_or(0, |typed| typed.chars().count()));
     let group_width = column(|a| &a.session);
     let row_width = list_area.width.saturating_sub(2) as usize;
     let items: Vec<ListItem> = sidebar
@@ -607,7 +630,10 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                         search,
                         name_style(a, a.visible),
                     ));
-                    let pad = name_width.saturating_sub(a.name.chars().count()) + 2;
+                    let badge = orchestrator_badge(a);
+                    let used = a.name.chars().count() + badge.as_ref().map_or(0, Span::width);
+                    spans.extend(badge);
+                    let pad = name_width.saturating_sub(used) + 2;
                     spans.push(Span::raw(" ".repeat(pad)));
                 }
             }
@@ -635,6 +661,9 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
     // The popup's frame already says agents and names the workspace; the list's own title shows
     // only a state filter or search, as the sidebar's top line spells them.
     let mut title = Vec::new();
+    if sidebar.navigation.orchestrators {
+        title.push("m orchestrators".into());
+    }
     if let Some(state) = sidebar.navigation.filter {
         title.push(format!("d {}", state.as_str()));
     }
@@ -658,6 +687,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                 Span::raw(" "),
                 Span::styled(a.name.clone(), Style::default().fg(colour(a.state)).bold()),
             ];
+            title.extend(orchestrator_badge(a));
             if let (State::Blocked, Some(detail)) = (a.state, &a.detail) {
                 title.push(Span::styled(format!(" · {detail}"), colour(State::Blocked)));
             }
@@ -755,6 +785,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                         ("r", "rename"),
                         ("f", "filter"),
                         ("d", "state"),
+                        ("m", "orchestrators"),
                         ("o", "configure"),
                         ("q", "close"),
                     ]);
@@ -1084,6 +1115,8 @@ mod tests {
             cwd: "/tmp/project".into(),
             parent: None,
             parent_ended: false,
+            orchestrator: false,
+            process_id: 0,
             session_id: None,
             state_since: 0,
             completions: 0,
@@ -1103,6 +1136,31 @@ mod tests {
         app.sidebar.navigation.order = vec!["%10".into(), "%11".into()];
         app.sidebar.rebuild();
         app
+    }
+
+    #[test]
+    fn picker_shows_leadership_and_filters_without_losing_live_state() {
+        let mut app = app();
+        app.sidebar.all_agents[1].orchestrator = true;
+        app.sidebar.all_agents[1].state = State::Blocked;
+        app.sidebar.rebuild();
+        assert_eq!(app.sidebar.agents[0].name, "quartz-build");
+        let mut terminal = Terminal::new(TestBackend::new(120, 38)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let shown = screen(&terminal);
+        assert!(shown.contains("quartz-build orch"), "{shown}");
+        assert!(shown.contains("blocked"), "{shown}");
+        let _ = press(&mut app, KeyCode::Char('m'));
+        assert_eq!(app.sidebar.agents.len(), 1);
+        let _ = press(&mut app, KeyCode::Char('d'));
+        assert_eq!(app.sidebar.navigation.filter, Some(State::Blocked));
+        assert_eq!(app.sidebar.agents.len(), 1);
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let shown = screen(&terminal);
+        assert!(shown.contains("m orchestrators"), "{shown}");
+        assert!(press(&mut app, KeyCode::Esc).is_continue());
+        assert!(app.sidebar.unfiltered());
+        assert_eq!(app.sidebar.agents.len(), 2);
     }
 
     #[test]

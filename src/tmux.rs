@@ -82,6 +82,8 @@ pub struct Pane {
     pub parent: String,
     /// The pane has its project and is never placed automatically again.
     pub placed: bool,
+    /// The session's orchestrator assignment, including its revision.
+    pub orchestrator_role: String,
     /// The pane runs a background task, which is never an agent.
     pub task: bool,
 }
@@ -97,7 +99,7 @@ impl Pane {
     }
 }
 
-const PANE_FIELDS: [&str; 17] = [
+const PANE_FIELDS: [&str; 18] = [
     "#{pane_id}",
     "#{pane_pid}",
     "#{session_name}",
@@ -115,6 +117,7 @@ const PANE_FIELDS: [&str; 17] = [
     "#{@agent-plane-parent}",
     "#{@agent-plane-placed}",
     "#{?@agent-plane-task,1,0}",
+    "#{@agent-plane-orchestrator}",
 ];
 
 fn parse_pane(line: &str) -> Result<Pane> {
@@ -140,6 +143,7 @@ fn parse_pane(line: &str) -> Result<Pane> {
         parent: f[14].to_string(),
         placed: f[15] == "1",
         task: f[16] == "1",
+        orchestrator_role: f[17].to_string(),
     })
 }
 
@@ -445,6 +449,7 @@ mod tests {
             sidebar: false,
             name: "agent".into(),
             parent: String::new(),
+            orchestrator_role: String::new(),
             placed: false,
             task: false,
         };

@@ -209,6 +209,7 @@ set -g @agent-plane-keys-toggle-key e
 | `n` / `N` | Next / previous match in a kept search |
 | `f` | Fuzzy-filter names, projects, tasks and blocked details; `/` freezes matches so keys become commands, `f` resumes editing |
 | `d` | Cycle the state filter: All → Blocked → Done → Working → Idle |
+| `m` | Show only orchestrators; combines with the state and text filters |
 | `Enter`, `l`, `→` | Focus the selection; the picker closes and the sidebar stays open. When the daemon is stopped, `Enter` restarts it |
 | `Esc` / `Ctrl-C` | Cancel an edit, clear a kept search, clear filters, then close the picker |
 | `r` | Rename the selected agent; `Enter` saves, `Esc` cancels |
@@ -317,6 +318,14 @@ Each provider is read one way, with the login its own CLI already keeps. Tokens 
 The snapshot lives in `${XDG_STATE_HOME:-~/.local/state}/tmux-agent-plane/quota.json`, written only by the daemon. HTTPS honours `HTTPS_PROXY` and `NO_PROXY`, follows no redirects and gives up after 15 seconds.
 
 ### Project sessions
+
+Each project has **zero or one orchestrator**. Its agent appears first under the project heading with an `orch` badge, alongside its normal state. `m` in the sidebar or picker shows only orchestrators in the current workspace; combine it with `d` for blocked or completed orchestrators, and with text filtering. Escape or Ctrl+C clears filters. Background tasks are hidden while this filter is active.
+
+The background naming agent can infer leadership when it names an agent, using the task, parent links and the project's other agents. Unclear cases stay ordinary workers. Naming is still optional; disabling it leaves role reporting available through the CLI and skill. A naming command must return a JSON object such as `{"name":"coordinate-api","orchestrator":true}` in its configured output format.
+
+The shipped skill tells agents to report promotions and demotions from conversation context: “you're in charge”, “you're the orchestrator”, or an assignment to delegate and coordinate project work. `tmux-agent-plane orchestrator set <agent>` transfers the project's role; `orchestrator clear <agent>` reports that agent stepping down. A late naming result cannot undo an intervening report, and clearing a previous holder cannot demote its successor. Roles survive agent/project renaming and daemon restarts, and end with their agent process. No replacement is elected on exit. The text CLI marks `[orch]`; `list --json` exposes `orchestrator`.
+
+Moving an orchestrator into a vacant project carries its role and leaves its old project without one. A destination already holding an orchestrator requires an explicit leadership decision before the move.
 
 A tmux session is a project: its orchestrator and helpers live in the same session, and the sidebar groups them under that session's name. The CLI and shipped skill let an orchestrator organize existing work and place new work directly in a named project:
 
@@ -435,7 +444,7 @@ Only agents still carrying an unassigned default name qualify, once they have a 
 
 The daemon runs one naming job at a time, with a 60-second timeout. An invalid name gets one corrective retry; a failed or timed-out command leaves the default name and logs a fault in `daemon.log` while tracking continues. Attempts persist across daemon restarts. Changing the command lets failed agents try again.
 
-For a custom command, enter a JSON array of an executable and literal arguments, with exactly one `"{prompt}"` argument. It must run noninteractively, use no tools and print only the name to stdout. The daemon runs it in a private working directory without a shell. The saved `auto_name.output` is `"text"`; the OpenCode preset uses `"opencode"` to extract text from its JSON events.
+For a custom command, enter a JSON array of an executable and literal arguments, with exactly one `"{prompt}"` argument. It must run noninteractively, use no tools and print only a JSON object with `name` and `orchestrator` to stdout. The daemon runs it in a private working directory without a shell. The saved `auto_name.output` is `"text"`; the OpenCode preset uses `"opencode"` to extract text from its JSON events.
 
 ### CLI
 
@@ -455,6 +464,8 @@ For a custom command, enter a JSON array of an executable and literal arguments,
 | `send <agent> "<prompt>" [--answer] [--wait] [--timeout S]` | Paste a prompt and press Enter. Refuses blocked agents unless `--answer` deliberately replies to their question; `--answer` requires a blocked target. `--wait` follows the submitted turn until it ends or blocks |
 | `keys <agent> <key>...` | Press keys, by tmux key name: `Enter`, `Escape`, `Down`, `2` |
 | `wait <agent> [--timeout S]` | Wait until the agent is not working |
+| `orchestrator set <agent>` | Designate the project's orchestrator, transferring the role from its previous holder |
+| `orchestrator clear <agent>` | Report an agent stepping down; leaves any successor intact |
 | `rename <agent> <name>` | Name an agent: one word, unique. `self` requires a known caller |
 | `focus <agent>` | Show the agent on your screen |
 | `cycle next\|previous --client CLIENT` | Direct key binding: focus the adjacent agent in global sidebar order for the exact invoking tmux client |

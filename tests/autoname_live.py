@@ -44,8 +44,10 @@ ENV = dict(os.environ, HOME=str(ROOT / "home"), XDG_STATE_HOME=str(ROOT / "s"),
            GROK_LEADER_SOCKET=str(ROOT / "absent.sock"), PLANE_NAV_ROOT=str(ROOT), XDG_CONFIG_HOME=str(ROOT / "config"), TERM="xterm-256color",
            PATH=str(BIN) + os.pathsep + os.environ["PATH"])
 ENV.pop("TMUX", None)
+# The test's isolated shell caller has no host Codex identity.
+for identity in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID'):
+    ENV.pop(identity, None)
 ENV.pop("NO_COLOR", None)  # The agent tool environment disables colours; this PTY tests them.
-# Keep Codex identity intact, use explicit names/window placements for agent jobs.
 WRAPPER = BIN / "tmux"
 WRAPPER.write_text(f"#!{sys.executable}\nimport json, os, sys\n"
     f"with open({str(ROOT / 'tmux.calls')!r}, 'a') as log: log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
@@ -176,8 +178,8 @@ mode = (root / 'namer.mode').read_text() if (root / 'namer.mode').exists() else 
 if mode == 'bad': print('`bad-output`')
 elif mode == 'retry' and 'rejected_answer' not in data: print('much-too-long-for-an-agent-name')
 elif mode == 'fail': print('fixture failed', file=sys.stderr); sys.exit(7)
-elif mode == 'duplicate': print('keep-name')
-else: print('auto-p' + data['title'].rsplit('%', 1)[-1])
+elif mode == 'duplicate': print(json.dumps({{'name': 'keep-name', 'orchestrator': False}}))
+else: print(json.dumps({{'name': 'auto-p' + data['title'].rsplit('%', 1)[-1], 'orchestrator': False}}))
 ''')
 NAMER.chmod(0o755)
 (BIN / 'agy').symlink_to(NAMER)
@@ -327,7 +329,8 @@ try:
     assert len(calls()) == 1, calls()
     call = calls()[0]
     assert Path(call['cwd']).resolve() == (STATE / 'auto-name-work').resolve() and call['tmux'] is None and call['pane'] is None and call['stdin'] == ''
-    assert set(call['data']) == {'title', 'cwd', 'detail'}
+    assert set(call['data']) == {'title', 'cwd', 'detail', 'pane', 'parent', 'project', 'agents'}
+    assert len(call['data']['agents']) >= 1
     RESULTS.update(setup_by_real_keypress=True, agy_preset_fixture_only=True, provider_save_does_not_enable=True, explicit_enable_by_keypress=True,
                    default_renamed=True, explicit_names_preserved=True, detached_no_input=True)
     # The button stays once naming is on: there is always a way back to configuration.

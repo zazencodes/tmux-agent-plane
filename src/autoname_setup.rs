@@ -565,7 +565,7 @@ fn custom_lines(input: &str, width: usize) -> Vec<Line<'static>> {
     vec![
         heading("Custom command", width),
         muted("A JSON array: executable, then arguments. One argument must be \"{prompt}\"."),
-        muted("It runs with no tools and has 60s to print a plain name."),
+        muted("It has 60s to return name and orchestrator as JSON."),
         Line::default(),
         heading("Example", width),
         muted("[\"/path/to/namer\",\"{prompt}\"]"),

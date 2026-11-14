@@ -41,6 +41,9 @@ ENV = dict(os.environ, HOME=str(ROOT / 'home'), XDG_STATE_HOME=str(ROOT / 's'),
            PLANE_NAV_ROOT=str(ROOT), TERM='xterm-256color',
            PATH=str(BIN) + os.pathsep + os.environ['PATH'])
 ENV.pop('TMUX', None)
+# The test's isolated shell caller has no host Codex identity.
+for identity in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID'):
+    ENV.pop(identity, None)
 ENV.pop('NO_COLOR', None)
 WRAPPER = BIN / 'tmux'
 WRAPPER.write_text(f'#!{sys.executable}\nimport json, os, sys\n'
@@ -214,13 +217,13 @@ try:
     # Blank canvas and panel background must use terminal default, despite popup-style.
     assert client.screen.buffer[frame + 1][65].bg == 'default', client.screen.buffer[frame + 1][65]
     assert client.screen.buffer[20][65].bg == 'default', client.screen.buffer[20][65]
-    # Sessions sit in their own coloured column, separate from window and pane.
+    # Sessions sit in their own coloured column after the state and age.
     def group_cell(session):
         client.drain()
         for y, line in enumerate(client.screen.display):
-            found = re.search(r'(?<=\s)' + session + r'(?=\s+\d+\.\d+\s)', line)
+            found = list(re.finditer(r'(?<=\s)' + re.escape(session) + r'(?=\s)', line))
             if found:
-                return client.screen.buffer[y][found.start()].fg
+                return client.screen.buffer[y][found[-1].start()].fg
         raise AssertionError(client.text())
     assert group_cell('cedar-review') != group_cell('quartz-build')
     # Plain and control vim keys browse from the list, and a state refresh keeps the row.
