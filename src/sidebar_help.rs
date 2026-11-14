@@ -43,6 +43,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("e", "Rename project"),
             ("x", "Kill agent or stop task"),
             ("R", "Restart task"),
+            ("z", "Clean up workspace"),
             ("tab", "Picker: type to agent"),
         ],
     ),

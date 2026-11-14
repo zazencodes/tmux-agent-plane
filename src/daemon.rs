@@ -120,6 +120,8 @@ fn run_inner() -> Result<()> {
     diagnostics::record("daemon", "active")?;
     let previous = index::read_any()?;
     let mut workspaces = crate::workspaces::Tracker::start(previous.as_ref());
+    let mut cleanup =
+        crate::cleanup::Runtime::restore(previous.as_ref().and_then(|i| i.cleanup.clone()));
     let mut order = previous.as_ref().map_or_else(Vec::new, |i| i.order.clone());
     let mut last_agent = previous.as_ref().and_then(|i| i.last_agent.clone());
     let mut prev: HashMap<String, Agent> = previous
@@ -182,6 +184,7 @@ fn run_inner() -> Result<()> {
         }
         issues.extend(crate::orchestrators::resolve(&mut agents, &panes, &issues));
         issues.extend(crate::autoname::tick(&mut auto_name, &agents, &panes, now));
+        issues.extend(cleanup.tick()?);
         order = next_order(order, &agents, &panes);
         last_agent = last_used(last_agent, &before, &agents, &panes);
         recent_event = recent_event.filter(|event| event.is_live(now));
@@ -220,6 +223,7 @@ fn run_inner() -> Result<()> {
             global_keys: keys.clone(),
             workspaces: workspace.workspaces.clone(),
             workspace: workspace.current.clone(),
+            cleanup: cleanup.status.clone(),
         })
         .context("writing agent index")?;
         // Last, so everything above saw one consistent placement of the agents.

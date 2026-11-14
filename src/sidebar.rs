@@ -275,6 +275,15 @@ pub(crate) struct KillConfirmation {
     ends_sessions: Vec<String>,
 }
 
+/// `z` pins the workspace and names the background command that will judge it.
+pub(crate) struct CleanupConfirmation {
+    workspace: String,
+    command: String,
+}
+
+/// How long a finished cleanup's result stays in the footer.
+const CLEANUP_RESULT_MS: u64 = 15_000;
+
 /// The kinds `c` offers. Antigravity needs a task to start, and this picker starts agents empty.
 const NEW_AGENT_KINDS: [Kind; 5] = [
     Kind::Claude,
@@ -459,6 +468,9 @@ pub(crate) struct Sidebar {
     pub(crate) editing: Option<Rename>,
     pub(crate) notice: Option<String>,
     killing: Option<KillConfirmation>,
+    cleaning: Option<CleanupConfirmation>,
+    /// The last cleanup of this list's workspace, from the index.
+    cleanup: Option<crate::cleanup::Status>,
     new_agent: Option<NewAgent>,
     /// Hide successfully closed panes until the daemon has removed them from the index.
     closed: HashSet<String>,
@@ -606,6 +618,7 @@ impl Sidebar {
             .cloned()
             .collect();
         self.recent_event = index.recent_event.filter(|e| here(&e.workspace));
+        self.cleanup = index.cleanup.filter(|c| here(&c.workspace));
         self.tasks.apply(
             index
                 .tasks
@@ -1041,6 +1054,53 @@ impl Sidebar {
         matches!(origin, Origin::Sidebar(_)) && self.next_row(&agent.pane).is_some()
     }
 
+    /// The cleanup prompt consumes every key: Enter/y queue the cleanup; all others cancel.
+    fn cleanup_confirmation_key(&mut self, key: KeyEvent) -> bool {
+        let Some(confirmation) = self.cleaning.take() else {
+            return false;
+        };
+        self.notice = None;
+        if kill_accepts(key)
+            && let Err(error) = lifecycle::ask(
+                &format!("cleanup {}", confirmation.workspace),
+                Duration::from_secs(10),
+            )
+        {
+            self.notice = Some(format!("{error:#}"));
+        }
+        true
+    }
+
+    /// `z` asks before cleaning up the workspace this list shows.
+    fn cleanup_key(&mut self, key: KeyEvent) -> bool {
+        if key.code != KeyCode::Char('z')
+            || !key.modifiers.is_empty()
+            || self.editing.is_some()
+            || self.typing_query()
+        {
+            return false;
+        }
+        self.notice = None;
+        let result = (|| {
+            let settings = crate::cleanup::settings()?;
+            if self.cleanup.as_ref().is_some_and(|c| c.running) {
+                bail!("cleanup already running");
+            }
+            let workspace = self.workspace.clone().context("workspace not known yet")?;
+            let command = std::path::Path::new(&settings.auto_name.command[0])
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            Ok(CleanupConfirmation { workspace, command })
+        })();
+        match result {
+            Ok(confirmation) => self.cleaning = Some(confirmation),
+            Err(error) => self.notice = Some(format!("{error:#}")),
+        }
+        true
+    }
+
     /// While the picker is open it consumes every key: Enter starts, Esc or `c` cancels.
     fn new_agent_key(&mut self, key: KeyEvent, origin: Origin<'_>) -> bool {
         if let Some(picker) = &mut self.new_agent {
@@ -1094,12 +1154,14 @@ impl Sidebar {
             self.navigation.first_g = false;
         }
         // A project name being typed, the restore view and the workspaces consume every key.
-        let consumed = self.project_key(key)
+        let consumed = self.cleanup_confirmation_key(key)
+            || self.project_key(key)
             || self.restore_key(key, origin)
             || self.workspace_key(key, origin)
             || self.help_key(key)
             // Setup consumes its keys before navigation/kill, including Enter.
             || (self.killing.is_none()
+                && self.cleaning.is_none()
                 && self.new_agent.is_none()
                 && self.project_rename.is_none()
                 && self.editing.is_none()
@@ -1107,6 +1169,7 @@ impl Sidebar {
                 && self.auto_name.key(key))
             || self.new_agent_key(key, origin)
             || self.task_key(key, origin)
+            || self.cleanup_key(key)
             || self.kill_key(key, origin)
             || self.restart_key(key);
         // Only a sidebar takes up its own settings; the picker shows neither.
@@ -1876,6 +1939,12 @@ pub(crate) fn confirmation_footer(sidebar: &Sidebar, width: usize) -> Option<Vec
         .map(|kill| kill_footer(kill, width))
         .or_else(|| {
             sidebar
+                .cleaning
+                .as_ref()
+                .map(|cleanup| cleanup_footer(cleanup, width))
+        })
+        .or_else(|| {
+            sidebar
                 .new_agent
                 .as_ref()
                 .map(|picker| new_agent_footer(picker, width))
@@ -1893,6 +1962,22 @@ pub(crate) fn confirmation_footer(sidebar: &Sidebar, width: usize) -> Option<Vec
                 .as_ref()
                 .map(|edit| project_rename::footer(edit, width))
         })
+}
+
+fn cleanup_footer(confirmation: &CleanupConfirmation, width: usize) -> Vec<Line<'static>> {
+    vec![
+        Line::styled(
+            truncate(
+                &format!(" clean up {}? [Y/n]", confirmation.workspace),
+                width,
+            ),
+            Style::default().fg(TEXT).bold(),
+        ),
+        Line::styled(
+            truncate(&format!(" via {}", confirmation.command), width),
+            SUBTEXT,
+        ),
+    ]
 }
 
 fn new_agent_footer(picker: &NewAgent, width: usize) -> Vec<Line<'static>> {
@@ -2006,6 +2091,21 @@ pub(crate) fn status_footer(sidebar: &Sidebar, width: usize) -> Option<Line<'sta
         }
         (None, None) if !sidebar.navigation.pattern.is_empty() => {
             hints(&[("n N", "next/prev"), ("⏎", "open"), ("esc", "clear")])
+        }
+        (None, None)
+            if sidebar.cleanup.as_ref().is_some_and(|c| {
+                c.running || index::now_ms().saturating_sub(c.updated_at) < CLEANUP_RESULT_MS
+            }) =>
+        {
+            let cleanup = sidebar.cleanup.as_ref().expect("checked above");
+            Line::styled(
+                truncate(&format!(" {}", cleanup.message), width),
+                if cleanup.failed {
+                    colour(State::Blocked)
+                } else {
+                    SUBTEXT
+                },
+            )
         }
         (None, None) => return None,
     })
@@ -2142,6 +2242,45 @@ fn right<'a>(mut line: Line<'a>, end: Span<'a>, width: usize) -> Line<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cleanup_prompt_names_the_workspace_and_any_other_key_cancels_without_replay() {
+        for code in [KeyCode::Esc, KeyCode::Char('n'), KeyCode::Char('x')] {
+            let mut sidebar = showing(vec![agent("%1", State::Done)]);
+            sidebar.cleaning = Some(CleanupConfirmation {
+                workspace: "main".into(),
+                command: "agy".into(),
+            });
+            let footer = confirmation_footer(&sidebar, 60).unwrap();
+            assert_eq!(footer[0].to_string(), " clean up main? [Y/n]");
+            assert_eq!(footer[1].to_string(), " via agy");
+            assert!(sidebar.action_key(KeyEvent::from(code), Origin::Popup("/dev/x")));
+            assert!(sidebar.cleaning.is_none() && sidebar.killing.is_none());
+            assert!(sidebar.notice.is_none());
+        }
+    }
+
+    #[test]
+    fn a_running_or_recent_cleanup_shows_in_the_footer() {
+        let mut sidebar = showing(Vec::new());
+        assert!(status_footer(&sidebar, 40).is_none());
+        let status = |running, updated_at| crate::cleanup::Status {
+            workspace: "main".into(),
+            running,
+            failed: false,
+            message: "closed 2 agents".into(),
+            updated_at,
+        };
+        sidebar.cleanup = Some(status(true, 0));
+        assert_eq!(
+            status_footer(&sidebar, 40).unwrap().to_string(),
+            " closed 2 agents"
+        );
+        sidebar.cleanup = Some(status(false, 0));
+        assert!(status_footer(&sidebar, 40).is_none());
+        sidebar.cleanup = Some(status(false, index::now_ms()));
+        assert!(status_footer(&sidebar, 40).is_some());
+    }
 
     #[test]
     fn new_agent_picker_pins_the_project_and_consumes_its_keys() {

@@ -536,7 +536,12 @@ fn review_lines(command: &[String], width: usize) -> Vec<Line<'static>> {
     }
     lines.push(Line::default());
     lines.push(heading("What is sent", width));
-    for item in ["Task title", "Working directory", "Blocked detail"] {
+    for item in [
+        "Task title",
+        "Working directory",
+        "Blocked detail",
+        "Cleanup (z): task commands",
+    ] {
         lines.push(Line::from(vec![
             Span::styled("· ", OVERLAY),
             Span::styled(item, TEXT),

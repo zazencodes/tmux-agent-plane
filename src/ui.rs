@@ -799,6 +799,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                         ("f", "filter"),
                         ("d", "state"),
                         ("m", "orchestrators"),
+                        ("z", "clean up"),
                         ("o", "configure"),
                         ("q", "close"),
                     ]);

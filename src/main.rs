@@ -4,6 +4,7 @@ mod autoname_config;
 mod autoname_setup;
 mod background;
 mod bindings;
+mod cleanup;
 mod commands;
 mod daemon;
 mod detect;

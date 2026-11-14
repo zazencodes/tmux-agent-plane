@@ -171,6 +171,9 @@ pub struct Index {
     /// daemon restart.
     #[serde(default)]
     pub workspace: String,
+    /// The last cleanup (`z`), for the sidebars of its workspace.
+    #[serde(default)]
+    pub cleanup: Option<crate::cleanup::Status>,
 }
 
 /// A named group of tmux sessions, above tmux: lists, agent keys and the status bar show the

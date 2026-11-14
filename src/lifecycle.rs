@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(50);
-/// Requests are single short words.
-const REQUEST_LIMIT: u64 = 64;
+/// Requests are short words, and `cleanup` with a workspace name.
+const REQUEST_LIMIT: u64 = 1024;
 static SIGNAL: AtomicI32 = AtomicI32::new(0);
 
 #[derive(Clone, Copy, Subcommand)]
@@ -339,6 +339,14 @@ fn control_loop(listener: UnixListener, done: &AtomicBool) -> Result<()> {
                 (&mut socket)
                     .take(REQUEST_LIMIT)
                     .read_to_string(&mut command)?;
+                if let Some(workspace) = command.strip_prefix("cleanup ") {
+                    let response = match crate::cleanup::request(workspace) {
+                        Ok(()) => "ok".into(),
+                        Err(error) => format!("{error:#}"),
+                    };
+                    socket.write_all(response.as_bytes())?;
+                    continue;
+                }
                 match command.as_str() {
                     "ping" => {}
                     "tick" => daemon::wake(),

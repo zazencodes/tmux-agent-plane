@@ -219,6 +219,7 @@ set -g @agent-plane-keys-toggle-key e
 | `p` | Show or hide the selected agent's [graph](#parents) |
 | `t` | Sidebar: show or hide [background tasks](#background-tasks) |
 | `R` | Restart the selected task |
+| `z` | [Clean up](#cleanup) the workspace: close finished agents, exited tasks and unused sessions; `Enter` or lowercase `y` accepts |
 | `b` | Review agents waiting to be [restored](#restore) after tmux restarted |
 | `o` | Open [Configuration](#configuration) |
 | `Tab` | Picker: type to the selected agent in the preview; `Tab` again returns to the menu |
@@ -447,6 +448,20 @@ Only agents still carrying an unassigned default name qualify, once they have a 
 The daemon runs one naming job at a time, with a 60-second timeout. An invalid name gets one corrective retry; a failed or timed-out command leaves the default name and logs a fault in `daemon.log` while tracking continues. Attempts persist across daemon restarts. Changing the command lets failed agents try again.
 
 For a custom command, enter a JSON array of an executable and literal arguments, with exactly one `"{prompt}"` argument. It must run noninteractively, use no tools and print only a JSON object with `name` and `orchestrator` to stdout. The daemon runs it in a private working directory without a shell. The saved `auto_name.output` is `"text"`; the OpenCode preset uses `"opencode"` to extract text from its JSON events.
+
+### Cleanup
+
+Press `z` in the sidebar or picker to tidy the workspace you are in. It asks `clean up <workspace>? [Y/n]`; `Enter` or lowercase `y` starts it, and any other key cancels. The background agent you chose in `o` → Configure decides what is finished and no longer needed, and the daemon closes it. You do not pick each item: when in doubt, it keeps things.
+
+It can only choose from what is safe to close:
+
+- agents that are done or idle, have stayed that way for 30 minutes, are not in a window on screen, and have no working or blocked agent they spawned;
+- background tasks whose command has exited;
+- sessions in the workspace that no client is attached to, untouched for 30 minutes, and holding only idle shells, sidebars and agents it may close. Closing a session closes those agents with it. The tasks session is never closed.
+
+Working and blocked agents, running tasks, attached sessions and other workspaces are never touched. The background command receives the workspace's agents (name, state and how long, task title, folder, project, parent, orchestrator role, blocked detail), its exited tasks (command, folder, exit code, starter) and the candidate sessions (name and each pane's program and folder). Screens and file contents are never sent. It returns a JSON list of what to close, with a short reason for each; anything it was not offered rejects the whole answer before anything closes. Just before closing, the daemon checks every choice again, and keeps any that changed in the meantime.
+
+The footer shows `cleaning up…`, then what closed, such as `closed 3 agents, 1 task`. `daemon.log` records each item closed with its reason. One cleanup runs at a time, with a two-minute timeout. A failure shows in the footer and as a `cleanup` fault in the status bar until the next cleanup; a daemon restart during a cleanup reports it as interrupted and does not retry it.
 
 ### CLI
 
