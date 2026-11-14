@@ -1651,7 +1651,7 @@ try:
     settle(0.5)
     client.snapshot("narrow-empty")
     assert "d all" in client.text()
-    wait("event expired", lambda: index().get("recent_event") is None and "jump" in client.footer())
+    wait("event expired", lambda: index().get("recent_event") is None and "go to agent" in client.footer())
     for name, pane in FIXTURES.items():
         value = typed(pane)
         assert value == (b'x' if name == 'nav-done' else b''), (name, value)

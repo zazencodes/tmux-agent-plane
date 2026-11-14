@@ -1768,7 +1768,9 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         return;
     }
     let confirmation = confirmation_footer(sidebar, f.area().width as usize);
-    let footer_height = confirmation.as_ref().map_or(2, |lines| lines.len() as u16);
+    let footer_height = confirmation
+        .as_ref()
+        .map_or(FOOTER_HEIGHT, |lines| lines.len() as u16);
     let quota_height = if sidebar.quota.pinned {
         if sidebar.quota.open {
             f.area()
@@ -1913,23 +1915,32 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
 
     let footer = confirmation.map_or_else(
         || {
-            Text::from(vec![
-                if sidebar.navigation.search.is_some() {
-                    hints(&[("^j/^k", "browse"), ("^w ^u", "clear")])
-                } else if sidebar.navigation.jump.is_some() {
-                    hints(&[("type", "find a row"), ("^w ^u", "clear")])
-                } else if sidebar.tasks.exist() {
-                    hints(&[("c", "new"), ("t", "tasks"), ("w", "workspaces")])
-                } else {
-                    hints(&[("c", "new"), ("o", "configure"), ("w", "workspaces")])
-                },
-                footer(sidebar, inner + 2, index::now_ms()),
-            ])
+            let mut lines = if sidebar.navigation.search.is_some() {
+                vec![hints(&[("^j/^k", "browse"), ("^w ^u", "clear")])]
+            } else if sidebar.navigation.jump.is_some() {
+                vec![hints(&[("type", "find a row"), ("^w ^u", "clear")])]
+            } else {
+                KEY_HINTS.iter().map(|keys| hints(keys)).collect()
+            };
+            // The same height while typing, so the list never jumps.
+            lines.resize(FOOTER_HEIGHT as usize - 1, Line::default());
+            lines.push(footer(sidebar, inner + 2, index::now_ms()));
+            Text::from(lines)
         },
         Text::from,
     );
     f.render_widget(Paragraph::new(footer), help_area);
 }
+
+/// The main keys, always at the bottom of the sidebar; each line fits its narrowest width.
+/// Search and filters are named at the top of the list.
+const KEY_HINTS: [&[(&str, &str)]; 3] = [
+    &[("c", "new"), ("x", "kill"), ("r", "rename"), ("z", "clean")],
+    &[("p", "graph"), ("u", "quota"), ("e", "project")],
+    &[("w", "workspaces"), ("o", "configure"), ("?", "keys")],
+];
+/// The key hints, then a line for events, notices and the selection's own keys.
+const FOOTER_HEIGHT: u16 = KEY_HINTS.len() as u16 + 1;
 
 /// The prompt of whichever action is waiting on a key.
 pub(crate) fn confirmation_footer(sidebar: &Sidebar, width: usize) -> Option<Vec<Line<'static>>> {
@@ -2061,7 +2072,8 @@ fn footer(sidebar: &Sidebar, width: usize, now: u64) -> Line<'static> {
             None if sidebar.selected_task().is_some() => {
                 hints(&[("⏎", "open"), ("x", "stop"), ("R", "restart")])
             }
-            None => hints(&[("⏎", "jump"), ("x", "kill"), ("?", "keys")]),
+            None if sidebar.tasks.exist() => hints(&[("⏎", "go to agent"), ("t", "tasks")]),
+            None => hints(&[("⏎", "go to agent")]),
         }
     })
 }
@@ -2366,7 +2378,7 @@ mod tests {
             assert!(
                 footer(&sidebar, 38, index::now_ms())
                     .to_string()
-                    .contains("? keys")
+                    .contains("go to agent")
             );
             sidebar.help_key(KeyEvent::from(KeyCode::Char('?')));
             terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
@@ -2415,7 +2427,11 @@ mod tests {
             " Agent Plane keys off · prefix o "
         );
         sidebar.global_keys.off = false;
-        assert!(footer(&sidebar, 38, 5100).to_string().contains("jump"));
+        assert!(
+            footer(&sidebar, 38, 5100)
+                .to_string()
+                .contains("go to agent")
+        );
     }
 
     #[test]
@@ -2448,7 +2464,11 @@ mod tests {
             assert_eq!(line.to_string(), expected);
             assert_eq!(line.style.fg, Some(colour(state)));
         }
-        assert!(footer(&sidebar, 38, 5100).to_string().contains("jump"));
+        assert!(
+            footer(&sidebar, 38, 5100)
+                .to_string()
+                .contains("go to agent")
+        );
         sidebar.navigation.search = Some(SearchEdit {
             query: String::new(),
             pane: None,
@@ -2998,7 +3018,11 @@ mod tests {
         sidebar.rebuild();
         assert_eq!(order(&sidebar), ["%3", "%2", "%1", "%4"]);
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
-        assert!(footer(&sidebar, 38, 100).to_string().contains("kill"));
+        assert!(
+            footer(&sidebar, 38, 100)
+                .to_string()
+                .contains("go to agent")
+        );
     }
 
     #[test]
@@ -3313,10 +3337,10 @@ mod tests {
         other.name = "elsewhere".into();
         let mut sidebar = showing(vec![agent("%1", State::Idle), other]);
         let heading_colour = |sidebar: &mut Sidebar| {
-            let mut terminal = Terminal::new(TestBackend::new(38, 13)).unwrap();
+            let mut terminal = Terminal::new(TestBackend::new(38, 15)).unwrap();
             terminal.draw(|frame| draw(frame, sidebar)).unwrap();
             let buffer = terminal.backend().buffer().clone();
-            let row = (0..13)
+            let row = (0..15)
                 .find(|&y| (0..38).any(|x| buffer[(x, y)].symbol() == "z"))
                 .unwrap();
             let x = (0..38).find(|&x| buffer[(x, row)].symbol() == "z").unwrap();
@@ -3710,13 +3734,13 @@ mod tests {
     fn p_draws_the_selected_agents_family_below_the_list() {
         let mut sidebar = showing(crate::ui::family::tests::family_agents());
         sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%2"));
-        assert!(!rendered(&mut sidebar).contains(" graph "));
+        assert!(!rendered(&mut sidebar).contains("╭ graph "));
         press(&mut sidebar, KeyCode::Char('p'));
         let screen = rendered(&mut sidebar);
         let rows: Vec<&str> = screen.lines().collect();
         let top = rows
             .iter()
-            .position(|r| r.contains(" graph "))
+            .position(|r| r.contains("╭ graph "))
             .expect(&screen);
         assert!(
             rows[top + 2].contains("│ ● site-lead │─┬╌│ ● hero-copy"),
@@ -3728,7 +3752,7 @@ mod tests {
             "{screen}"
         );
         press(&mut sidebar, KeyCode::Char('p'));
-        assert!(!rendered(&mut sidebar).contains(" graph "));
+        assert!(!rendered(&mut sidebar).contains("╭ graph "));
     }
 
     #[test]
@@ -3738,11 +3762,11 @@ mod tests {
         let mut sidebar = showing(agents);
         sidebar.show(&crate::autoname_config::Sidebar::default());
         sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%2"));
-        assert!(rendered(&mut sidebar).contains(" graph "));
+        assert!(rendered(&mut sidebar).contains("╭ graph "));
         sidebar.select(sidebar.agents.iter().position(|a| a.pane == "%6"));
         let screen = rendered(&mut sidebar);
         assert!(
-            !screen.contains(" graph ") && !screen.contains("no parent"),
+            !screen.contains("╭ graph ") && !screen.contains("no parent"),
             "{screen}"
         );
     }

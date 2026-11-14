@@ -542,7 +542,7 @@ mod tests {
         assert!(quota_row(&screen).unwrap() > 0);
         assert!(sidebar.quota_key(u));
         let screen = rendered(&mut sidebar);
-        assert_eq!(quota_row(&screen), Some(15), "{screen}");
+        assert_eq!(quota_row(&screen), Some(13), "{screen}");
         assert!(!screen.contains("i details"));
         assert!(screen.contains("── quota ─"));
     }

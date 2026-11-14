@@ -28,6 +28,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- The sidebar's footer lists its main keys on three lines: new, kill, rename and clean up; graph, quota and project rename; workspaces, configure and the full key list. The line below says what Enter does (`⏎ go to agent`) instead of `⏎ jump`, and shows `t tasks` when there are tasks.
 - Automatic naming commands now return a JSON decision with `name` and `orchestrator` fields. Custom naming commands must return both fields.
 - A tighter sidebar: agents in a session sit on consecutive rows, with a blank line only between sessions, so more agents fit on screen. Each description is dimmer than the name above it, so the names read as a column, and an agent with no description takes one row. The window and pane numbers (such as `14.2`) are gone from sidebar and picker rows, which gives sidebar descriptions the full width.
 - Turning Agent Plane keys off preserves open sidebars and their normal navigation. Opening or closing a sidebar is blocked until keys are back on. Global navigation, sidebar and picker keys return to their original tmux bindings, including `prefix + Space` for layouts. The status bar keeps an enable reminder visible; `prefix + o` turns the keys back on.

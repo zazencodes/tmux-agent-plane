@@ -219,7 +219,7 @@ try:
     observer_window = tmux("list-windows", "-t", "observer", "-F", "#{window_id}")
     plane("follow-sidebar", observer_window)
     CLIENTS.append(Client("observer"))
-    wait("two sidebar hints", lambda: all("jump" in c.footer() for c in CLIENTS))
+    wait("two sidebar hints", lambda: all("go to agent" in c.footer() for c in CLIENTS))
     # Explicit terminal focus event clears setup effects before measuring notifications.
     os.write(CLIENTS[0].master, b"\x1b[I")
     wait("original fixture visible", lambda: agent("footer-original")["visible"])
@@ -243,7 +243,7 @@ try:
     fast_done = index()["recent_event"]
     assert_footer("fast-done", "✓ footer-source done", "a6e3a1")
     wait("desktop failure visible", lambda: "notification:desktop" in tmux("show-option", "-gqv", "@agent_plane_status"))
-    wait("expiry to hints", lambda: all("jump" in c.footer() for c in CLIENTS) and index()["recent_event"] is None)
+    wait("expiry to hints", lambda: all("go to agent" in c.footer() for c in CLIENTS) and index()["recent_event"] is None)
     for c in CLIENTS:
         c.snapshot("expired")
     (ROOT / "desktop.fail").unlink()
@@ -280,7 +280,7 @@ try:
     DAEMON.wait(timeout=5)
     DAEMON = subprocess.Popen([str(BINARY), "daemon", "serve"], env=ENV, stdout=stderr, stderr=stderr)
     wait("restart clears event", lambda: index()["updated_at"] > blocked["occurred_at"] and
-         index()["recent_event"] is None and all("jump" in c.footer() for c in CLIENTS))
+         index()["recent_event"] is None and all("go to agent" in c.footer() for c in CLIENTS))
     assert geometry() == layout
     wait("restart popups closed", lambda: not popup_open())
     calls = (ROOT / "tmux.calls").read_text().splitlines()
