@@ -14,6 +14,7 @@ before 1.0, a breaking change bumps the minor version.
 - New sessions join the workspace you are in, automatic folder projects stay inside their workspace (numbered, such as `notes-2`, when another workspace's project has the folder's name), restore brings sessions back into theirs, and closing a session keeps you in its workspace.
 - Rename a project (its tmux session) with `e` in the sidebar or picker, or `tmux-agent-plane sessions rename`. Its agents, windows and workspace stay as they are.
 - `sessions create` without a name names the project after its folder, adding `-2`, `-3`… when another session has that name. A new workspace's first project is named the same way.
+- Click an agent in the sidebar to preview it, as moving the selection to it does.
 
 ### Fixed
 

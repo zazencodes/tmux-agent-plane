@@ -234,6 +234,26 @@ def previewed(client, name):
     wait("preview " + name, arrived)
 
 
+def assert_mouse_clicks(client):
+    """A left click on a row previews that agent, the keyboard stays in the sidebar and no agent
+    receives the click."""
+    tmux("set-option", "-g", "mouse", "on")
+    before = {name: typed(pane) for name, pane in FIXTURES.items()}
+    clicked = []
+    for name in [n for n in shown_names(client) if n != client.selected()][:2] + [client.selected()]:
+        client.drain()
+        row = next(y for y, line in enumerate(client.screen.display)
+                   if name in line[:38] and "─" not in line[1:37])  # not its session heading
+        for line in (row, row + 1):  # the name, then its description
+            client.key(f"\x1b[<0;6;{line + 1}M\x1b[<0;6;{line + 1}m".encode())
+            previewed(client, name)
+        clicked.append(name)
+    for name, pane in FIXTURES.items():
+        assert typed(pane) == before[name], (name, typed(pane))
+    tmux("set-option", "-gu", "mouse")
+    return {"mouse_clicked": clicked}
+
+
 def assert_project_navigation(client):
     names = shown_names(client)
     rows = {a["name"]: a for a in index()["agents"]}
@@ -1360,6 +1380,9 @@ try:
     plane("toggle-sidebar", agent("nav-work")["window"])
     wait("sidebar controls", lambda: "d all" in client.text())
     selected(client, "nav-work")  # the agent it was opened from
+    if "--mouse-only" in sys.argv[2:]:
+        RESULTS = {"passed": True, **assert_mouse_clicks(client)}
+        sys.exit(0)
     project_results = assert_project_navigation(client)
     if "--projects-only" in sys.argv[2:]:
         RESULTS = {"passed": True, **project_results}

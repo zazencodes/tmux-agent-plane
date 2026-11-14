@@ -21,8 +21,12 @@ use anyhow::{Context, Result, bail};
 use nucleo_matcher::Matcher;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::layout::{Constraint, Layout};
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers, MouseButton, MouseEventKind,
+};
+use ratatui::crossterm::execute;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph};
@@ -208,9 +212,14 @@ impl Drop for Lock {
 
 pub fn run() -> Result<()> {
     let mut terminal = ratatui::init();
-    let result = event_loop(&mut terminal);
+    // Clicks reach the sidebar wherever tmux sends them on, as they do with `mouse on`.
+    let result = execute!(std::io::stdout(), EnableMouseCapture)
+        .map_err(anyhow::Error::from)
+        .and_then(|()| event_loop(&mut terminal));
+    let released = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
-    result
+    result?;
+    Ok(released?)
 }
 
 #[derive(Default)]
@@ -479,6 +488,9 @@ pub(crate) struct Sidebar {
     pub(crate) menu: workspace_menu::Menu,
     /// `e`: the selected agent's project, being renamed.
     project_rename: Option<project_rename::ProjectRename>,
+    /// The agent drawn on each screen row of the last frame, for clicks. Empty while anything
+    /// but the plain list is on screen.
+    clickable: Vec<(u16, usize)>,
 }
 
 impl Navigation {
@@ -670,6 +682,21 @@ impl Sidebar {
             .selected()
             .map(|a| a.pane.clone())
             .or_else(|| self.selected_task().map(|t| t.pane.clone()));
+    }
+
+    /// A left click on `row`: selects the agent drawn there, unless something is being typed or
+    /// confirmed. True when the selection moved.
+    fn click(&mut self, row: u16) -> bool {
+        if self.editing.is_some() || self.typing_query() || confirmation_footer(self, 0).is_some() {
+            return false;
+        }
+        let Some(&(_, agent)) = self.clickable.iter().find(|(y, _)| *y == row) else {
+            return false;
+        };
+        self.navigation.first_g = false;
+        let before = self.navigation.pane.clone();
+        self.select(Some(agent));
+        self.navigation.pane != before
     }
 
     pub(crate) fn selected(&self) -> Option<&Agent> {
@@ -1500,6 +1527,13 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
         loop {
             let event = event::read()?;
             check_width |= matches!(event, Event::Resize(..));
+            // A click shows the agent as moving the selection to it does.
+            if let Event::Mouse(mouse) = event
+                && mouse.kind == MouseEventKind::Down(MouseButton::Left)
+            {
+                sidebar.pressed(index::now_ms());
+                preview |= sidebar.click(mouse.row);
+            }
             if let Event::Key(key) = event
                 && key.kind == KeyEventKind::Press
             {
@@ -1653,6 +1687,7 @@ fn delete_word(name: &mut String) {
 }
 
 fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
+    sidebar.clickable.clear();
     if sidebar.help.open {
         sidebar.help.draw(f, f.area());
         return;
@@ -1808,6 +1843,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
             agent_state.select(None);
         }
         fill_viewport(&mut agent_state, &items, agents_area.height);
+        sidebar.clickable = agent_rows(&sidebar.agents, &items, agent_state.offset(), agents_area);
         f.render_stateful_widget(List::new(items), agents_area, &mut agent_state);
         *sidebar.list.offset_mut() = agent_state.offset();
     }
@@ -2067,6 +2103,32 @@ fn items<'a>(
             ListItem::new(lines)
         })
         .collect()
+}
+
+/// The screen rows of each agent's own lines, from `offset` down: session headings and the gaps
+/// above them belong to no agent.
+fn agent_rows(
+    agents: &[Agent],
+    items: &[ListItem],
+    offset: usize,
+    area: Rect,
+) -> Vec<(u16, usize)> {
+    let mut rows = Vec::new();
+    let mut y = area.y;
+    for (i, item) in items.iter().enumerate().skip(offset) {
+        let heading = match i.checked_sub(1) {
+            None => 1,
+            Some(previous) if agents[previous].session != agents[i].session => 2,
+            Some(_) => 0,
+        };
+        let end = y + item.height() as u16;
+        rows.extend((y + heading..end.min(area.bottom())).map(|row| (row, i)));
+        if end >= area.bottom() {
+            break;
+        }
+        y = end;
+    }
+    rows
 }
 
 /// `line` with `end` pushed to the right edge of `width` columns.
@@ -3468,6 +3530,41 @@ mod tests {
             .map(|y| (0..38).map(|x| buffer[(x, y)].symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn a_click_selects_the_agent_on_its_name_or_description_and_nothing_else() {
+        let mut remote = agent("%3", State::Working);
+        remote.session = "zeta".into();
+        let mut sidebar = showing(vec![
+            agent("%1", State::Idle),
+            agent("%2", State::Idle),
+            remote,
+        ]);
+        sidebar.select(Some(0));
+        let shown = rendered(&mut sidebar);
+        let row = |text: &str| shown.lines().position(|line| line.contains(text)).unwrap() as u16;
+        assert!(!sidebar.click(row(" zeta ")), "{shown}");
+        assert!(
+            !sidebar.click(row(" zeta ") - 1),
+            "the gap above a session is no agent's"
+        );
+        assert!(sidebar.click(row("agent-%3")));
+        assert_eq!(sidebar.selected().unwrap().pane, "%3");
+        assert!(
+            !sidebar.click(row("agent-%3") + 1),
+            "its description is the same agent"
+        );
+        assert!(sidebar.click(row("agent-%2") + 1));
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
+        // Typing or confirming owns the screen; a click there moves nothing.
+        sidebar.start_search();
+        assert!(!sidebar.click(row("agent-%1")));
+        sidebar.navigation.search = None;
+        sidebar.help.open = true;
+        rendered(&mut sidebar);
+        assert!(!sidebar.click(row("agent-%1")));
+        assert_eq!(sidebar.selected().unwrap().pane, "%2");
     }
 
     #[test]
