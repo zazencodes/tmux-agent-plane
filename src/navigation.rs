@@ -58,6 +58,7 @@ struct Pane {
     window: String,
     session: String,
     session_name: String,
+    sidebar: bool,
 }
 
 struct ContextSnapshot {
@@ -72,7 +73,7 @@ impl ContextSnapshot {
         for line in output.lines() {
             if let Some(row) = line.strip_prefix("pane\x1f") {
                 let fields: Vec<_> = row.split('\x1f').collect();
-                if fields.len() != 4 {
+                if fields.len() != 5 {
                     bail!("unexpected pane context: {line:?}");
                 }
                 panes.push(Pane {
@@ -80,6 +81,7 @@ impl ContextSnapshot {
                     window: fields[1].into(),
                     session: fields[2].into(),
                     session_name: fields[3].into(),
+                    sidebar: fields[4] == "1",
                 });
             } else if let Some(row) = line.strip_prefix("client\x1f") {
                 clients.push(parse_client(row)?);
@@ -153,7 +155,7 @@ pub fn cycle(direction: Direction, name: &str) -> Result<()> {
         "list-panes",
         "-a",
         "-F",
-        "pane\x1f#{pane_id}\x1f#{window_id}\x1f#{session_id}\x1f#{session_name}",
+        "pane\x1f#{pane_id}\x1f#{window_id}\x1f#{session_id}\x1f#{session_name}\x1f#{@agent-plane-sidebar}",
     ])?)?;
     let client = context.client(name)?;
     // A session without a workspace, such as the tasks session, goes through the one you are in.
@@ -166,13 +168,33 @@ pub fn cycle(direction: Direction, name: &str) -> Result<()> {
         return Ok(());
     }
     guard_destination(&context.clients, client, &pane.session, &pane.window)?;
-    tmux::run(&[
-        "switch-client",
-        "-c",
-        &client.name,
-        "-t",
-        &format!("{}:{}.{}", pane.session, pane.window, pane.id),
-    ])?;
+    if let Some(sidebar) = context
+        .panes
+        .iter()
+        .find(|pane| pane.window == client.window && pane.session == client.session && pane.sidebar)
+    {
+        // The sidebar's j/k carries its pane with the client. Keep that same viewport,
+        // filters and selection history when the key comes from a chat.
+        if let Some(command) = crate::sidebar::switch_for_client(
+            &sidebar.id,
+            &agent.session,
+            &agent.window,
+            &agent.pane,
+            true,
+            crate::sidebar::Origin::Popup(name),
+        )? {
+            let command: Vec<_> = command.iter().map(String::as_str).collect();
+            tmux::run(&command)?;
+        }
+    } else {
+        tmux::run(&[
+            "switch-client",
+            "-c",
+            &client.name,
+            "-t",
+            &format!("{}:{}.{}", pane.session, pane.window, pane.id),
+        ])?;
+    }
     // Sidebars highlight the active pane the daemon publishes. A move within a window changes
     // nothing else on screen, so publish it now rather than on the next scan.
     crate::lifecycle::run(crate::lifecycle::Action::Tick)
@@ -284,12 +306,15 @@ mod tests {
     fn live_context_resolves_exact_client_and_linked_session() {
         let context = ContextSnapshot::parse(concat!(
             "client\x1f/dev/tty1\x1f10\x1f$1\x1f@1\x1f%1\n",
-            "pane\x1f%1\x1f@1\x1f$1\x1fother\n",
-            "pane\x1f%1\x1f@1\x1f$2\x1fzeta\n"
+            "pane\x1f%1\x1f@1\x1f$1\x1fother\x1f\n",
+            "pane\x1f%1\x1f@1\x1f$2\x1fzeta\x1f\n",
+            "pane\x1f%9\x1f@1\x1f$2\x1fzeta\x1f1\n"
         ))
         .unwrap();
         assert_eq!(context.client("/dev/tty1").unwrap().pane, "%1");
         assert!(context.client("tty1").is_err());
+        assert!(context.panes[2].sidebar);
+        assert!(!context.panes[0].sidebar);
         let mut agent = index().agents.remove(0);
         assert_eq!(context.pane(&agent).unwrap().session, "$2");
         agent.window = "@moved".into();

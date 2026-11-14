@@ -9,6 +9,7 @@ uv run tests/sidebar_navigation_live.py target/debug/tmux-agent-plane
 uv run tests/sidebar_navigation_live.py target/debug/tmux-agent-plane --search-only
 uv run tests/sidebar_navigation_live.py target/debug/tmux-agent-plane --projects-only
 uv run tests/sidebar_navigation_live.py target/debug/tmux-agent-plane --bold-only
+uv run tests/sidebar_navigation_live.py target/debug/tmux-agent-plane --scroll-only
 PTY decoding asserts UI only. Agent state comes exclusively from native fixtures/index.
 Filter and search editing pause preview; / freezes the filter and previews; Enter opens.
 Evidence persists in /tmp/tap-nav-*. Agent jobs use the branch CLI.
@@ -339,6 +340,60 @@ def assert_vim_search(client):
     client.key(b"\x1bh")
     wait("back in the sidebar", lambda: client.context()[1] != agent("nav-work")["pane"])
     return {"vim_search": True, "in_out_keys": True}
+
+
+def assert_cycle_scroll(client):
+    """Global chat keys keep exactly the viewport produced by sidebar j/k."""
+    for number in range(12):
+        name = f"nav-scroll-{number:02}"
+        plane("spawn", "pi", "--in", "window", "--session", "scratch",
+              "--cwd", str(ROOT), "--name", name)
+        SPAWNED.append(name)
+    wait("overflowing roster", lambda: len(index()["agents"]) == 16)
+    plane("toggle-sidebar", agent("nav-work")["window"])
+    wait("sidebar open", lambda: client.selected() is not None)
+    client.key(b"gg")
+    names = listed_names()
+    selected(client, names[0])
+    moving_sidebar = client.context()[1]
+
+    def positions():
+        client.drain()
+        return [(name, row) for row, line in enumerate(client.screen.display)
+                for name in names if re.search(r"(?<![\w-])" + re.escape(name) + r"(?![\w-])", line[:38])]
+
+    directions = [1] * 15 + [-1] * 5 + [1] * 6 + [-1] * 3
+    expected = []
+    current = 0
+    for delta in directions:
+        current = (current + delta) % len(names)
+        client.key(b"j" if delta == 1 else b"k")
+        previewed(client, names[current])
+        settle(.15)
+        assert client.context()[1] == moving_sidebar
+        expected.append(positions())
+    assert len(expected[14]) < len(names), "the list must actually scroll"
+
+    client.key(b"gg")
+    previewed(client, names[0])
+    client.key(b"\r")
+    wait("keyboard in first chat", lambda: client.context()[1] == agent(names[0])["pane"])
+    current = 0
+    carried = True
+    for step, (delta, rows) in enumerate(zip(directions, expected)):
+        current = (current + delta) % len(names)
+        client.key(b"\x1bj" if delta == 1 else b"\x1bk")
+        wait("chat hop", lambda: client.context()[1] == agent(names[current])["pane"])
+        selected(client, names[current])
+        settle(.15)
+        carried &= sidebar_pane(client.context()[2]) == moving_sidebar
+        assert positions() == rows, (step, names[current], positions(), rows, ROOT)
+        client.snapshot(f"scroll-{step:02}")
+    assert carried, "chat navigation must carry the sidebar pane"
+    for name in FIXTURES:
+        assert not input_bytes(name), (name, input_bytes(name))
+    return {"same_viewport_as_sidebar_jk": True, "bottom_reversals_and_wrap": True,
+            "same_sidebar_pane": True, "models_used": 0, "unintended_agent_input": 0}
 
 
 def assert_cycle_keys(client):
@@ -1295,6 +1350,9 @@ try:
         sys.exit(0)
     if "--cycle-only" in sys.argv[2:]:
         RESULTS = {"passed": True, **assert_cycle_keys(client)}
+        sys.exit(0)
+    if "--scroll-only" in sys.argv[2:]:
+        RESULTS = {"passed": True, **assert_cycle_scroll(client)}
         sys.exit(0)
     if "--bold-only" in sys.argv[2:]:
         RESULTS = {"passed": True, **assert_bold_on_arrival(client)}

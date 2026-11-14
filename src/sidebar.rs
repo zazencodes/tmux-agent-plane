@@ -1322,6 +1322,25 @@ fn switch_to(
     target_pane: &str,
     focus: bool,
 ) -> Result<Option<Vec<String>>> {
+    switch_for_client(
+        own,
+        session,
+        window,
+        target_pane,
+        focus,
+        Origin::Sidebar(own),
+    )
+}
+
+/// Both sidebar navigation and chat navigation carry the same sidebar with the client.
+pub(crate) fn switch_for_client(
+    own: &str,
+    session: &str,
+    window: &str,
+    target_pane: &str,
+    focus: bool,
+    origin: Origin<'_>,
+) -> Result<Option<Vec<String>>> {
     let window_target = format!("={session}:{window}");
     // Resolve the indexed session explicitly: a pane can be linked into several sessions.
     let context = parse_switch_context(&tmux::run(&[
@@ -1347,7 +1366,7 @@ fn switch_to(
         "-F",
         "left\x1f#{pane_id}\x1f#{pane_last}",
     ])?)?;
-    let client = input_client(&context.clients, Origin::Sidebar(own))?;
+    let client = input_client(&context.clients, origin)?;
     guard_destination(&context.clients, client, &context.session, window)?;
     let destination = match context.sidebar {
         Some(pane) => pane,
@@ -1375,7 +1394,11 @@ fn switch_to(
             own,
             &destination,
             &switch,
-            context.previous.as_deref(),
+            if client.pane == own {
+                context.previous.as_deref()
+            } else {
+                Some(&client.pane)
+            },
         )));
     }
     Ok(focus.then(|| switch.to_vec()))
