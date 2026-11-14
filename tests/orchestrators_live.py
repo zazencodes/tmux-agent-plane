@@ -188,7 +188,7 @@ try:
     assert leaders('harness') == []
     plane('orchestrator', 'set', 'lead')
     wait('lead promoted', lambda: leaders('harness') == [lead])
-    assert '[orch]' in plane('list').stdout
+    assert '[orchestrator]' in plane('list').stdout
     plane('orchestrator', 'set', 'worker')
     wait('role transfers', lambda: leaders('harness') == [worker])
     plane('orchestrator', 'clear', 'lead')
@@ -300,17 +300,17 @@ try:
         if line.endswith(' 1')), None))
     def side():
         return plane('read', sidebar).stdout
-    wait('role badge rendered', lambda: 'project-lead orch' in side())
+    wait('role badge rendered', lambda: 'project-lead ♛' in side())
     shown = side()
-    assert shown.index('project-lead orch') < shown.index('worker'), shown
+    assert shown.index('project-lead ♛') < shown.index('worker'), shown
     assert 'other-lead' not in shown, shown
     wait('task shown normally', lambda: 'role-task' in side())
     plane('keys', sidebar, 'm')
-    wait('sidebar filters', lambda: 'project-lead orch' in side() and 'worker' not in side() and 'rival' not in side() and 'role-task' not in side())
+    wait('sidebar filters', lambda: 'project-lead ♛' in side() and 'worker' not in side() and 'rival' not in side() and 'role-task' not in side())
     (ROOT / f'{lead}.command').write_text('blocked 0 0')
     wait('blocked leader in sidebar snapshot', lambda: by_pane(lead)['state'] == 'blocked' and 'blocked' in side())
     plane('keys', sidebar, 'd')
-    wait('state and role filters compose', lambda: 'd blocked' in side() and 'project-lead orch' in side())
+    wait('state and role filters compose', lambda: 'd blocked' in side() and 'project-lead ♛' in side())
     plane('keys', sidebar, 'C-c')
     wait('ctrl-c clears filters', lambda: 'worker' in side() and 'd all' in side())
     (ROOT / 'sidebar.txt').write_text(side())
@@ -321,14 +321,14 @@ try:
 
     # The actual popup receives keys from an attached client, not a separate pseudo-UI.
     client.key(b'\x01a')
-    wait('picker renders badge', lambda: 'project-lead orch' in client.text())
+    wait('picker renders badge', lambda: 'project-lead ♛' in client.text())
     client.key(b'm')
     wait('picker filters', lambda: 'm orchestrators' in client.text())
     popup = client.text()
     # Agent terminal output behind the popup contains no names; these assertions are its rows.
     assert 'worker' not in popup and 'rival' not in popup, popup
     client.key(b'd')
-    wait('picker combines filters', lambda: 'd blocked' in client.text() and 'project-lead orch' in client.text())
+    wait('picker combines filters', lambda: 'd blocked' in client.text() and 'project-lead ♛' in client.text())
     (ROOT / 'picker.txt').write_text(client.text())
     client.key(b'\x03')
     wait('picker clears filters before closing', lambda: 'worker' in client.text() and 'm orchestrators' not in client.text())

@@ -114,7 +114,11 @@ pub fn list(json: bool) -> Result<()> {
             } else {
                 " "
             };
-            let badge = if a.orchestrator { " [orch]" } else { "" };
+            let badge = if a.orchestrator {
+                " [orchestrator]"
+            } else {
+                ""
+            };
             let mut row = vec![format!("{mark}{}{badge}", a.name)];
             if workspaces {
                 row.push(a.workspace.clone());

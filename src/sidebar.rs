@@ -2015,7 +2015,8 @@ fn items<'a>(
             let bar = Span::styled(if is_selected { "▌" } else { " " }, colour(a.state));
 
             let status = format!("{} {} ", a.state.as_str(), age(a.state_since));
-            let badge = crate::ui::orchestrator_badge(a);
+            let group = group_colour(all, &a.session);
+            let badge = crate::ui::orchestrator_badge(a, group);
             let name_width =
                 width.saturating_sub(status.len() + 4 + badge.as_ref().map_or(0, Span::width));
             let name = match renaming {
@@ -2037,7 +2038,7 @@ fn items<'a>(
                     &a.name,
                     name_width,
                     search,
-                    name_style(a, in_use == Some(a.pane.as_str())),
+                    name_style(a, in_use == Some(a.pane.as_str()), group),
                 ),
             };
             let mut first = vec![
@@ -3142,7 +3143,7 @@ mod tests {
         sidebar.rebuild();
         assert_eq!(sidebar.selected().unwrap().pane, "%1");
         let shown = rendered(&mut sidebar);
-        assert!(shown.contains("agent-%2 orch"), "{shown}");
+        assert!(shown.contains("agent-%2 ♛"), "{shown}");
         assert!(shown.contains("blocked"), "{shown}");
         press(&mut sidebar, KeyCode::Char('m'));
         assert_eq!(order(&sidebar), ["%2", "%3"]);

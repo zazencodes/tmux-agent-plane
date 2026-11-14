@@ -53,16 +53,20 @@ pub(crate) fn age(since_ms: u64) -> String {
     }
 }
 
-/// A role stays distinct from the agent's working/blocked/done/idle state.
-pub(crate) fn orchestrator_badge(agent: &Agent) -> Option<Span<'static>> {
+/// The orchestrator's crown, after its name.
+const CROWN: &str = "♛";
+
+/// A role stays distinct from the agent's working/blocked/done/idle state: the crown wears its
+/// project's colour, `group`, and no state's.
+pub(crate) fn orchestrator_badge(agent: &Agent, group: Color) -> Option<Span<'static>> {
     agent
         .orchestrator
-        .then(|| Span::styled(" orch", Style::default().fg(LAVENDER).bold()))
+        .then(|| Span::styled(format!(" {CROWN}"), Style::default().fg(group).bold()))
 }
 
 pub(crate) fn orchestrator_filter(active: bool) -> Span<'static> {
     Span::styled(
-        " m orch",
+        format!(" m {CROWN}"),
         if active {
             Style::default().fg(LAVENDER).bold()
         } else {
@@ -598,7 +602,12 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
     let name_width = sidebar
         .agents
         .iter()
-        .map(|a| a.name.chars().count() + orchestrator_badge(a).as_ref().map_or(0, Span::width))
+        .map(|a| {
+            a.name.chars().count()
+                + orchestrator_badge(a, Color::Reset)
+                    .as_ref()
+                    .map_or(0, Span::width)
+        })
         .max()
         .unwrap_or(0)
         .max(renaming.as_ref().map_or(0, |typed| typed.chars().count()));
@@ -612,6 +621,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
             let is_selected = selected == Some(i);
             let search = &sidebar.navigation.pattern;
             let (task, task_style) = task(a, SUBTEXT);
+            let group = group_colour(&sidebar.all_agents, &a.session);
             let mut spans = vec![
                 Span::styled(if is_selected { "▌" } else { " " }, colour(a.state)),
                 Span::styled(format!("{} ", icon(a.state)), colour(a.state)),
@@ -628,9 +638,9 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                         &a.name,
                         usize::MAX,
                         search,
-                        name_style(a, a.visible),
+                        name_style(a, a.visible, group),
                     ));
-                    let badge = orchestrator_badge(a);
+                    let badge = orchestrator_badge(a, group);
                     let used = a.name.chars().count() + badge.as_ref().map_or(0, Span::width);
                     spans.extend(badge);
                     let pad = name_width.saturating_sub(used) + 2;
@@ -645,7 +655,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                 &a.session,
                 usize::MAX,
                 search,
-                Style::default().fg(group_colour(&sidebar.all_agents, &a.session)),
+                Style::default().fg(group),
             ));
             spans.push(Span::raw(
                 " ".repeat(group_width.saturating_sub(a.session.chars().count()) + 2),
@@ -687,7 +697,10 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                 Span::raw(" "),
                 Span::styled(a.name.clone(), Style::default().fg(colour(a.state)).bold()),
             ];
-            title.extend(orchestrator_badge(a));
+            title.extend(orchestrator_badge(
+                a,
+                group_colour(&app.sidebar.all_agents, &a.session),
+            ));
             if let (State::Blocked, Some(detail)) = (a.state, &a.detail) {
                 title.push(Span::styled(format!(" · {detail}"), colour(State::Blocked)));
             }
@@ -947,11 +960,12 @@ pub(crate) fn state_style(state: State) -> Style {
 }
 
 /// An agent's name: bold while it is the one in use, faded when idle.
-pub(crate) fn name_style(agent: &Agent, in_use: bool) -> Style {
-    let style = Style::default().fg(if agent.state == State::Idle {
-        SUBTEXT
-    } else {
-        TEXT
+/// An agent's name: an orchestrator's in its project's colour, `group`, matching its crown.
+pub(crate) fn name_style(agent: &Agent, in_use: bool, group: Color) -> Style {
+    let style = Style::default().fg(match agent.state {
+        _ if agent.orchestrator => group,
+        State::Idle => SUBTEXT,
+        _ => TEXT,
     });
     if in_use { style.bold() } else { style }
 }
@@ -1148,7 +1162,7 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(120, 38)).unwrap();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let shown = screen(&terminal);
-        assert!(shown.contains("quartz-build orch"), "{shown}");
+        assert!(shown.contains("quartz-build ♛"), "{shown}");
         assert!(shown.contains("blocked"), "{shown}");
         let _ = press(&mut app, KeyCode::Char('m'));
         assert_eq!(app.sidebar.agents.len(), 1);
