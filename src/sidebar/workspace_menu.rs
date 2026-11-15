@@ -53,6 +53,7 @@ impl Sidebar {
                 && self.killing.is_none()
                 && self.new_agent.is_none()
                 && self.project_rename.is_none()
+                && self.project_move.is_none()
                 && self.tasks.stopping.is_none()
                 && !self.restore.is_open();
             if opens {

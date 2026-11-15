@@ -214,6 +214,7 @@ set -g @agent-plane-keys-toggle-key e
 | `Esc` / `Ctrl-C` | Cancel an edit, clear a kept search, clear filters, then close the picker |
 | `r` | Rename the selected agent; `Enter` saves, `Esc` cancels |
 | `e` | Rename the selected agent's project (its tmux session); `Enter` saves, `Esc` cancels |
+| `v` | Move the selected agent into another project of its workspace without restarting it; `j`/`k` choose, `Enter` moves, `Esc` cancels |
 | `x` | Confirm killing an agent or stopping a task; `Enter` or lowercase `y` accepts, other keys cancel |
 | `c` | Start a new agent in the selected agent's project and folder |
 | `p` | Show or hide the selected agent's [graph](#parents) |
@@ -253,7 +254,7 @@ Press `prefix + a` from any pane. It opens over a dimmed copy of your screen, on
 
 Press `/` to search as in the sidebar: the selection and preview move to the next row whose name or task contains your text, or the first visible agent in a project whose name matches, and after `Enter`, `n` and `N` go through the matches. Press `f` to filter, or open the picker with `prefix + f` to start there. The filter box appears and letters become text: a case-insensitive fuzzy query across agent names, projects, task titles and blocked details, where each word can match any of them. Stronger matches appear first; Ctrl-J/Ctrl-K or Up/Down browse them. Backspace edits, Ctrl-W deletes a word and Ctrl-U clears. Press `/` to freeze the filter: its matches and selection stay, and your keys are commands again, so `c` or `x` act on the selected match. `f` resumes editing. Enter opens the selected match right away; Esc cancels the edit. A `/` cannot be part of a filter. On the list, Esc or Ctrl-C clears a kept search, then the text and state filters, then closes.
 
-The sidebar's actions work on the selected agent, with the same prompts and checks: `c` new agent, `x` kill, `r` rename, `d` state filter, `p` graph, `o` configure and `?` shortcuts. `c` closes the picker and takes you to the new agent.
+The sidebar's actions work on the selected agent, with the same prompts and checks: `c` new agent, `x` kill, `r` rename, `v` move, `d` state filter, `p` graph, `o` configure and `?` shortcuts. `c` closes the picker and takes you to the new agent.
 
 Press `Tab` to type to the selected agent without leaving the picker. The preview gets a coloured border and follows the agent live, with its cursor, and every key goes to that agent: Enter, Esc, Ctrl-C and letters included, so you can give it a task or answer a prompt. `Tab` again returns to the menu or search you came from. The agent stays pinned: if it exits or leaves the list, the picker returns to the menu and sends nothing elsewhere. `Tab` itself never reaches the agent, and Shift-Tab does. The preview shows the agent's screen at its own size, so a pane wider than the popup is cut off on the right. Ctrl-J sends a newline. Each newline in a multi-line paste arrives as Enter, so it submits; to paste several lines, press `Enter` from the menu to jump to the agent's pane.
 

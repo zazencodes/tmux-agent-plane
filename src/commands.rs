@@ -309,7 +309,10 @@ pub fn kill(target: &str) -> Result<()> {
 
 pub fn move_agent(target: &str, session: &str) -> Result<()> {
     let index = index::read()?;
-    sessions::move_agent(find_agent(&index, target)?, session)
+    let agent = find_agent(&index, target)?;
+    let location = sessions::move_agent(agent, session)?;
+    println!("{} {} {location}", agent.name, agent.pane);
+    Ok(())
 }
 
 /// The single close operation shared by the CLI and the sidebar's confirmed action.

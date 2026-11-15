@@ -367,7 +367,8 @@ fn plan_move<'a>(
     })
 }
 
-pub fn move_agent(agent: &Agent, target: &str) -> Result<()> {
+/// Returns the agent's new location.
+pub fn move_agent(agent: &Agent, target: &str) -> Result<String> {
     // Refresh the native identity before moving an indexed name. A state/turn
     // change is fine, but a different agent in the same pane requires a new list.
     let panes = tmux::list_panes()?;
@@ -396,9 +397,7 @@ pub fn move_agent(agent: &Agent, target: &str) -> Result<()> {
     {
         bail!("agent identity/name/placement changed; list agents again before moving");
     }
-    let location = relocate(agent, live.pane.pid, target, &[])?;
-    println!("{} {} {location}", agent.name, agent.pane);
-    Ok(())
+    relocate(agent, live.pane.pid, target, &[])
 }
 
 /// Move a verified agent and mark it placed, in one tmux command, so nothing shows in between.

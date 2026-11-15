@@ -51,6 +51,7 @@ impl Sidebar {
             || self.help.open
             || self.killing.is_some()
             || self.new_agent.is_some()
+            || self.project_move.is_some()
             || self.tasks.stopping.is_some()
             || self.restore.is_open()
             || self.menu.is_open()

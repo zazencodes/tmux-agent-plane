@@ -1,5 +1,6 @@
 //! A narrow, always-on agent list in a pane down the side of a window.
 
+mod project_move;
 mod project_rename;
 mod restore;
 mod tasks;
@@ -500,6 +501,8 @@ pub(crate) struct Sidebar {
     pub(crate) menu: workspace_menu::Menu,
     /// `e`: the selected agent's project, being renamed.
     project_rename: Option<project_rename::ProjectRename>,
+    /// `v`: the selected agent, being moved to another project.
+    project_move: Option<project_move::ProjectMove>,
     /// The agent drawn on each screen row of the last frame, for clicks. Empty while anything
     /// but the plain list is on screen.
     clickable: Vec<(u16, usize)>,
@@ -1156,6 +1159,7 @@ impl Sidebar {
         // A project name being typed, the restore view and the workspaces consume every key.
         let consumed = self.cleanup_confirmation_key(key)
             || self.project_key(key)
+            || self.move_key(key)
             || self.restore_key(key, origin)
             || self.workspace_key(key, origin)
             || self.help_key(key)
@@ -1164,6 +1168,7 @@ impl Sidebar {
                 && self.cleaning.is_none()
                 && self.new_agent.is_none()
                 && self.project_rename.is_none()
+                && self.project_move.is_none()
                 && self.editing.is_none()
                 && !self.typing_query()
                 && self.auto_name.key(key))
@@ -1199,6 +1204,7 @@ impl Sidebar {
             && !self.auto_name.open
             && self.new_agent.is_none()
             && self.project_rename.is_none()
+            && self.project_move.is_none()
             && self.killing.is_none()
             && self.tasks.stopping.is_none()
             && !self.restore.is_open()
@@ -1233,7 +1239,8 @@ impl Sidebar {
                 && !self.typing_query()
                 && !self.auto_name.open
                 && self.new_agent.is_none()
-                && self.project_rename.is_none(),
+                && self.project_rename.is_none()
+                && self.project_move.is_none(),
         )
     }
 
@@ -1972,6 +1979,12 @@ pub(crate) fn confirmation_footer(sidebar: &Sidebar, width: usize) -> Option<Vec
                 .project_rename
                 .as_ref()
                 .map(|edit| project_rename::footer(edit, width))
+        })
+        .or_else(|| {
+            sidebar
+                .project_move
+                .as_ref()
+                .map(|picker| project_move::footer(picker, width))
         })
 }
 
