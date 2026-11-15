@@ -16,6 +16,7 @@ before 1.0, a breaking change bumps the minor version.
 - Rename a project (its tmux session) with `e` in the sidebar or picker, or `tmux-agent-plane sessions rename`. Its agents, windows and workspace stay as they are.
 - `sessions create` without a name names the project after its folder, adding `-2`, `-3`… when another session has that name. A new workspace's first project is named the same way.
 - Click an agent in the sidebar to preview it, as moving the selection to it does.
+- `tmux-agent-plane background "<prompt>"` runs the background agent from `o` → Configure once and prints its answer, so your own scripts and hooks can use the same cheap model as naming and cleanup.
 - `z` in the sidebar and picker cleans up the workspace you are in: after one confirmation, the background agent from `o` → Configure closes agents that finished a while ago, exited background tasks and sessions nobody uses, and the footer says what closed. It chooses only among agents done or idle for 30 minutes that are off screen and not waited on, exited tasks, and detached sessions holding only shells and such agents. `daemon.log` records why each one closed.
 
 ### Fixed

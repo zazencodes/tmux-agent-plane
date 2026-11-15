@@ -1085,7 +1085,7 @@ impl Sidebar {
         }
         self.notice = None;
         let result = (|| {
-            let settings = crate::cleanup::settings()?;
+            let settings = crate::background::settings()?;
             if self.cleanup.as_ref().is_some_and(|c| c.running) {
                 bail!("cleanup already running");
             }

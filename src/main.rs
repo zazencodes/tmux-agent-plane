@@ -193,6 +193,11 @@ enum Cmd {
         #[arg(long, group = "restore")]
         discard: bool,
     },
+    /// Run the background agent from `o` → Configure once with a prompt and print its answer
+    Background {
+        /// The whole prompt, passed to the background command as its {prompt} argument
+        prompt: String,
+    },
     /// Start an agent in a new pane, window or session
     Spawn {
         kind: index::Kind,
@@ -258,6 +263,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Kill { target } => commands::kill(&target),
         Cmd::Wait { target, timeout } => commands::wait(&target, timeout),
         Cmd::Task { action } => tasks::run(action),
+        Cmd::Background { prompt } => background::command(&prompt),
         Cmd::Restore {
             tasks,
             no_tasks,

@@ -1,7 +1,6 @@
 //! `z`: the configured background command chooses finished agents, exited tasks and unused
 //! sessions to close in one workspace. Native rules decide what it may choose from; it returns
 //! data, and native code checks each choice again before closing it.
-use crate::autoname_config::{self as config, Config};
 use crate::diagnostics::{self, Issue};
 use crate::index::{self, Agent, Index, State};
 use crate::tasks::{self, Status as TaskStatus, Task};
@@ -39,19 +38,9 @@ static CONTROL: Mutex<Control> = Mutex::new(Control {
     pending: None,
 });
 
-/// The configured background command, which cleanup needs.
-pub fn settings() -> Result<Config> {
-    let settings = config::read()?;
-    if settings.auto_name.command.is_empty() {
-        bail!("press o to choose a background agent first");
-    }
-    config::executable(&settings.auto_name.command)?;
-    Ok(settings)
-}
-
 /// Queue a cleanup of one workspace.
 pub fn request(workspace: &str) -> Result<()> {
-    settings()?;
+    background::settings()?;
     let mut control = CONTROL.lock().expect("cleanup control lock");
     if control.busy {
         bail!("cleanup already running");
@@ -563,7 +552,7 @@ fn reason<'a>(plan: &'a Plan, id: &str) -> &'a str {
 }
 
 fn run(workspace: &str, cancel: &AtomicBool) -> Result<String> {
-    let settings = settings()?;
+    let settings = background::settings()?;
     let offered = World::load()?;
     let inventory = inventory(&offered, workspace);
     if inventory["agents"]

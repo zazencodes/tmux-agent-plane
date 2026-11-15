@@ -1,15 +1,51 @@
-//! Shared noninteractive command transport for naming.
+//! The background agent from `o` → Configure: one noninteractive command shared by naming,
+//! cleanup and `background`.
 use crate::autoname_config::{self as config, Config, Output};
 use anyhow::{Context, Result, bail};
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 const OUTPUT_LIMIT: u64 = 16_384;
+const ASK_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The configured background command; fails when none is chosen or it is not installed.
+pub fn settings() -> Result<Config> {
+    let settings = config::read()?;
+    if settings.auto_name.command.is_empty() {
+        bail!("press o to choose a background agent first");
+    }
+    config::executable(&settings.auto_name.command)?;
+    Ok(settings)
+}
+
+/// `background`: run the background agent once with a prompt and print its answer.
+pub fn command(prompt: &str) -> Result<()> {
+    let answer = ask(
+        &settings()?,
+        prompt,
+        &crate::index::state_dir()?,
+        ASK_TIMEOUT,
+    )?;
+    print!("{answer}");
+    Ok(())
+}
+
+/// Each call writes its output files in a folder of its own, so concurrent calls never collide.
+fn ask(settings: &Config, prompt: &str, state: &Path, timeout: Duration) -> Result<String> {
+    let dir = state
+        .join("background-work")
+        .join(std::process::id().to_string());
+    let answer = run_command(settings, prompt, &dir, &AtomicBool::new(false), timeout);
+    let removed = std::fs::remove_dir(&dir).with_context(|| format!("removing {}", dir.display()));
+    let answer = answer?;
+    removed?;
+    Ok(answer)
+}
 
 pub fn output_text(output: &str, format: Output) -> Result<String> {
     match format {
@@ -137,3 +173,28 @@ pub fn run_command(
 }
 
 use std::os::unix::fs::DirBuilderExt;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ask_prints_the_answer_and_leaves_no_work_folder() {
+        let state = std::env::temp_dir().join(format!("tap-ask-unit-{}", std::process::id()));
+        let mut settings = Config::default();
+        settings.auto_name.command = vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            "printf 'answer to %s' \"$0\"".into(),
+            "{prompt}".into(),
+        ];
+        let answer = ask(&settings, "a long prompt", &state, ASK_TIMEOUT).unwrap();
+        assert_eq!(answer, "answer to a long prompt");
+        let work = state.join("background-work");
+        assert_eq!(std::fs::read_dir(&work).unwrap().count(), 0);
+        settings.auto_name.command[2] = "exit 3".into();
+        assert!(ask(&settings, "fails", &state, ASK_TIMEOUT).is_err());
+        assert_eq!(std::fs::read_dir(&work).unwrap().count(), 0);
+        std::fs::remove_dir_all(state).unwrap();
+    }
+}
