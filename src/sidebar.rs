@@ -1942,8 +1942,8 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
 /// The main keys, always at the bottom of the sidebar; each line fits its narrowest width.
 /// Search and filters are named at the top of the list.
 const KEY_HINTS: [&[(&str, &str)]; 3] = [
-    &[("c", "new"), ("x", "kill"), ("r", "rename"), ("z", "clean")],
-    &[("p", "graph"), ("u", "quota"), ("e", "project")],
+    &[("c", "new"), ("x", "kill"), ("z", "clean")],
+    &[("p", "graph"), ("u", "quota"), ("v", "move")],
     &[("w", "workspaces"), ("o", "configure"), ("?", "keys")],
 ];
 /// The key hints, then a line for events, notices and the selection's own keys.

@@ -795,7 +795,6 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                         ("?", "keys"),
                         ("c", "new"),
                         ("x", "kill"),
-                        ("r", "rename"),
                         ("v", "move"),
                         ("f", "filter"),
                         ("d", "state"),
