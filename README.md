@@ -488,7 +488,7 @@ The footer shows `cleaning up…`, then what closed, such as `closed 3 agents, 1
 | `focus <agent>` | Show the agent on your screen |
 | `cycle next\|previous --client CLIENT` | Direct key binding: focus the adjacent agent in global sidebar order for the exact invoking tmux client |
 | `kill <agent>` | Close the agent's pane |
-| `background "<prompt>"` | Run the background agent from `o` → Configure once with the prompt and print its answer, for your own scripts and hooks. Fails when no background agent is chosen, and after 60 seconds |
+| `background "<prompt>"` | Run the background agent from `o` → Configure once with the prompt and print its answer, for your own scripts and hooks (using the same small model as naming and cleanup), not to delegate work; use `spawn` for an interactive agent. Fails when no background agent is chosen, and after 60 seconds |
 | `quota [--json]` | Read how much of each plan is left, fresh, through the daemon. `--json` adds each group's remaining percent, limiting window and runway, and each window's pace |
 | `spawn claude\|codex\|pi\|opencode\|agy\|grok ["<task>"] [--in pane\|window\|session] [--session SESSION] [--workspace W] [--cwd DIR] [--name NAME] [--parent NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]` | Start an agent. Arguments after `--` go verbatim to the agent CLI. `--in pane` (default) splits the caller's pane; `--session` selects an existing project with `--in window`, or names a new one with `--in session`, which joins the caller's workspace or `--workspace` |
 | `task start <name> [--cwd DIR] -- <command>...` | Start a long-running command in the background, or reuse the running task of that name and command. Different work under a taken name fails |

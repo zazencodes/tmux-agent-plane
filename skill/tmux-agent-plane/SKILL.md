@@ -93,7 +93,7 @@ tmux-agent-plane focus <agent>            # bring it on screen for the user
 tmux-agent-plane toggle-sidebar self  # requires known caller identity; opens/closes every sidebar
 tmux-agent-plane kill <agent>             # close its pane, ending it
 tmux-agent-plane quota [--json]           # how much of each plan is left (Claude, Codex, agy, Grok), read fresh
-tmux-agent-plane background "<prompt>"    # run the user's configured background agent once; prints its answer
+tmux-agent-plane background "<prompt>"    # one-shot cheap model from o → Configure for naming, cleanup and user scripts/hooks; prints its answer. Never use it to delegate; use spawn
 tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|window|session] [--session SESSION] [--workspace W] [--cwd DIR] [--name NAME] [--parent NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]
 tmux-agent-plane task list [--json]       # background tasks: state, ports, cwd, starter, command
 tmux-agent-plane task start <name> [--cwd DIR] -- <command>...  # reuses a running task with the same command
@@ -120,7 +120,7 @@ tmux-agent-plane restore --tasks|--no-tasks|--discard  # bring them back (with t
 - `spawn` placements are final. Only agents started by hand join a session named after their folder automatically, once, with any client viewing them.
 - Give the full task as the prompt: the new agent has none of your context. Say which files, what done looks like, and what to report back.
 - Always name agents you spawn (`--name reviewer`), following the naming rule above.
-- Pass agent CLI flags after `--`: `spawn codex "<task>" --in window --name reviewer -- -m <model>`. Each argument reaches the agent verbatim, ahead of the task; `spawn` adds none of its own.
+- Pass agent CLI flags after `--`: `spawn codex "<task>" --in window --name reviewer -- -m <model>`. Pass any model or effort the user names that way (for agy, a model id from `agy models`, such as `--model gemini-4-hydrogen-high`). Each argument reaches the agent verbatim, ahead of the task; `spawn` adds none of its own.
 - `spawn` prints `<name> <pane> <location>`. The spawned agent records you as its parent: from your pane, or from `--parent` for Codex. The link lasts as long as the spawned agent; `list` shows `ended` once its parent has exited.
 - A folder the agent has not trusted yet stops at a trust prompt, and `spawn` reports that the agent did not start. `read <pane>`, then answer with `keys <pane> ...` only when the user asked for that folder.
 
@@ -175,7 +175,7 @@ Before **any status or escalation message**, inspect the target's current state 
 
 ## Working as a super agent
 
-When coordinating several agents: spawn each with a self-contained task and a name, `send --wait` or `wait` on them, `read` their results, and check `list` for anything `blocked` or `done`. Give each agent its own files or worktree so they do not edit the same files. When the user wants to look at an agent, `focus` it. Close a finished agent only when the user wants it gone: `kill <agent>`.
+Always delegate with `spawn` to start a real interactive agent the user can see and steer in tmux; never use `background`, which only runs the small configured model once for naming, cleanup and user scripts or hooks. When coordinating several agents: spawn each with a self-contained task and a name, `send --wait` or `wait` on them, `read` their results, and check `list` for anything `blocked` or `done`. Give each agent its own files or worktree so they do not edit the same files. When the user wants to look at an agent, `focus` it. Close a finished agent only when the user wants it gone: `kill <agent>`.
 
 ## Workspaces
 
