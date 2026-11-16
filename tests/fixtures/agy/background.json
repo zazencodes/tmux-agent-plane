@@ -72,5 +72,185 @@
       ]
     ],
     "expected": "idle"
+  },
+  {
+    "name": "v1_5_9_generating_with_idle_summary",
+    "summary": "CASCADE_RUN_STATUS_IDLE",
+    "not_fully_idle": false,
+    "steps": [
+      [
+        0,
+        14,
+        3
+      ],
+      [
+        1,
+        15,
+        8
+      ]
+    ],
+    "expected": "working"
+  },
+  {
+    "name": "v1_5_9_pending_with_idle_summary",
+    "summary": "CASCADE_RUN_STATUS_IDLE",
+    "not_fully_idle": false,
+    "steps": [
+      [
+        0,
+        14,
+        3
+      ],
+      [
+        1,
+        132,
+        1
+      ]
+    ],
+    "expected": "working"
+  },
+  {
+    "name": "v1_5_9_running_with_idle_summary",
+    "summary": "CASCADE_RUN_STATUS_IDLE",
+    "not_fully_idle": false,
+    "steps": [
+      [
+        0,
+        14,
+        3
+      ],
+      [
+        1,
+        132,
+        2
+      ]
+    ],
+    "expected": "working"
+  },
+  {
+    "name": "v1_5_9_queued_with_idle_summary",
+    "summary": "CASCADE_RUN_STATUS_IDLE",
+    "not_fully_idle": false,
+    "steps": [
+      [
+        0,
+        14,
+        3
+      ],
+      [
+        1,
+        132,
+        11
+      ]
+    ],
+    "expected": "working"
+  },
+  {
+    "name": "terminal_step_3",
+    "summary": "CASCADE_RUN_STATUS_IDLE",
+    "not_fully_idle": false,
+    "steps": [
+      [
+        0,
+        14,
+        3
+      ],
+      [
+        1,
+        132,
+        3
+      ]
+    ],
+    "expected": "idle"
+  },
+  {
+    "name": "terminal_step_4",
+    "summary": "CASCADE_RUN_STATUS_IDLE",
+    "not_fully_idle": false,
+    "steps": [
+      [
+        0,
+        14,
+        3
+      ],
+      [
+        1,
+        132,
+        4
+      ]
+    ],
+    "expected": "idle"
+  },
+  {
+    "name": "terminal_step_5",
+    "summary": "CASCADE_RUN_STATUS_IDLE",
+    "not_fully_idle": false,
+    "steps": [
+      [
+        0,
+        14,
+        3
+      ],
+      [
+        1,
+        132,
+        5
+      ]
+    ],
+    "expected": "idle"
+  },
+  {
+    "name": "terminal_step_6",
+    "summary": "CASCADE_RUN_STATUS_IDLE",
+    "not_fully_idle": false,
+    "steps": [
+      [
+        0,
+        14,
+        3
+      ],
+      [
+        1,
+        132,
+        6
+      ]
+    ],
+    "expected": "idle"
+  },
+  {
+    "name": "terminal_step_7",
+    "summary": "CASCADE_RUN_STATUS_IDLE",
+    "not_fully_idle": false,
+    "steps": [
+      [
+        0,
+        14,
+        3
+      ],
+      [
+        1,
+        132,
+        7
+      ]
+    ],
+    "expected": "idle"
+  },
+  {
+    "name": "terminal_step_12",
+    "summary": "CASCADE_RUN_STATUS_IDLE",
+    "not_fully_idle": false,
+    "steps": [
+      [
+        0,
+        14,
+        3
+      ],
+      [
+        1,
+        132,
+        12
+      ]
+    ],
+    "expected": "idle"
   }
 ]

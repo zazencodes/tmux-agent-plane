@@ -5,8 +5,9 @@ Run from an already trusted repository:
   python3 scripts/test-agy.py --binary target/debug/tmux-agent-plane
 
 Requires authenticated agy 1.4.12+, tmux, lsof, and Python 3 on macOS/Linux.
-Both modes use a short private HOME/state root containing copies of the native
-auth/onboarding files. Add --folder-trust to use a never-trusted workspace.
+Each mode uses a short private HOME/state root with native onboarding and
+authentication (the login keychain on macOS, a copied token elsewhere).
+Add --folder-trust to use a never-trusted workspace.
 All agent jobs use the supplied plane CLI. Raw tmux only creates the isolated
 server and its invisible terminal client. A temporary workspace hook forces a
 real permission request even when the user's settings allow all commands.
@@ -22,6 +23,7 @@ import re
 import select
 import shlex
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -41,6 +43,7 @@ def run():
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--folder-trust", action="store_true")
     parser.add_argument("--session-trust-overrides", action="store_true", help="Probe conservative untracking of explicit --settings trustedWorkspaces overlays")
+    parser.add_argument("--active-turn", action="store_true", help="Probe auto-mode generation/tool execution and waits with agy 1.5.9")
     args = parser.parse_args()
     binary = args.binary.resolve()
     cwd = Path.cwd()
@@ -56,6 +59,9 @@ def run():
     # for the lifecycle daemon socket while retaining target-based artifact links.
     runtime_root = Path(tempfile.mkdtemp(prefix="tap-agy-", dir="/tmp")).resolve()
     original_home = Path.home()
+    if args.active_turn:
+        cwd = runtime_root / "project"
+        cwd.mkdir()
     if args.folder_trust:
         cwd = run_dir / "never-trusted"
         cwd.mkdir()
@@ -67,11 +73,20 @@ def run():
     (runtime_root / "s").mkdir()
     (run_dir / "state").symlink_to(runtime_root / "s", target_is_directory=True)
     source = original_home / ".gemini/antigravity-cli"
-    # Also remove the copied credential if setup fails before the main cleanup block.
-    atexit.register((private_data / "antigravity-oauth-token").unlink, missing_ok=True)
-    for relative in ("antigravity-oauth-token", "cache/onboarding.json"):
-        shutil.copy2(source / relative, private_data / relative)
+    # Native macOS auth uses the login keychain; HOME otherwise hides its path.
+    if sys.platform == "darwin":
+        (private_home / "Library").mkdir()
+        keychains = private_home / "Library/Keychains"
+        keychains.symlink_to(original_home / "Library/Keychains", target_is_directory=True)
+        atexit.register(keychains.unlink, missing_ok=True)
+    else:
+        private_token = private_data / "antigravity-oauth-token"
+        atexit.register(private_token.unlink, missing_ok=True)
+        shutil.copy2(source / "antigravity-oauth-token", private_token)
+    shutil.copy2(source / "cache/onboarding.json", private_data / "cache/onboarding.json")
     settings = json.loads((source / "settings.json").read_text())
+    if args.active_turn:
+        settings["trustedWorkspaces"] = [str(cwd)]
     if args.folder_trust:
         settings["trustedWorkspaces"] = []
     (private_data / "settings.json").write_text(json.dumps(settings))
@@ -86,11 +101,14 @@ def run():
         stub.write_text("#!/bin/sh\nexit 0\n")
         stub.chmod(0o755)
     extra_argv = run_dir / "extra-argv.json"
-    extra_argv.write_text("[]")
+    extra_argv.write_text(json.dumps(["--model", "gemini-3.8-flash-low"]) if args.active_turn else "[]")
     wrapper = stub_dir / "agy"
     wrapper.write_text(f"#!{sys.executable}\nimport json,os,sys\nfrom pathlib import Path\nargs=json.loads(Path({str(extra_argv)!r}).read_text())\nos.execv({real_agy!r}, [{real_agy!r}, *args, *sys.argv[1:]])\n")
     wrapper.chmod(0o755)
     env = dict(os.environ)
+    # This isolated server has a shell caller, independent of the hosting agent.
+    for key in ("CODEX_THREAD_ID", "CODEX_SESSION_ID"):
+        env.pop(key, None)
     env["PATH"] = str(stub_dir) + os.pathsep + env["PATH"]
     env["XDG_STATE_HOME"] = str(runtime_root / "s")
     env["TERM"] = "xterm-256color"
@@ -204,6 +222,49 @@ def run():
                 except OSError:
                     return
         threading.Thread(target=drain, daemon=True).start()
+
+        if args.active_turn:
+            name = "agy-active-turn"
+            started.append(name)
+            task = "Run `sleep 8` synchronously, then in a separate tool call run `sleep 8` synchronously, then reply exactly TURN_FINISHED. Do not run commands in the background."
+            plane("spawn", "agy", task, "--in", "window", "--cwd", str(cwd), "--name", name)
+            state(name, "working")
+            row = named(agents(), name)
+            with sqlite3.connect(f"file:{private_data}/conversation_summaries.db?mode=ro", uri=True) as db:
+                results["summary_during_work"] = db.execute("SELECT status, not_fully_idle FROM conversation_summaries WHERE conversation_id=?", (row["session_id"],)).fetchone()
+            (run_dir / "working.txt").write_text(plane("read", name))
+            row = named(agents(), name)
+            db = sqlite3.connect(f"file:{private_data}/conversations/{row['session_id']}.db?mode=ro", uri=True)
+            results["active_steps"] = db.execute("SELECT idx, step_type, status FROM steps").fetchall()
+            db.close()
+            start = time.monotonic()
+            plane("wait", name, "--timeout", "90", timeout=95)
+            results["wait_seconds"] = time.monotonic() - start
+            assert results["wait_seconds"] >= 10, results
+            state(name, "done")
+            screen = plane("read", name)
+            assert "TURN_FINISHED" in screen and "esc to cancel" not in screen, screen
+            assert named(agents(), name)["completions"] == 1
+            (run_dir / "done.txt").write_text(screen)
+            row = named(agents(), name)
+            db = sqlite3.connect(f"file:{private_data}/conversations/{row['session_id']}.db?mode=ro", uri=True)
+            results["completed_steps"] = db.execute("SELECT idx, step_type, status FROM steps").fetchall()
+            db.close()
+
+            start = time.monotonic()
+            plane("send", name, task, "--wait", "--timeout", "90", timeout=95)
+            results["send_wait_seconds"] = time.monotonic() - start
+            screen = plane("read", name)
+            assert "esc to cancel" not in screen, screen
+            assert named(agents(), name)["completions"] == 2
+            assert results["send_wait_seconds"] >= 10, results
+            state(name, "done")
+            results["checks"].append("auto mode with explicit model: working -> done, wait and send --wait block through synchronous tool execution")
+            plane("kill", name)
+            closed.add(name)
+            until("probe removed", lambda rows: named(rows, name) is None)
+            print("PASS native active-turn integration", flush=True)
+            return
 
         if args.folder_trust:
             # A fresh folder must stay untracked even after the native first turn
@@ -363,7 +424,10 @@ def run():
         if not hook_dir_existed and hook_path.parent.exists():
             hook_path.parent.rmdir()
         # Never retain copied credentials as integration evidence.
-        (private_data / "antigravity-oauth-token").unlink(missing_ok=True)
+        if sys.platform == "darwin":
+            keychains.unlink(missing_ok=True)
+        else:
+            private_token.unlink(missing_ok=True)
         (run_dir / "results.json").write_text(json.dumps(results, indent=2) + "\n")
         print(f"Results: {run_dir / 'results.json'}", flush=True)
 

@@ -21,6 +21,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Antigravity agents stay working during generation and tool execution when native summaries prematurely report idle, so waits and completion notices follow the actual turn.
+
 - Chat navigation keys carry the same sidebar between windows, preserving its scroll position just like j/k inside the sidebar. Scrolling near the bottom no longer jumps between each window's saved viewport.
 - Starting an agent with `c` in the sidebar opens one sidebar in the new window instead of two side by side.
 - The sidebar highlights the agent you move to with the agent keys (such as Shift + Up / Down) within a fraction of a second, as it does for its own arrow keys. Moving between agents in the same window used to leave the old row highlighted for up to a second and a half.

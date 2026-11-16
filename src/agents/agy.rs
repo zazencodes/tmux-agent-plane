@@ -472,7 +472,31 @@ fn current_state(steps: &Connection) -> Result<(RawState, Option<String>)> {
             Ok((row.get::<_, i32>(0)?, row.get::<_, Vec<u8>>(1)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    active_state(&current)
+    let (mut state, detail) = active_state(&current)?;
+    if state == RawState::Idle {
+        let response: Option<(i32, Vec<u8>)> = steps
+            .query_row(
+                "SELECT status, step_payload FROM steps WHERE step_type = 15
+             AND idx >= COALESCE((SELECT MAX(idx) FROM steps WHERE step_type = 14), 0)
+             ORDER BY idx DESC LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        // Completed tool calls still owe a model response between native DB updates.
+        if let Some((3, payload)) = response
+            && let Some(response) = protobuf_bytes(&payload, 20)?
+            && protobuf_fields(response)?
+                .iter()
+                .any(|(field, _)| *field == 7)
+            && !current
+                .last()
+                .is_some_and(|(status, _)| matches!(status, 6 | 12))
+        {
+            state = RawState::Working;
+        }
+    }
+    Ok((state, detail))
 }
 
 fn session_state(
@@ -482,28 +506,30 @@ fn session_state(
 ) -> Result<(RawState, Option<String>)> {
     validate_summary(status)?;
     let (mut state, detail) = current_state(steps)?;
-    // Native summaries can settle to IDLE while an approval still waits. The
-    // selected conversation's current-turn RequestedInteraction remains pending.
-    // fullyIdle includes background tasks, as documented by the native Stop hook.
-    if state != RawState::Blocked && status == "CASCADE_RUN_STATUS_IDLE" && !not_fully_idle {
-        state = RawState::Idle;
+    // 1.5.9 summaries can say fully idle during generation or tool execution.
+    // Current-turn steps take priority; summaries also include background tasks.
+    if state == RawState::Idle && (status != "CASCADE_RUN_STATUS_IDLE" || not_fully_idle) {
+        state = RawState::Working;
     }
     Ok((state, detail))
 }
 
 fn active_state(steps: &[(i32, Vec<u8>)]) -> Result<(RawState, Option<String>)> {
     let mut waiting = None;
+    let mut working = false;
     for (status, payload) in steps {
         match status {
-            // Native CortexStepStatus values from Antigravity CLI 1.4.12's descriptor.
-            1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 11 | 12 => {}
+            // Native CortexStepStatus values from Antigravity CLI 1.5.9's descriptor.
+            1 | 2 | 8 | 11 => working = true,
+            3 | 4 | 5 | 6 | 7 | 12 => {}
             9 => waiting = Some(waiting_detail(payload)?),
             other => bail!("unknown Antigravity step status {other}"),
         }
     }
     Ok(match waiting {
         Some(detail) => (RawState::Blocked, Some(detail.to_string())),
-        None => (RawState::Working, None),
+        None if working => (RawState::Working, None),
+        None => (RawState::Idle, None),
     })
 }
 
@@ -624,6 +650,12 @@ mod tests {
             validate_summary(&fixture.summary).unwrap();
             let state = active_state(&[(fixture.status, unhex(&fixture.interaction_hex))]).unwrap();
             assert_eq!(state.0, RawState::Blocked, "{}", fixture.name);
+            let mixed = [
+                (8, vec![]),
+                (fixture.status, unhex(&fixture.interaction_hex)),
+            ];
+            assert_eq!(active_state(&mixed).unwrap().0, RawState::Blocked);
+
             assert_eq!(
                 state.1.as_deref(),
                 Some(if fixture.name == "question" {
@@ -748,6 +780,34 @@ mod tests {
                 RawState::Working
             );
         }
+    }
+
+    #[test]
+    fn idle_summary_between_tools_and_next_response_does_not_finish_the_turn() {
+        let db = Connection::open_in_memory().unwrap();
+        // Step.planner_response (20), PlannerResponse.tool_calls (7).
+        db.execute_batch("CREATE TABLE steps (idx INTEGER PRIMARY KEY, step_type INTEGER, status INTEGER, step_payload BLOB);
+            INSERT INTO steps VALUES (0,14,3,X''),(1,15,3,X'A201023A00'),(2,132,3,X'');").unwrap();
+        let state = || {
+            session_state("CASCADE_RUN_STATUS_IDLE", false, &db)
+                .unwrap()
+                .0
+        };
+        assert_eq!(state(), RawState::Working);
+        db.execute("UPDATE steps SET status=6 WHERE idx=2", [])
+            .unwrap();
+        assert_eq!(state(), RawState::Idle);
+        db.execute("UPDATE steps SET status=3 WHERE idx=2", [])
+            .unwrap();
+        // A completed response without tool calls ends the turn.
+        db.execute("INSERT INTO steps VALUES (3,15,3,X'A201030A0178')", [])
+            .unwrap();
+        assert_eq!(state(), RawState::Idle);
+        // A prior turn's tool calls cannot hold a new turn working.
+        db.execute("DELETE FROM steps WHERE idx=3", []).unwrap();
+        db.execute("INSERT INTO steps VALUES (3,14,3,X'')", [])
+            .unwrap();
+        assert_eq!(state(), RawState::Idle);
     }
 
     #[test]
@@ -933,7 +993,7 @@ mod tests {
                 [],
             )
             .unwrap();
-        assert_eq!(current_state(&reader).unwrap().0, RawState::Working);
+        assert_eq!(current_state(&reader).unwrap().0, RawState::Idle);
         assert_eq!(
             session_state("CASCADE_RUN_STATUS_IDLE", false, &reader)
                 .unwrap()
@@ -952,7 +1012,7 @@ mod tests {
             .unwrap();
         drop(writer);
         let reader = open_database(&path).unwrap();
-        assert_eq!(current_state(&reader).unwrap().0, RawState::Working);
+        assert_eq!(current_state(&reader).unwrap().0, RawState::Idle);
         drop(reader);
         std::fs::remove_file(path).unwrap();
     }
