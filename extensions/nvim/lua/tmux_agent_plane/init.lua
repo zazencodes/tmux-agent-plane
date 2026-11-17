@@ -39,24 +39,37 @@ local function workspace_here()
   error_message("tmux-agent-plane: cannot tell which workspace this pane is in; run Neovim inside tmux")
 end
 
-local function agents(workspace)
-  local output = run({ "list", "--json" })
+local function agents(workspace, history)
+  local command = history and "recent" or "list"
+  local output = run({ command, "--json" })
   if not output then
     return
   end
   local ok, rows = pcall(vim.json.decode, output)
   if not ok or type(rows) ~= "table" or not vim.islist(rows) or not output:match("^%s*%[") then
-    error_message("tmux-agent-plane list --json: expected an array of agents")
+    error_message("tmux-agent-plane " .. command .. " --json: expected an array of agents")
     return
   end
-  for _, row in ipairs(rows) do
-    for _, field in ipairs({ "name", "title", "session", "workspace", "pane", "state", "location" }) do
+  local fields = history and { "name", "title", "session", "workspace", "kind" }
+    or { "name", "title", "session", "workspace", "pane", "state", "location" }
+  for i, row in ipairs(rows) do
+    if history then
+      if type(row) ~= "table" or type(row.id) ~= "number" or type(row.agent) ~= "table" or type(row.closed_at) ~= "number" then
+        error_message("tmux-agent-plane recent --json: invalid history entry")
+        return
+      end
+      row.agent.history_id = row.id
+      row.agent.closed_at = row.closed_at
+      rows[i] = row.agent
+      row = row.agent
+    end
+    for _, field in ipairs(fields) do
       if type(row) ~= "table" or type(row[field]) ~= "string" then
-        error_message("tmux-agent-plane list --json: invalid agent field " .. field)
+        error_message("tmux-agent-plane " .. command .. " --json: invalid agent field " .. field)
         return
       end
     end
-    if not row.pane:match("^%%%d+$") then
+    if not history and not row.pane:match("^%%%d+$") then
       error_message("tmux-agent-plane list --json: invalid agent pane " .. row.pane)
       return
     end
@@ -66,13 +79,13 @@ local function agents(workspace)
   end, rows)
 end
 
-function M.agents(opts)
+local function pick(opts, history)
   opts = opts or {}
   local workspace = workspace_here()
   if not workspace then
     return
   end
-  local rows = agents(workspace)
+  local rows = agents(workspace, history)
   if not rows then
     return
   end
@@ -80,11 +93,19 @@ function M.agents(opts)
   local actions = require("telescope.actions")
   local action_state = require("telescope.actions.state")
   local picker = require("telescope.pickers").new(opts, {
-    prompt_title = "Agents · " .. workspace,
+    prompt_title = (history and "Recently closed · " or "Agents · ") .. workspace,
     previewer = false,
     finder = require("telescope.finders").new_table({
       results = rows,
       entry_maker = function(agent)
+        if history then
+          local title = agent.title ~= "" and agent.title or agent.name
+          return {
+            value = agent,
+            ordinal = title .. " " .. agent.name .. " " .. agent.session .. " " .. agent.kind,
+            display = title .. "  ·  " .. agent.session .. "  ·  " .. os.date("%b %d %H:%M", math.floor(agent.closed_at / 1000)),
+          }
+        end
         local detail = type(agent.detail) == "string" and agent.detail or ""
         local description = agent.state == "blocked" and type(agent.detail) == "string" and detail or agent.title
         return {
@@ -100,10 +121,16 @@ function M.agents(opts)
         map(mode, "<Down>", actions.move_selection_next)
         map(mode, "<Up>", actions.move_selection_previous)
       end
+      map("n", "h", function()
+        actions.close(prompt_bufnr)
+        pick(opts, not history)
+      end)
       actions.select_default:replace(function()
         local entry = action_state.get_selected_entry()
         actions.close(prompt_bufnr)
-        if entry then
+        if entry and history then
+          run({ "revive", tostring(entry.value.history_id), "--focus" })
+        elseif entry then
           run({ "focus", entry.value.pane })
         end
       end)
@@ -113,5 +140,8 @@ function M.agents(opts)
   picker:find()
   return picker
 end
+
+function M.agents(opts) return pick(opts, false) end
+function M.history(opts) return pick(opts, true) end
 
 return M

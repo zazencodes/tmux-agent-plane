@@ -188,7 +188,12 @@ enum Cmd {
         json: bool,
     },
     /// Revive a conversation by its id from `recent`
-    Revive { id: u64 },
+    Revive {
+        id: u64,
+        /// Focus the revived conversation in the invoking client
+        #[arg(long)]
+        focus: bool,
+    },
     /// Bring back agents from before tmux restarted: lists them; --tasks or --no-tasks restores
     Restore {
         /// Restore the agents and the tasks that were running
@@ -278,8 +283,11 @@ fn main() -> anyhow::Result<()> {
             discard,
         } => restore::run_cli(tasks, no_tasks, discard),
         Cmd::Recent { json } => history::list(json),
-        Cmd::Revive { id } => {
+        Cmd::Revive { id, focus } => {
             let agent = history::revive(id)?;
+            if focus {
+                tmux::jump(&agent.session, &agent.window, &agent.pane)?;
+            }
             println!("{} {} {}", agent.name, agent.pane, agent.location);
             Ok(())
         }

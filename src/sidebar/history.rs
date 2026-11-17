@@ -7,7 +7,7 @@ use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 
 #[derive(Default)]
@@ -35,14 +35,21 @@ impl History {
     }
 
     pub(crate) fn draw(&mut self, f: &mut Frame, area: Rect) {
-        let width = area.width as usize;
-        let [title, body, detail, footer] = Layout::vertical([
+        let [title, content, footer] = Layout::vertical([
             Constraint::Length(2),
             Constraint::Min(0),
-            Constraint::Length(3),
             Constraint::Length(1),
         ])
         .areas(area);
+        let wide = content.width >= 80;
+        let [body, detail] = if wide {
+            Layout::horizontal([Constraint::Percentage(55), Constraint::Fill(1)])
+                .spacing(2)
+                .areas(content)
+        } else {
+            Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).areas(content)
+        };
+        let width = body.width as usize;
         f.render_widget(
             Paragraph::new(Line::styled(
                 " Recently closed",
@@ -55,27 +62,18 @@ impl History {
             .iter()
             .map(|entry| {
                 let agent = &entry.agent;
-                ListItem::new(vec![
-                    Line::styled(
-                        truncate(
-                            &format!(
-                                " {} · {} · {}",
-                                agent.name,
-                                agent.kind.as_str(),
-                                agent.session
-                            ),
-                            width,
-                        ),
-                        TEXT,
-                    ),
-                    Line::styled(
-                        truncate(
-                            &format!(" {} ago · {}", age(entry.closed_at.unwrap()), agent.title),
-                            width,
-                        ),
-                        SUBTEXT,
-                    ),
-                ])
+                let when = format!(" {:>4}  ", age(entry.closed_at.unwrap()));
+                let title = if agent.title.trim().is_empty() {
+                    &agent.name
+                } else {
+                    &agent.title
+                };
+                let available = width.saturating_sub(when.len() + 1);
+                ListItem::new(Line::from(vec![
+                    Span::styled(when, SUBTEXT),
+                    Span::styled(truncate(title, available), TEXT),
+                    Span::styled(format!("  · {}", agent.session), SUBTEXT),
+                ]))
             })
             .collect();
         if items.is_empty() {
@@ -86,7 +84,7 @@ impl History {
         } else {
             f.render_stateful_widget(
                 List::new(items)
-                    .highlight_style(Style::default().bg(OVERLAY).fg(TEXT))
+                    .highlight_style(Style::default().bg(OVERLAY))
                     .highlight_symbol("▸"),
                 body,
                 &mut self.list,
@@ -101,8 +99,22 @@ impl History {
                 .or_else(|| selected.and_then(history::reason))
                 .unwrap_or_else(|| selected.map(|e| e.agent.cwd.clone()).unwrap_or_default())
         };
+        let mut lines = Vec::new();
+        if let Some(entry) = selected {
+            let a = &entry.agent;
+            if wide {
+                lines.push(Line::styled(
+                    a.title.clone(),
+                    Style::default().fg(TEXT).bold(),
+                ));
+                lines.push(Line::default());
+            }
+            let metadata = format!("{} · {} · {}", a.name, a.session, a.kind.as_str());
+            lines.push(Line::styled(truncate(&metadata, detail.width.into()), TEXT));
+        }
+        lines.push(Line::from(message));
         f.render_widget(
-            Paragraph::new(message)
+            Paragraph::new(lines)
                 .style(SUBTEXT)
                 .wrap(ratatui::widgets::Wrap { trim: true }),
             detail,

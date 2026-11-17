@@ -73,6 +73,9 @@ executable("tmux-agent-plane", f"""import json, os, sys
 from pathlib import Path
 root = Path({str(ROOT)!r})
 mode = (root / 'mode').read_text().strip()
+if sys.argv[1] == 'revive':
+    (root / 'revive.call').write_text(json.dumps(sys.argv[1:]))
+    sys.exit(0)
 if sys.argv[1] == 'focus':
     with (root / 'focus.calls').open('a') as log: log.write(json.dumps(sys.argv[1:]) + '\\n')
     if mode == 'focus-failure':
@@ -144,6 +147,10 @@ try:
     rows.append(dict(rows[0], name="quartz-elsewhere", title="Ship compiler elsewhere", pane=elsewhere,
                      detail=None, state="idle", location="other:0.0", session="other",
                      workspace="client-x"))
+    (STATE / "history.json").write_text(json.dumps(dict(next_id=13, entries=[
+        dict(id=i, closed_at=1234567890000, agent=dict(row, session_id=f"closed-{i}"))
+        for i, row in enumerate(rows, 10)
+    ])))
     workspaces = [dict(name="client-x", sessions=[dict(id=session_ids["other"], name="other")]),
                   dict(name="main", sessions=[dict(id=session_ids[s], name=s)
                                               for s in ("destination", "origin")])]

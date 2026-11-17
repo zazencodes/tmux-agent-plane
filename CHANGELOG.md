@@ -7,6 +7,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
+- Recently closed conversations show a compact timeline of titles with details for the selected row. Neovim Telescope now searches workspace history and revives the selection with Enter. Press `h` in normal mode or run `:Telescope tmux_agent_plane history`.
+
 - `h` in the sidebar and picker lists recently closed agent conversations in the current workspace; `Enter` revives one in its original project and folder. The newest 100 closed conversations survive daemon and tmux restarts. `recent [--json]` and `revive <id>` expose the same history to agents. All six integrated kinds support resume, including Codex when its terminal title publishes the conversation ID.
 - `v` in the sidebar and picker moves the selected agent into another project of its workspace without restarting it: pick the project from the list in the footer and press `Enter`. It runs the same checks as `tmux-agent-plane move`.
 - Project orchestrators: zero or one per project, inferred during automatic naming or reported by agents through the skill and `orchestrator set|clear`. They appear first in their project, their name in the project's colour with a crown, `♛`, and `list` marks them `[orchestrator]`; `m` in the sidebar and picker filters to orchestrators and combines with state and text filters. Explicit handoffs take precedence over pending naming results.

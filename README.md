@@ -264,6 +264,8 @@ The popup inherits the terminal background and uses its palette for the selected
 
 ### Neovim Telescope picker
 
+In Telescope normal mode, press `h` to switch between live agents and recently closed conversations in your workspace. Open history directly with `:Telescope tmux_agent_plane history`. Search by conversation title, agent name, project or agent kind. Enter revives the selected conversation and focuses its new pane.
+
 With Neovim 0.10+ and [Telescope](https://github.com/nvim-telescope/telescope.nvim), add this local plugin to your lazy.nvim spec (adjust the checkout path):
 
 ```lua
