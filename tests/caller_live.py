@@ -42,7 +42,7 @@ ENV.update(PATH=str(BIN) + os.pathsep + ENV["PATH"], XDG_STATE_HOME=str(WORK / "
 ENV.update(CODEX_THREAD_ID="caller-fixture", TMUX_PANE="%999999")
 CLI = str(ROOT / "target/debug/tmux-agent-plane")
 # A person at a plain shell: no agent caller, so no parent.
-PERSON = {k: v for k, v in ENV.items() if k not in ("CODEX_THREAD_ID", "TMUX_PANE")}
+PERSON = {k: v for k, v in ENV.items() if k not in ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "TMUX_PANE")}
 
 
 def plane(*args, check=True, env=ENV):
@@ -85,10 +85,26 @@ try:
     rows = json.loads(plane("list", "--json").stdout)
     lead = next(agent for agent in rows if agent["name"] == "lead")
     assert lead["parent"] is None and not lead["parent_ended"], lead
-    for parent, message in ((None, "must name itself as the parent"), ("nobody", "no agent has that name")):
-        extra = ["--parent", parent] if parent else []
-        result = plane("spawn", "codex", "--in", "window", "--cwd", str(SCRATCH), *extra, check=False)
-        assert result.returncode and message in result.stderr, result
+    result = plane("spawn", "codex", "--in", "window", "--cwd", str(SCRATCH),
+                   "--parent", "nobody", check=False)
+    assert result.returncode and "no agent has that name" in result.stderr, result
+    # Two caller threads share the same inherited pane. Neither owns it by implication,
+    # even when that pane names a live Codex agent and several Codex rows are present.
+    for placement in ("window", "session"):
+        name = "independent-" + placement
+        caller = dict(ENV, CODEX_THREAD_ID=name, CODEX_SESSION_ID=name, TMUX_PANE=lead["pane"])
+        result = plane("spawn", "codex", "--in", placement, "--name", name,
+                       "--cwd", str(SCRATCH), env=caller)
+        owned.append(name)
+        assert "independent agent with no recorded parent" in result.stderr, result
+        rows = json.loads(plane("list", "--json", env=caller).stdout)
+        item = next(agent for agent in rows if agent["name"] == name)
+        assert item["parent"] is None and not item["parent_ended"], item
+        assert all(not agent["self"] for agent in rows), rows
+        for target in ("self", lead["pane"]):
+            refused = plane("rename", target, "never-applied", check=False, env=caller)
+            assert refused.returncode and "cannot identify" in refused.stderr, refused
+        print("PASS independent", placement, "with shared inherited pane", flush=True)
     for placement in ("window", "session"):
         name = "caller-" + placement
         print(plane("spawn", "codex", "--in", placement, "--name", name, "--parent", "lead",
@@ -161,7 +177,7 @@ try:
     assert row("caller-session")["parent"] is None
     assert "ended" in plane("list").stdout
     print("PASS: agy task preflight, list/JSON, self/inherited target guards, pane split guard, Codex --parent "
-          "required and recorded, links bound to processes, pane reuse clears the link, ended parent", flush=True)
+          "optional and recorded, independent shared-server callers, links bound to processes, pane reuse clears the link, ended parent", flush=True)
 finally:
     for name in owned:
         print(plane("kill", name, check=False).stdout.strip(), flush=True)

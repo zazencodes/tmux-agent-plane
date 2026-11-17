@@ -24,7 +24,7 @@ When you load this skill, read `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-pla
 
 ## First: name yourself
 
-The user tells agents apart by name. Preserve a name already assigned in your task. When you load this skill, run `list`. Codex callers have no self marker: use an explicit name supplied in your task, and never run `rename self` or use `$TMUX_PANE`. Other callers whose own marked name is still the default `<kind>-<number>` (`claude-154`) name themselves after their task:
+The user tells agents apart by name. Preserve a name already assigned in your task. When you load this skill, run `list`. Codex callers have no self marker: use an explicit name supplied in your task, and never run `rename self` or use `$TMUX_PANE`. If no name was supplied, skip self-naming and continue the task; never ask the user to identify you merely to delegate. Other callers whose own marked name is still the default `<kind>-<number>` (`claude-154`) name themselves after their task:
 
 ```bash
 tmux-agent-plane rename self <name>
@@ -54,7 +54,7 @@ Clearing an old holder leaves a successor intact. Exiting leaves the project wit
 
 Use `list --json` to inspect each agent's `orchestrator` boolean; the text list marks it `[orchestrator]`. Orchestrators lead their project in the sidebar and picker, their name in the project's colour with a crown, `♛`; `m` filters to orchestrators and combines with `d` and text filtering. The role survives naming, project renaming and daemon restarts. Moving an orchestrator into a vacant project carries its role; moving it into a project with another orchestrator is refused until leadership is resolved explicitly.
 
-**Codex identity rules still apply:** use the known name supplied in your task; never infer it from `TMUX_PANE`, a title or a likely-looking row. If your name is unknown, ask your lead or the user to identify/name you before reporting your role. Other reliably identified callers may use `self`. Role commands change metadata and never send input to an agent.
+**Codex identity rules still apply:** use the known name supplied in your task; never infer it from `TMUX_PANE`, a title or a likely-looking row. If your name is unknown, leave your role metadata unchanged and continue the work. Delegation does not require self-naming or a role report. Other reliably identified callers may use `self`. Role commands change metadata and never send input to an agent.
 
 ## Suspending Agent Plane keys
 
@@ -62,7 +62,11 @@ Use `list --json` to inspect each agent's `orchestrator` boolean; the text list 
 
 ## Caller identity
 
-Codex tool shells can inherit `TMUX_PANE` from a shared app-server. Their `CODEX_THREAD_ID`/`CODEX_SESSION_ID` identifies a thread, but current published files do not reliably associate that thread with its TUI pane. Never use `$TMUX_PANE` from a Codex tool shell. `list` works and marks no caller row for Codex. Use explicit agent names supplied in your task. If your own name is unknown, ask the lead to identify/name you. The CLI fails on Codex self references (including the inherited pane value) and `spawn --in pane`, since it cannot safely choose a caller pane. Use `spawn --in window` or `spawn --in session` and name yourself as the parent with `--parent <your name>`; spawn refuses a Codex caller without it, or with a name that is not a Codex agent. Do not unset Codex identity variables to bypass this error. Other callers may use `self`.
+Codex tool shells can inherit `TMUX_PANE` from a shared app-server. Their `CODEX_THREAD_ID`/`CODEX_SESSION_ID` identifies a thread, but current published files do not reliably associate that thread with its TUI pane. Process ancestry can identify a server hosting several threads; it does not prove which pane owns the calling thread. Never infer your identity from `$TMUX_PANE`, titles, a likely row, or the first Codex agent. `list` marks no caller row for Codex, and self references (including the inherited pane value) and `spawn --in pane` remain unavailable.
+
+**Delegate without a confirmation question.** Use `spawn --in window` or `spawn --in session`. If your own Agent Plane name is already supplied in your task, pass `--parent <your name>`. Otherwise omit `--parent`: the CLI explicitly reports an independent agent with no recorded parent. This is a successful delegation; include where the helper should report in its task if known. Never ask the user or lead to identify/name you just to spawn, and never unset identity variables to bypass the guards.
+
+Choose `--session <project>` for a known existing project with window placement. Without `--session`, tmux chooses its default destination; this is not a claim about the caller's project. Use session placement for an explicitly requested separate project. Independent agents have no family link; task text can establish coordination, but does not create a tracked parent.
 
 ## Rule: the CLI, never raw tmux
 
@@ -121,7 +125,7 @@ tmux-agent-plane restore --tasks|--no-tasks|--discard  # bring them back (with t
 - Give the full task as the prompt: the new agent has none of your context. Say which files, what done looks like, and what to report back.
 - Always name agents you spawn (`--name reviewer`), following the naming rule above.
 - Pass agent CLI flags after `--`: `spawn codex "<task>" --in window --name reviewer -- -m <model>`. Pass any model or effort the user names that way (for agy, a model id from `agy models`, such as `--model gemini-4-hydrogen-high`). Each argument reaches the agent verbatim, ahead of the task; `spawn` adds none of its own.
-- `spawn` prints `<name> <pane> <location>`. The spawned agent records you as its parent: from your pane, or from `--parent` for Codex. The link lasts as long as the spawned agent; `list` shows `ended` once its parent has exited.
+- `spawn` prints `<name> <pane> <location>`. The spawned agent records a parent from a reliably identified caller pane or an optional known Codex `--parent`. Codex delegation without `--parent` is independent and records no family link. The link lasts as long as the spawned agent; `list` shows `ended` once its parent has exited.
 - A folder the agent has not trusted yet stops at a trust prompt, and `spawn` reports that the agent did not start. `read <pane>`, then answer with `keys <pane> ...` only when the user asked for that folder.
 
 ## Launch requirements

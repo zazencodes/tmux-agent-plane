@@ -21,6 +21,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Codex agents can delegate into a window or session without asking the user to identify their parent. An optional known `--parent` preserves family tracking; otherwise the CLI explicitly reports an independent agent and records no parent.
+
 - Antigravity agents stay working during generation and tool execution when native summaries prematurely report idle, so waits and completion notices follow the actual turn.
 
 - Chat navigation keys carry the same sidebar between windows, preserving its scroll position just like j/k inside the sidebar. Scrolling near the bottom no longer jumps between each window's saved viewport.

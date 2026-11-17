@@ -217,7 +217,7 @@ enum Cmd {
         /// Agent name (default: <kind>-<pane number>)
         #[arg(long)]
         name: Option<String>,
-        /// The calling Codex agent's own name, recorded as the parent (required from Codex)
+        /// Optional known Codex caller name; omitted means independent, with no parent
         #[arg(long)]
         parent: Option<String>,
         /// Wait until the agent finishes its first turn or blocks

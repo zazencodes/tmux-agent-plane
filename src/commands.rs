@@ -363,7 +363,7 @@ pub struct Spawn {
     pub workspace: Option<String>,
     pub cwd: Option<PathBuf>,
     pub name: Option<String>,
-    /// A Codex caller's own name. Other callers are identified by their pane.
+    /// Optional known Codex caller name. Other callers are identified by their pane.
     pub parent: Option<String>,
     pub task: Option<String>,
     pub agent_args: Vec<String>,
@@ -407,6 +407,12 @@ pub fn spawn(mut s: Spawn) -> Result<()> {
         s.parent.as_deref(),
         &index.agents,
     )?;
+
+    if codex_caller() && parent.is_none() {
+        eprintln!(
+            "caller identity unavailable; spawning an independent agent with no recorded parent"
+        );
+    }
 
     // Pass the command as argv to an interactive login shell. Shell startup finishes
     // before -c is evaluated; no terminal input can race startup or hit its line limit.
@@ -560,7 +566,7 @@ pub fn spawn(mut s: Spawn) -> Result<()> {
 /// Start an interactive agent in a new background window of an existing session, for a person to
 /// work in. Returns the window and pane ids.
 /// The pane of the agent a spawn records as its parent. A caller that is not an agent (a shell)
-/// records none. Codex cannot identify its own pane, so it names itself with `--parent`.
+/// records none. Codex can supply a known name with `--parent`, or delegate independently.
 fn spawn_parent(
     codex: bool,
     me: Option<&str>,
@@ -568,9 +574,7 @@ fn spawn_parent(
     agents: &[Agent],
 ) -> Result<Option<String>> {
     match (codex, named) {
-        (true, None) => bail!(
-            "a Codex caller must name itself as the parent: spawn ... --parent <your agent name>. Ask your lead for your name if you do not know it"
-        ),
+        (true, None) => Ok(None),
         (true, Some(name)) => {
             let Some(agent) = agents.iter().find(|a| a.name == name) else {
                 bail!("--parent {name}: no agent has that name");
@@ -720,13 +724,16 @@ mod tests {
     }
 
     #[test]
-    fn spawn_records_an_agent_caller_and_codex_names_itself() {
+    fn spawn_records_proven_or_explicit_parents_and_allows_independent_codex() {
         let mut lead = crate::links::tests::agent("%1");
         lead.name = "lead".into();
         let mut reviewer = crate::links::tests::agent("%2");
         reviewer.name = "reviewer".into();
         reviewer.kind = Kind::Codex;
-        let agents = [lead, reviewer];
+        let mut other = crate::links::tests::agent("%3");
+        other.name = "other-codex".into();
+        other.kind = Kind::Codex;
+        let agents = [lead, reviewer, other];
         let parent = |codex, me, named| spawn_parent(codex, me, named, &agents);
         assert_eq!(
             parent(false, Some("%1"), None).unwrap().as_deref(),
@@ -740,7 +747,9 @@ mod tests {
             parent(true, None, Some("reviewer")).unwrap().as_deref(),
             Some("%2")
         );
-        assert!(parent(true, None, None).is_err());
+        assert_eq!(parent(true, None, None).unwrap(), None);
+        // Even a real indexed pane inherited from a shared server proves no parent.
+        assert_eq!(parent(true, Some("%2"), None).unwrap(), None);
         assert!(parent(true, None, Some("lead")).is_err());
         assert!(parent(true, None, Some("nobody")).is_err());
     }
