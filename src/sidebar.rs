@@ -3732,8 +3732,23 @@ mod tests {
                 assert_eq!(sidebar.list.offset(), offset);
                 if width >= 20 {
                     let anchor = rows.iter().find(|(_, row)| *row == selected).unwrap().0;
-                    let expected_top = anchor.min(height - FOOTER_HEIGHT - 1 - 5);
-                    assert_eq!(terminal.backend().buffer()[(0, expected_top)].symbol(), "╭");
+                    let expected_top = anchor.min(height - FOOTER_HEIGHT - 1 - 2);
+                    let buffer = terminal.backend().buffer();
+                    let line: String = (0..width)
+                        .map(|x| buffer[(x, expected_top)].symbol())
+                        .collect();
+                    assert!(line.contains("kill "), "{line}");
+                    let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+                    assert_eq!(text.matches("[Y/n]").count(), 1);
+                    assert!(!text.contains("confirm"));
+                    assert!(!text.contains("⏎/y"));
+                    for y in 0..height.saturating_sub(FOOTER_HEIGHT) {
+                        if !(expected_top..expected_top + 2).contains(&y) {
+                            for x in 0..width {
+                                assert_eq!(before[(x, y)], buffer[(x, y)]);
+                            }
+                        }
+                    }
                 }
                 for y in height.saturating_sub(FOOTER_HEIGHT)..height {
                     for x in 0..width {

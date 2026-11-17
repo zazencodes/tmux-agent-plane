@@ -37,6 +37,7 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Kill and task-stop prompts are compact, borderless strips sized to their text, with the confirmation keys shown once in both sidebar and picker.
 - Clarify in the skill and README that `background` is only for one-shot internal jobs, scripts and hooks, and that delegating work always uses `spawn` with any requested model or effort passed after `--`.
 - The sidebar's footer lists its main keys on three lines: new, kill and clean up; graph, quota and move; workspaces, configure and the full key list. Rename (`r`) and project rename (`e`) still work and are listed under `?`. The line below says what Enter does (`⏎ go to agent`) instead of `⏎ jump`, and shows `t tasks` when there are tasks.
 - Automatic naming commands now return a JSON decision with `name` and `orchestrator` fields. Custom naming commands must return both fields.

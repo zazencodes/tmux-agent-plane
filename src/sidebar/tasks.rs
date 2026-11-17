@@ -463,7 +463,8 @@ mod tests {
             before_screen.lines().skip(15).collect::<Vec<_>>(),
             screen.lines().skip(15).collect::<Vec<_>>()
         );
-        assert!(screen.contains("confirm"), "{screen}");
+        assert!(!screen.contains("confirm"), "{screen}");
+        assert_eq!(screen.matches("[Y/n]").count(), 1);
         assert!(screen.contains("stop web-dev"), "{screen}");
         assert!(screen.contains("(running)? [Y/n]"), "{screen}");
         let before = sidebar.navigation.pane.clone();

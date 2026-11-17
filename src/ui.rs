@@ -841,14 +841,13 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
 
 /// Paint last, anchored to the selected row; the normal layout and footer stay put.
 pub(crate) fn draw_kill_confirmation(f: &mut Frame, sidebar: &Sidebar, area: Rect, anchor: u16) {
-    let width = area.width.min(48);
-    let Some(mut lines) =
-        crate::sidebar::kill_confirmation(sidebar, width.saturating_sub(2) as usize)
+    let Some(lines) = crate::sidebar::kill_confirmation(sidebar, area.width.min(48) as usize)
     else {
         return;
     };
-    lines.push(hints(&[("⏎/y", "yes"), ("n", "no")]));
-    let height = (lines.len() as u16 + 2).min(area.height);
+    let width = lines.iter().map(Line::width).max().unwrap_or(0) as u16;
+    let width = width.min(area.width);
+    let height = (lines.len() as u16).min(area.height);
     let popup = Rect::new(
         area.right().saturating_sub(width),
         anchor.clamp(area.y, area.bottom().saturating_sub(height).max(area.y)),
@@ -857,9 +856,7 @@ pub(crate) fn draw_kill_confirmation(f: &mut Frame, sidebar: &Sidebar, area: Rec
     );
     f.render_widget(Clear, popup);
     f.render_widget(
-        Paragraph::new(lines)
-            .style(Style::default().bg(SURFACE0))
-            .block(panel(Line::from(" confirm ")).border_style(colour(State::Blocked))),
+        Paragraph::new(lines).style(Style::default().bg(SURFACE0)),
         popup,
     );
 }
