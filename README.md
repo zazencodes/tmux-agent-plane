@@ -46,7 +46,8 @@ Claude Code, Codex and Antigravity use native signals. Add Pi, OpenCode or Grok 
 - **Workspaces above tmux.** Group sessions into workspaces and set one aside the way you detach from tmux: the sidebar, the picker, the agent keys and the status bar show only the workspace you are in, while tmux still shows every session. Press `w` to switch, or ask an agent to start a workspace or break work off into one. See [Workspaces](#workspaces).
 - **Stay in tmux when a session closes.** Closing its last pane switches you to the most recently active remaining session of its workspace. Closing the final session exits tmux.
 - **Background tasks every agent can see.** Keep dev servers, watchers and tunnels in a shared list with their ports, output and exit status. Tasks outlive their agents and can be restarted after they stop. See [Background tasks](#background-tasks).
-- **Restore after tmux restarts.** Review saved agents and layouts, then choose whether to bring back their conversations and background tasks. Codex conversations cannot currently be resumed. See [Restore](#restore).
+- **Recently closed conversations.** Press `h` in the sidebar or picker to revive a closed agent with its conversation, folder and project. Works with every integrated kind; Codex needs its [conversation ID in the title](#recently-closed-conversations).
+- **Restore after tmux restarts.** Review saved agents and layouts, then choose whether to bring back their conversations and background tasks. See [Restore](#restore).
 - **Your agents, unchanged.** Spawned agents use your interactive login shell, so aliases and flags apply. A shell stays open when the agent exits.
 
 ## States
@@ -221,6 +222,7 @@ set -g @agent-plane-keys-toggle-key e
 | `t` | Sidebar: show or hide [background tasks](#background-tasks) |
 | `R` | Restart the selected task |
 | `z` | [Clean up](#cleanup) the workspace: close finished agents, exited tasks and unused sessions; `Enter` or lowercase `y` accepts |
+| `h` | Browse recently closed conversations in this workspace; `Enter` revives the selected one |
 | `b` | Review agents waiting to be [restored](#restore) after tmux restarted |
 | `o` | Open [Configuration](#configuration) |
 | `Tab` | Picker: type to the selected agent in the preview; `Tab` again returns to the menu |
@@ -392,7 +394,30 @@ A task keeps running when the agent that started it exits; only `task stop` (or 
 
 `task list` shows every task's state, the TCP ports its processes listen on, folder, the agent that started it, how long ago it started, and its command, with its workspace once there are several; `--json` gives every field. A task belongs to the workspace it was started from. The daemon looks up ports with `lsof` at most every five seconds, only while tasks run. A task is never an agent, even when its command is an agent CLI, and projects and automatic placement leave the tasks session alone. The definition lives on the task's tmux pane, so tasks and their state survive a daemon restart.
 
-### Restore
+## Recently closed conversations
+
+Press `h` in the sidebar or picker for your workspace's recently closed agent conversations, newest first. Browse with `j`/`k` or arrows, then `Enter` revives the selected conversation and takes you there; `Esc` or `Ctrl+C` returns to the agent list. Each row shows the agent, kind, project, task title and time since closing. An unavailable conversation shows why it cannot be revived.
+
+The daemon remembers conversations it has tracked, including agents closed outside the plane, and keeps the latest 100 closed conversations across daemon and tmux restarts. History starts when this version is installed. Reviving opens a new window in the original project and folder, recreating the project in its original workspace if needed. An existing project in another workspace is refused. The agent keeps its name if available; leadership and old family links stay with the original processes. A conversation already running stays out of the list.
+
+```sh
+tmux-agent-plane recent             # all workspaces
+tmux-agent-plane recent --json
+tmux-agent-plane revive <id>        # id from recent
+```
+
+All six kinds use their native resume command. Pi/OpenCode need their publishers and Grok Build needs leader mode as usual. For Codex, include its conversation ID in the native terminal title, ahead of the task and project so it survives title length limits. Add this to your Codex config (`$CODEX_HOME/config.toml`, normally `~/.codex/config.toml`):
+
+```toml
+[tui]
+terminal_title = ["activity", "session-id", "thread-name", "project-name"]
+```
+
+New Codex processes load this setting. For one already open, use Codex's `/terminal-title` setup to choose these items, with Session ID ahead of Thread Name and Project Name. Until its title publishes an ID, that conversation cannot be revived. Codex shortens the title's UUID; the plane resolves that prefix uniquely against Codex's local thread database, and refuses an ambiguous match. Task titles in the plane leave the ID out. This identifies the conversation being viewed; Codex tool-shell caller identity remains unavailable with a shared server.
+
+Revive resumes saved history; it cannot recover deleted conversations, missing folders, unsent drafts or an interrupted in-memory turn. History stores metadata, without copying conversation transcripts.
+
+## Restore
 
 The daemon keeps a roster of every window that holds an agent: its session, index, name and layout, and each pane's folder, with the agent's kind, session id, name and parent. It also records every running background task. When the tmux server dies and a new one starts, the daemon turns that roster into a pending restore, and the status bar shows `↺ N`, the number of agents that can come back. Nothing is restored until you ask, every time: press `b` in the sidebar to see them and choose, or use the CLI:
 
@@ -403,7 +428,7 @@ tmux-agent-plane restore --no-tasks   # the agents only
 tmux-agent-plane restore --discard    # forget them
 ```
 
-Each agent reopens its own conversation through the same interactive login shell as `spawn`, so your aliases apply: `claude --resume <id>`, `opencode --session <id>`, `grok --resume <id>`, `agy --conversation <id>` and `pi --session <id>`. Codex publishes no session id, so a Codex agent is listed as one that cannot come back, with its project and folder; its pane comes back as a shell there. A session that is missing is created, each window comes back at its index (or the next free one) with its name and every pane, then its recorded layout. Other panes come back as login shells in their folders. An agent gets its name back when it had been given one (by `spawn --name`, `rename`, `r` or AI naming), and a default name otherwise; parent links point at the restored parents. Restored agents stay where they are rather than moving to the session named after their folder. Tasks start again under their names, with the agent that started them.
+Each agent reopens its own conversation through the same interactive login shell as `spawn`, so your aliases apply: `claude --resume <id>`, `codex resume <id>`, `opencode --session <id>`, `grok --resume <id>`, `agy --conversation <id>` and `pi --session <id>`. A Codex agent needs the [terminal title setting above](#recently-closed-conversations). An agent without a recorded conversation ID is listed with the reason, and its pane comes back as a shell. A session that is missing is created, each window comes back at its index (or the next free one) with its name and every pane, then its recorded layout. Other panes come back as login shells in their folders. An agent gets its name back when it had been given one (by `spawn --name`, `rename`, `r` or AI naming), and a default name otherwise; parent links point at the restored parents. Restored agents stay where they are rather than moving to the session named after their folder. Tasks start again under their names, with the agent that started them.
 
 An agent whose conversation already runs again, or whose folder is gone, stays closed and is listed with the reason. Anything that fails is printed and written to `daemon.log`, and the rest still comes back; either way the pending restore is then forgotten. A later restart of tmux replaces a pending restore with the newer one. The roster leaves out sidebars, so a restored window gets one when the sidebar is open, and it changes only after a scan without faults has held for three seconds, so agents that exit while the machine shuts down are still remembered.
 
@@ -496,6 +521,8 @@ The footer shows `cleaning up…`, then what closed, such as `closed 3 agents, 1
 | `task read <name> [--lines N]` | The task's screen, plus N lines of scrollback |
 | `task restart <name>` | Run the task's command again in its window |
 | `task stop <name>` | End the task; it leaves the list |
+| `recent [--json]` | List recently closed conversations across workspaces |
+| `revive <id>` | Resume a conversation from `recent` in its original project and folder |
 | `restore [--tasks\|--no-tasks\|--discard]` | Agents from before tmux restarted: list them (no flag), bring them back with or without the tasks that were running, or forget them |
 | `toggle-sidebar <window>` | What the sidebar key does, from a window (a window or pane id) |
 | `follow-sidebar <window>` | Add the sidebar to a window while it is open. The plugin runs it when a window is created |

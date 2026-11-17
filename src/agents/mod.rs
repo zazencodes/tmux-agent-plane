@@ -54,9 +54,8 @@ pub struct Adapter {
     pub scan: fn(&ScanContext<'_>) -> Result<Vec<Observation>>,
     /// Builds the command from an optional task and verbatim agent arguments.
     pub launch: fn(Option<&str>, &[String]) -> Result<Launch>,
-    /// Reopens a recorded session by the id the agent published. None when the kind publishes no
-    /// session id to resume.
-    pub resume: Option<fn(&str) -> Launch>,
+    /// Reopens a recorded conversation by its published session id.
+    pub resume: fn(&str) -> Launch,
 }
 pub struct ScanContext<'a> {
     pub panes: &'a [Pane],

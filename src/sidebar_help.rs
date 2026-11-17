@@ -55,6 +55,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("t", "Background tasks"),
             ("u", "Sidebar: expand quota"),
             ("b", "Agents to restore"),
+            ("h", "Recently closed sessions"),
             ("o", "Configure"),
             ("q", "Close (sidebar: keys on)"),
         ],

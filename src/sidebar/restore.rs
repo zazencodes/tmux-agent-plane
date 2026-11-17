@@ -313,7 +313,7 @@ mod tests {
             agents: vec![listed("reviewer", Kind::Claude)],
             skipped: vec![(
                 listed("codex-2", Kind::Codex),
-                "Codex publishes no session id to resume".into(),
+                "it published no session id".into(),
             )],
             tasks: vec![crate::tasks::Definition {
                 name: "web".into(),
@@ -407,7 +407,7 @@ mod tests {
             " ▸ reviewer  claude  pro",
             " cannot come back",
             " ✕ codex-2  codex  pro",
-            "   Codex publishes no session id to",
+            "   it published no session id",
             " tasks that were running",
             " ▸ web  by reviewer",
             " ⏎ agents + tasks  a agents only",

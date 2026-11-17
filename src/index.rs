@@ -26,32 +26,32 @@ impl Kind {
             Self::Claude => Adapter {
                 scan: claude::scan,
                 launch: claude::launch,
-                resume: Some(claude::resume),
+                resume: claude::resume,
             },
             Self::Codex => Adapter {
                 scan: codex::scan,
                 launch: codex::launch,
-                resume: None,
+                resume: codex::resume,
             },
             Self::Pi => Adapter {
                 scan: pi::scan,
                 launch: pi::launch,
-                resume: Some(pi::resume),
+                resume: pi::resume,
             },
             Self::Opencode => Adapter {
                 scan: opencode::scan,
                 launch: opencode::launch,
-                resume: Some(opencode::resume),
+                resume: opencode::resume,
             },
             Self::Agy => Adapter {
                 scan: agy::scan,
                 launch: agy::launch,
-                resume: Some(agy::resume),
+                resume: agy::resume,
             },
             Self::Grok => Adapter {
                 scan: grok::scan,
                 launch: grok::launch,
-                resume: Some(grok::resume),
+                resume: grok::resume,
             },
         }
     }
@@ -92,7 +92,7 @@ impl State {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Agent {
     pub name: String,
     /// tmux pane id, e.g. `%154`. Stable for the life of the pane.

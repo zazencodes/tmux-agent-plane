@@ -477,6 +477,12 @@ fn event_loop(terminal: &mut DefaultTerminal, client: &str, search: bool) -> Res
                     if let ControlFlow::Break(jump) = app.key(key) {
                         return Ok(jump);
                     }
+                    if app.sidebar.history.chosen.is_some() {
+                        terminal.draw(|f| draw(f, &mut app))?;
+                        if let Some(agent) = app.sidebar.history.run() {
+                            return Ok(Some(agent));
+                        }
+                    }
                     if app.sidebar.restarting {
                         terminal.draw(|f| draw(f, &mut app))?;
                         app.sidebar.restart_daemon(Origin::Popup(&app.client));
@@ -532,6 +538,10 @@ fn draw(f: &mut Frame, app: &mut App) {
 }
 
 fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
+    if app.sidebar.history.open {
+        app.sidebar.history.draw(f, area);
+        return;
+    }
     if app.sidebar.help.open {
         app.sidebar.help.draw(f, area);
         return;
@@ -788,6 +798,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
                 status_footer(sidebar, width).unwrap_or_else(|| {
                     let mut line = hints(&[
                         ("w", "workspaces"),
+                        ("h", "recent"),
                         ("j/k", "browse"),
                         ("/", "search"),
                         ("⏎", "focus"),

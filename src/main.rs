@@ -10,6 +10,7 @@ mod daemon;
 mod detect;
 mod diagnostics;
 mod fit;
+mod history;
 mod index;
 mod lifecycle;
 mod links;
@@ -181,6 +182,13 @@ enum Cmd {
         #[command(subcommand)]
         action: tasks::Action,
     },
+    /// List recently closed agent conversations
+    Recent {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Revive a conversation by its id from `recent`
+    Revive { id: u64 },
     /// Bring back agents from before tmux restarted: lists them; --tasks or --no-tasks restores
     Restore {
         /// Restore the agents and the tasks that were running
@@ -269,6 +277,12 @@ fn main() -> anyhow::Result<()> {
             no_tasks,
             discard,
         } => restore::run_cli(tasks, no_tasks, discard),
+        Cmd::Recent { json } => history::list(json),
+        Cmd::Revive { id } => {
+            let agent = history::revive(id)?;
+            println!("{} {} {}", agent.name, agent.pane, agent.location);
+            Ok(())
+        }
         Cmd::Spawn {
             kind,
             task,

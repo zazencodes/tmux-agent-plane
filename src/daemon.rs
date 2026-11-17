@@ -139,6 +139,7 @@ fn run_inner() -> Result<()> {
     let mut placer = crate::projects::Placer::default();
     let mut tasks = crate::tasks::Tracker::default();
     let mut roster = crate::restore::Recorder::start()?;
+    let mut history = crate::history::Recorder::default();
 
     loop {
         if SHUTDOWN.load(Ordering::Relaxed) {
@@ -206,6 +207,7 @@ fn run_inner() -> Result<()> {
         let clean = !issues
             .iter()
             .any(|i| i.component.starts_with("scan:") || i.component.starts_with("advance:"));
+        issues.extend(history.tick(&agents, clean, now));
         let restore = roster.tick(&agents, &panes, &geometry, &tasks.values, clean, now);
         issues.extend(restore.issues);
         let views = windows(&panes);

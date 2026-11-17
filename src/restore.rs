@@ -97,27 +97,10 @@ pub struct Recorded {
 impl Recorded {
     /// The command that reopens its session, or why there is none.
     fn resume(&self) -> std::result::Result<Launch, String> {
-        let Some(resume) = self.kind.adapter().resume else {
-            return Err(format!(
-                "{} publishes no session id to resume",
-                display_kind(self.kind)
-            ));
-        };
         match &self.session_id {
-            Some(id) => Ok(resume(id)),
+            Some(id) => Ok((self.kind.adapter().resume)(id)),
             None => Err("it published no session id".into()),
         }
-    }
-}
-
-fn display_kind(kind: Kind) -> &'static str {
-    match kind {
-        Kind::Claude => "Claude Code",
-        Kind::Codex => "Codex",
-        Kind::Pi => "Pi",
-        Kind::Opencode => "OpenCode",
-        Kind::Agy => "Antigravity",
-        Kind::Grok => "Grok Build",
     }
 }
 
@@ -592,6 +575,75 @@ pub fn perform(with_tasks: bool) -> Result<Report> {
     Ok(report)
 }
 
+/// Reopen one closed conversation using the same builder as server recovery.
+pub fn revive(agent: &Agent) -> Result<String> {
+    let index = index::read()?;
+    if let Some(id) = &agent.session_id
+        && let Some(other) = index
+            .agents
+            .iter()
+            .find(|a| a.kind == agent.kind && a.session_id.as_ref() == Some(id))
+    {
+        bail!("already running as {}", other.name);
+    }
+    let panes = tmux::list_panes()?;
+    let processes = crate::agents::ProcessTable::load()?;
+    let observations = (agent.kind.adapter().scan)(&crate::agents::ScanContext {
+        panes: &panes,
+        processes: &processes,
+    })?;
+    if observations
+        .iter()
+        .any(|o| o.session_id.is_some() && o.session_id == agent.session_id)
+    {
+        bail!("conversation is already running");
+    }
+    if !dir_exists(&agent.cwd) {
+        bail!("its folder is gone: {}", agent.cwd);
+    }
+    let sessions = crate::sessions::inventory(&index.agents)?;
+    let session = sessions.iter().find(|s| s.name == agent.session);
+    if session.is_some_and(|s| s.workspace != agent.workspace) {
+        bail!("project {} now belongs to another workspace", agent.session);
+    }
+    let recorded = Recorded {
+        pane: agent.pane.clone(),
+        kind: agent.kind,
+        session_id: agent.session_id.clone(),
+        name: agent.name.clone(),
+        named: true,
+        parent: None,
+    };
+    let launch = recorded.resume().map_err(anyhow::Error::msg)?;
+    let shell = tmux::default_shell(session.map(|s| s.id.as_str()))?;
+    let mut builder = Builder {
+        shell,
+        names: index.agents.iter().map(|a| a.name.clone()).collect(),
+        windows: occupied_windows()?,
+        moved: HashMap::new(),
+    };
+    let mut report = Report::default();
+    builder.build(
+        &WindowPlan {
+            session: agent.session.clone(),
+            workspace: agent.workspace.clone(),
+            index: 0,
+            name: agent.name.clone(),
+            layout: String::new(),
+            panes: vec![PanePlan {
+                cwd: agent.cwd.clone(),
+                gone: false,
+                agent: Some((recorded, launch)),
+            }],
+        },
+        &mut report,
+    )?;
+    builder
+        .moved
+        .remove(&agent.pane)
+        .context("revived pane missing")
+}
+
 /// Session name and window index of every window there is.
 fn occupied_windows() -> Result<HashSet<(String, u32)>> {
     tmux::run(&[
@@ -710,7 +762,9 @@ impl Builder {
             tmux::run(&["select-layout", "-t", id, "tiled"])?;
             self.started(pane, &last, &location, report)?;
         }
-        if let Err(error) = tmux::run(&["select-layout", "-t", id, &window.layout]) {
+        if !window.layout.is_empty()
+            && let Err(error) = tmux::run(&["select-layout", "-t", id, &window.layout])
+        {
             report
                 .failed
                 .push(format!("layout of {location}: {error:#}"));
@@ -1065,7 +1119,7 @@ mod tests {
     }
 
     #[test]
-    fn every_kind_but_codex_resumes_its_session_and_the_rest_say_why_not() {
+    fn every_kind_resumes_its_session_and_missing_ids_say_why_not() {
         let recorded = |kind, session_id: Option<&str>| Recorded {
             pane: "%1".into(),
             kind,
@@ -1075,6 +1129,7 @@ mod tests {
             parent: None,
         };
         for (kind, command, flag) in [
+            (Kind::Codex, "codex", "resume"),
             (Kind::Claude, "claude", "--resume"),
             (Kind::Opencode, "opencode", "--session"),
             (Kind::Grok, "grok", "--resume"),
@@ -1091,7 +1146,7 @@ mod tests {
         }
         assert_eq!(
             recorded(Kind::Codex, None).resume().unwrap_err(),
-            "Codex publishes no session id to resume"
+            "it published no session id"
         );
     }
 
@@ -1131,11 +1186,11 @@ mod tests {
         assert_eq!(
             skipped,
             [
-                ("codex-2", "Codex publishes no session id to resume"),
+                ("codex-2", "it published no session id"),
                 ("reviewer", "already running as claude-40"),
-                ("codex-2", "Codex publishes no session id to resume"),
+                ("codex-2", "it published no session id"),
                 ("reviewer", "its folder is gone"),
-                ("codex-2", "Codex publishes no session id to resume"),
+                ("codex-2", "it published no session id"),
             ]
         );
         assert_eq!(plan.tasks.len(), 1);

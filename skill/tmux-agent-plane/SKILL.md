@@ -104,6 +104,8 @@ tmux-agent-plane task start <name> [--cwd DIR] -- <command>...  # reuses a runni
 tmux-agent-plane task read <name> [--lines N]
 tmux-agent-plane task restart <name>      # rerun its command in the same window
 tmux-agent-plane task stop <name>         # end it; it leaves the list
+tmux-agent-plane recent [--json]          # recently closed conversations, newest first, across workspaces
+tmux-agent-plane revive <id>              # exact conversation from recent; new window in its original project/workspace
 tmux-agent-plane restore                  # agents from before tmux restarted; lists only
 tmux-agent-plane restore --tasks|--no-tasks|--discard  # bring them back (with tasks or not), or forget them
 ```
@@ -159,7 +161,7 @@ Tasks are never agents: they do not appear in `list`, and agent commands do not 
 
 ## Restore after tmux restarts
 
-When the tmux server dies, its agents can be brought back. `↺ N` in the status bar, or `restore` listing agents, means some wait. Restoring reopens their conversations and windows, so do it only when the user asks: run `restore` to show them the list, then `restore --tasks` (agents and the tasks that were running) or `restore --no-tasks` as they choose, or `restore --discard` if they want them gone. Report what it printed, including agents that stay closed and why (Codex cannot be resumed).
+When the tmux server dies, its agents can be brought back. `↺ N` in the status bar, or `restore` listing agents, means some wait. Restoring reopens their conversations and windows, so do it only when the user asks: run `restore` to show them the list, then `restore --tasks` (agents and the tasks that were running) or `restore --no-tasks` as they choose, or `restore --discard` if they want them gone. Report what it printed, including agents that stay closed and why (a Codex conversation needs its ID published in the terminal title).
 
 ## Daemon diagnostics
 
@@ -205,3 +207,9 @@ Organize within workspaces: keep every session and agent in the workspace it is 
 4. Start future helpers directly in that project: `spawn codex "<full task>" --in window --session api --cwd /path/to/worktree --name api-review`. Check `sessions list` and `list` to verify the result, then report the organization.
 
 Moves keep destination clients on their current windows. A source window, and a detached session with no remaining content, may disappear naturally, including the plugin's lone-sidebar cleanup. A move that would end an attached source session is refused; leave another content pane/window there before retrying. Linked source windows and grouped source/destination sessions are refused because they share work across sessions. Report those limits rather than using raw tmux to bypass them. Existing shell-only windows remain for the user; organizing projects does not authorize killing agents or unrelated shells. Leave the `agent-plane-tasks` session alone: `sessions list` omits it and it is never a project.
+
+## Recently closed conversations
+
+`h` in the sidebar and picker lists recently closed conversations in that workspace; arrows/j/k browse, Enter revives and focuses, Esc/Ctrl+C cancels. `recent` lists every workspace with stable numeric IDs; `revive <id>` resumes the selected native conversation in a new window of its original project, recreating that project in its original workspace when missing. Reviving is an explicit workspace choice; never move it elsewhere implicitly. The daemon retains the newest 100 closed conversations it observed, across restarts. Missing folders or IDs and already-running conversations cannot be revived. Names are retained when free; old family links and leadership are not assigned to the new process.
+
+Every integrated kind supports resume. Codex requires `tui.terminal_title = ["activity", "session-id", "thread-name", "project-name"]` in Codex config (or the same selection through `/terminal-title` for an existing process). The plane resolves Codex's shortened published ID uniquely against its local thread database. This does not establish a calling tool shell's pane: the Codex caller identity rules above still apply. Pi/OpenCode publishers and Grok leader mode remain required. Saved conversation history must still exist; unsent input is not recoverable.

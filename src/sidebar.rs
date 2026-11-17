@@ -1,5 +1,6 @@
 //! A narrow, always-on agent list in a pane down the side of a window.
 
+mod history;
 mod project_move;
 mod project_rename;
 mod restore;
@@ -319,7 +320,7 @@ fn same_action_target(before: &Agent, current: &Agent) -> bool {
 }
 
 /// Read the native signal again at confirmation, rather than trusting a one-tick-old index.
-/// Codex has no session id in its title signal, so pin its unique live process PID too.
+/// Codex can omit its optional conversation id, so pin its live process PID too.
 fn action_identity(agent: &Agent) -> Result<Option<i32>> {
     let panes = tmux::list_panes()?;
     let pane = panes
@@ -486,6 +487,7 @@ pub(crate) struct Sidebar {
     pub(crate) tasks: tasks::Section,
     /// Agents from before tmux restarted, and `b` (sidebar only).
     pub(crate) restore: restore::Restore,
+    pub(crate) history: history::History,
     /// The plugin's global keys, from the index: the footer says when they are off.
     pub(crate) global_keys: crate::tmux::GlobalKeys,
     /// The workspace whose agents and tasks this list shows, once known: a sidebar's window's,
@@ -1164,6 +1166,7 @@ impl Sidebar {
         let consumed = self.cleanup_confirmation_key(key)
             || self.project_key(key)
             || self.move_key(key)
+            || self.history_key(key, origin)
             || self.restore_key(key, origin)
             || self.workspace_key(key, origin)
             || self.help_key(key)
@@ -1212,6 +1215,7 @@ impl Sidebar {
             && self.killing.is_none()
             && self.tasks.stopping.is_none()
             && !self.restore.is_open()
+            && !self.history.open
             && !self.menu.is_open();
         let consumed = !self.help.open && !self.menu.is_open() && self.quota.key(key, can_open);
         if consumed {
@@ -1660,6 +1664,19 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             screen.show(&mut sidebar)?;
             sidebar.restart_daemon(origin);
         }
+        if sidebar.history.chosen.is_some() {
+            screen.show(&mut sidebar)?;
+            if let Some(agent) = sidebar.history.run() {
+                // A resumed worker may be hidden by the live list's filters.
+                sidebar.navigation.pattern.clear();
+                sidebar.navigation.query.clear();
+                sidebar.navigation.filter = None;
+                sidebar.navigation.orchestrators = false;
+                sidebar.refresh(origin);
+                sidebar.select(sidebar.agents.iter().position(|a| a.pane == agent.pane));
+                focus = true;
+            }
+        }
         if sidebar.restore.chosen().is_some() {
             screen.show(&mut sidebar)?;
             sidebar.restore.run();
@@ -1772,6 +1789,10 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
     }
     if sidebar.auto_name.open {
         sidebar.auto_name.draw(f, f.area());
+        return;
+    }
+    if sidebar.history.open {
+        sidebar.history.draw(f, f.area());
         return;
     }
     if sidebar.restore.is_open() {
@@ -1972,7 +1993,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
 /// The main keys, always at the bottom of the sidebar; each line fits its narrowest width.
 /// Search and filters are named at the top of the list.
 const KEY_HINTS: [&[(&str, &str)]; 3] = [
-    &[("c", "new"), ("x", "kill"), ("z", "clean")],
+    &[("c", "new"), ("x", "kill"), ("z", "clean"), ("h", "recent")],
     &[("p", "graph"), ("u", "quota"), ("v", "move")],
     &[("w", "workspaces"), ("o", "configure"), ("?", "keys")],
 ];

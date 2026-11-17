@@ -1,6 +1,8 @@
 //! Codex publishes activity and approvals in its terminal title.
 use super::{Launch, Observation, ProcessTable, RawState, ScanContext};
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
+use rusqlite::{Connection, OpenFlags};
+use std::path::PathBuf;
 
 pub fn launch(task: Option<&str>, agent_args: &[String]) -> Result<Launch> {
     let mut args = agent_args.to_vec();
@@ -9,6 +11,77 @@ pub fn launch(task: Option<&str>, agent_args: &[String]) -> Result<Launch> {
         command: "codex",
         args,
     })
+}
+
+pub fn resume(session_id: &str) -> Launch {
+    Launch {
+        command: "codex",
+        args: vec!["resume".into(), session_id.into()],
+    }
+}
+
+// Codex bounds title segments to 32 characters. Resolve its published UUID prefix against
+// its native thread database; ambiguous prefixes must never reopen another conversation.
+fn thread_id(title: &str, database: impl FnOnce() -> Result<Connection>) -> Result<Option<String>> {
+    let token = title
+        .split(" | ")
+        .map(|part| part.trim_start_matches(|c: char| !c.is_ascii_hexdigit()))
+        .find(|part| {
+            uuid_prefix(part.trim_end_matches("...")) && (part.len() == 36 || part.ends_with("..."))
+        });
+    let Some(token) = token else { return Ok(None) };
+    if token.len() == 36 && !token.ends_with("...") {
+        return Ok(Some(token.to_owned()));
+    }
+    let prefix = token.trim_end_matches("...");
+    let db = database()?;
+    let mut statement = db.prepare("SELECT id FROM threads WHERE id GLOB ?1 LIMIT 2")?;
+    let ids = statement
+        .query_map([format!("{prefix}*")], |row| row.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    match ids.as_slice() {
+        [] => Ok(None),
+        [id] => Ok(Some(id.clone())),
+        _ => bail!("ambiguous Codex terminal-title thread id {prefix}"),
+    }
+}
+
+fn uuid_prefix(value: &str) -> bool {
+    (29..=36).contains(&value.len())
+        && value.bytes().enumerate().all(|(i, c)| {
+            if [8, 13, 18, 23].contains(&i) {
+                c == b'-'
+            } else {
+                c.is_ascii_hexdigit()
+            }
+        })
+}
+
+fn database() -> Result<Connection> {
+    let home = match std::env::var_os("CODEX_HOME") {
+        Some(home) => PathBuf::from(home),
+        None => PathBuf::from(std::env::var_os("HOME").context("HOME is not set")?).join(".codex"),
+    };
+    let path = std::fs::read_dir(&home)
+        .with_context(|| format!("reading {}", home.display()))?
+        .collect::<std::io::Result<Vec<_>>>()?
+        .into_iter()
+        .map(|entry| entry.path())
+        .filter_map(|path| {
+            let version = path
+                .file_name()?
+                .to_str()?
+                .strip_prefix("state_")?
+                .strip_suffix(".sqlite")?
+                .parse::<u32>()
+                .ok()?;
+            Some((version, path))
+        })
+        .max_by_key(|(version, _)| *version)
+        .context("Codex thread database is missing")?
+        .1;
+    Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("opening {}", path.display()))
 }
 
 pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
@@ -23,8 +96,12 @@ pub fn scan(context: &ScanContext<'_>) -> Result<Vec<Observation>> {
             pid,
             state,
             detail,
-            title: clean_title(&pane.title),
-            session_id: None,
+            title: clean_title(&pane.title)
+                .split(" | ")
+                .filter(|part| !uuid_prefix(part.trim_end_matches("...")))
+                .collect::<Vec<_>>()
+                .join(" | "),
+            session_id: thread_id(&pane.title, database)?,
             preserve_title: state == RawState::Blocked,
             completed_turns: None,
             completion_epoch: None,
@@ -181,6 +258,48 @@ mod tests {
             processes: &processes,
         };
         assert!(scan(&context).unwrap().is_empty());
+    }
+
+    #[test]
+    fn published_thread_ids_resolve_exactly_and_reject_ambiguous_prefixes() {
+        let id = "019af123-4567-7890-abcd-123456789abc";
+        let db = || {
+            let db = Connection::open_in_memory()?;
+            db.execute("CREATE TABLE threads (id TEXT)", [])?;
+            db.execute("INSERT INTO threads VALUES (?1)", [id])?;
+            Ok(db)
+        };
+        assert_eq!(
+            thread_id(&format!("⠼ {id} | Fix tests | repo"), || panic!(
+                "full id needs no database"
+            ))
+            .unwrap()
+            .as_deref(),
+            Some(id)
+        );
+        let title = format!("[ ! ] Action Required | {}... | Fix tests", &id[..29]);
+        assert_eq!(thread_id(&title, db).unwrap().as_deref(), Some(id));
+        assert!(
+            thread_id(&title, || {
+                let db = db()?;
+                db.execute(
+                    "INSERT INTO threads VALUES (?1)",
+                    [format!("{}0000000", &id[..29])],
+                )?;
+                Ok(db)
+            })
+            .unwrap_err()
+            .to_string()
+            .contains("ambiguous")
+        );
+        assert_eq!(
+            thread_id("Fix tests | repo", || panic!(
+                "no title id needs no database"
+            ))
+            .unwrap(),
+            None
+        );
+        assert!(!uuid_prefix("019af123-4567-7890-abcd-1234567_"));
     }
 
     #[test]

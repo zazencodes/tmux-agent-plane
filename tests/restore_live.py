@@ -292,7 +292,7 @@ def fixtures():
               and any(a["kind"] == "codex" and a["session_id"] is None for a in named.values()))
         check("only the running task is recorded, with its starter",
               roster["tasks"] == [{"name": "web", "cwd": str(pro), "command": ["sleep", "100000"],
-                                   "started_by": "reviewer"}])
+                                   "started_by": "reviewer", "workspace": "main"}])
         ids = {name: named[name]["session_id"] for name in ("reviewer", child["name"], loner["name"])}
 
         # Server two: the roster becomes the pending restore before anything replaces it.
@@ -309,7 +309,7 @@ def fixtures():
         check("restore lists what comes back, what cannot and why, and the tasks",
               "3 agents from before tmux restarted can be brought back" in listing
               and re.search(r"reviewer\s+pi\s+pro", listing)
-              and "Codex publishes no session id to resume" in listing
+              and "it published no session id" in listing
               and re.search(r"web\s+started by reviewer", listing)
               and "--no-tasks" in listing)
         check("restore alone does nothing", h.json("restore.json") == roster
@@ -317,7 +317,7 @@ def fixtures():
         done = h.plane("restore", "--no-tasks")
         check("restore --no-tasks reports each agent and what stays closed",
               f"reviewer (pi) is back in pro:{window['index']}" in done.stdout
-              and "stays closed: Codex publishes no session id" in done.stdout)
+              and "stays closed: it published no session id" in done.stdout)
         for name, session_id in ids.items():
             h.eventually(f"{name} resumed", lambda s=session_id: any(
                 a["session_id"] == s for a in h.index()["agents"]))
@@ -376,7 +376,7 @@ def fixtures():
                              and client.text())
         check("b lists agents, what cannot come back and why, and tasks with their starter",
               "▸ reviewer  pi  pro" in shown and "cannot come back" in shown
-              and "Codex publishes no session" in shown and "▸ web  by reviewer" in shown
+              and "it published no session" in shown and "▸ web  by reviewer" in shown
               and "⏎ agents + tasks  a agents only" in shown and "d discard  esc cancel" in shown)
         client.key(b"\x1b")
         h.eventually("esc closes", lambda: "bring back" not in client.text())
@@ -464,12 +464,13 @@ def claude():
         shutil.rmtree(transcripts, ignore_errors=True)
 
 
-try:
-    fixtures()
-    if CLAUDE:
-        claude()
-    print(json.dumps({"passed": True, "checks": len(RESULTS)}))
-except BaseException:
-    for path in Path("/tmp").glob("tap-rst*"):
-        print("evidence:", path, file=sys.stderr)
-    raise
+if __name__ == "__main__":
+    try:
+        fixtures()
+        if CLAUDE:
+            claude()
+        print(json.dumps({"passed": True, "checks": len(RESULTS)}))
+    except BaseException:
+        for path in Path("/tmp").glob("tap-rst*"):
+            print("evidence:", path, file=sys.stderr)
+        raise
