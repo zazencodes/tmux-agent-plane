@@ -264,7 +264,7 @@ The popup inherits the terminal background and uses its palette for the selected
 
 ### Neovim Telescope picker
 
-In Telescope normal mode, press `h` to switch between live agents and recently closed conversations in your workspace. Open history directly with `:Telescope tmux_agent_plane history`. Search by conversation title, agent name, project or agent kind. Enter revives the selected conversation and focuses its new pane.
+In Telescope normal mode, `p` toggles the selected project filter and `x` asks to remove the selected conversation. Open a specific project directly with `:Telescope tmux_agent_plane history project=PROJECT`. Press `h` to switch between live agents and recently closed conversations in your workspace. Open history directly with `:Telescope tmux_agent_plane history`. Search by conversation title, agent name, project or agent kind. Enter revives the selected conversation and focuses its new pane.
 
 With Neovim 0.10+ and [Telescope](https://github.com/nvim-telescope/telescope.nvim), add this local plugin to your lazy.nvim spec (adjust the checkout path):
 
@@ -398,7 +398,9 @@ A task keeps running when the agent that started it exits; only `task stop` (or 
 
 ## Recently closed conversations
 
-Press `h` in the sidebar or picker for your workspace's recently closed agent conversations, newest first. Browse with `j`/`k` or arrows, then `Enter` revives the selected conversation and takes you there; `Esc` or `Ctrl+C` returns to the agent list. Each row shows the agent, kind, project, task title and time since closing. An unavailable conversation shows why it cannot be revived.
+Press `h` in the sidebar or picker for your workspace's recently closed agent conversations, newest first. Browse with `j`/`k` or arrows, then `Enter` revives the selected conversation and takes you there; `Esc` or `Ctrl+C` clears the search, then the project filter, then returns to the agent list. Each row shows the agent, kind, project, task title and time since closing. An unavailable conversation shows why it cannot be revived.
+
+History colors match the sidebar for active projects. Closed projects get a shade based on their recorded project name. In sidebar and popup history, `/` searches titles, agent names, projects and agent kinds. Press `p` to filter to the selected project and again to show all projects. Press `x` then `y` to remove the selected entry from Agent Plane history. Its native transcript stays on disk. From the CLI, use `tmux-agent-plane recent --project PROJECT --search WORDS` (either flag works alone) and `tmux-agent-plane forget ID`.
 
 The daemon remembers conversations it has tracked, including agents closed outside the plane, and keeps the latest 100 closed conversations across daemon and tmux restarts. History starts when this version is installed. Reviving opens a new window in the original project and folder, recreating the project in its original workspace if needed. An existing project in another workspace is refused. The agent keeps its name if available; leadership and old family links stay with the original processes. A conversation already running stays out of the list.
 
@@ -523,7 +525,8 @@ The footer shows `cleaning up…`, then what closed, such as `closed 3 agents, 1
 | `task read <name> [--lines N]` | The task's screen, plus N lines of scrollback |
 | `task restart <name>` | Run the task's command again in its window |
 | `task stop <name>` | End the task; it leaves the list |
-| `recent [--json]` | List recently closed conversations across workspaces |
+| `recent [--json] [--project PROJECT] [--search WORDS]` | List or search recently closed conversations across workspaces |
+| `forget ID` | Remove one closed conversation from Agent Plane history |
 | `revive <id>` | Resume a conversation from `recent` in its original project and folder |
 | `restore [--tasks\|--no-tasks\|--discard]` | Agents from before tmux restarted: list them (no flag), bring them back with or without the tasks that were running, or forget them |
 | `toggle-sidebar <window>` | What the sidebar key does, from a window (a window or pane id) |

@@ -96,6 +96,8 @@ fn update(history: &mut History, agents: &[Agent], now: u64) -> Result<()> {
     Ok(())
 }
 
+pub static RECORDER: std::sync::Mutex<Recorder> = std::sync::Mutex::new(Recorder { entries: None });
+
 #[derive(Default)]
 pub struct Recorder {
     entries: Option<History>,
@@ -112,6 +114,19 @@ impl Recorder {
         }
     }
 
+    pub fn forget(&mut self, id: u64) -> Result<()> {
+        let mut history = read()?;
+        let i = history
+            .entries
+            .iter()
+            .position(|e| e.id == id && e.closed_at.is_some())
+            .context("closed conversation is no longer available")?;
+        history.entries.remove(i);
+        save(&history)?;
+        self.entries = Some(history);
+        Ok(())
+    }
+
     fn keep(&mut self, agents: &[Agent], now: u64) -> Result<()> {
         let previous = match &self.entries {
             Some(entries) => entries.clone(),
@@ -120,26 +135,38 @@ impl Recorder {
         let mut entries = previous.clone();
         update(&mut entries, agents, now)?;
         if entries != previous {
-            let path = path()?;
-            let tmp = path.with_extension("json.tmp");
-            std::fs::write(&tmp, serde_json::to_vec_pretty(&entries)?)
-                .with_context(|| format!("writing {}", tmp.display()))?;
-            std::fs::rename(&tmp, &path).with_context(|| format!("writing {}", path.display()))?;
+            save(&entries)?;
         }
         self.entries = Some(entries);
         Ok(())
     }
 }
 
+fn save(entries: &History) -> Result<()> {
+    let path = path()?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(entries)?)
+        .with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::rename(&tmp, &path).with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
+}
+
+pub fn forget(id: u64) -> Result<()> {
+    crate::lifecycle::ask(&format!("forget {id}"), Duration::from_secs(5))
+}
+
 pub fn recent(workspace: Option<&str>) -> Result<Vec<Entry>> {
-    let live = index::read()?;
+    closed_entries(workspace, &index::read()?.agents)
+}
+
+fn closed_entries(workspace: Option<&str>, live: &[Agent]) -> Result<Vec<Entry>> {
     Ok(read()?
         .entries
         .into_iter()
         .filter(|entry| {
             entry.closed_at.is_some()
                 && workspace.is_none_or(|w| entry.agent.workspace == w)
-                && !live.agents.iter().any(|a| same(&entry.agent, a))
+                && !live.iter().any(|a| same(&entry.agent, a))
         })
         .collect())
 }
@@ -190,10 +217,36 @@ pub fn revive(id: u64) -> Result<Agent> {
     }
 }
 
-pub fn list(json: bool) -> Result<()> {
-    let entries = recent(None)?;
+pub fn matches(entry: &Entry, project: Option<&str>, query: &str) -> bool {
+    let a = &entry.agent;
+    if project.is_some_and(|p| p != a.session) {
+        return false;
+    }
+    if query.is_empty() {
+        return true;
+    }
+    let fields = format!("{} {} {} {}", a.title, a.name, a.session, a.kind.as_str()).to_lowercase();
+    query
+        .split_whitespace()
+        .all(|word| fields.contains(&word.to_lowercase()))
+}
+
+pub fn list(json: bool, project: Option<&str>, query: &str) -> Result<()> {
+    let agents = index::read()?.agents;
+    let entries: Vec<_> = closed_entries(None, &agents)?
+        .into_iter()
+        .filter(|e| matches(e, project, query))
+        .collect();
     if json {
-        println!("{}", serde_json::to_string_pretty(&entries)?);
+        let mut rows = Vec::new();
+        for entry in entries {
+            let [r, g, b] =
+                crate::ui::project_rgb(&agents, &entry.agent.workspace, &entry.agent.session);
+            let mut row = serde_json::to_value(entry)?;
+            row["project_color"] = format!("#{r:02x}{g:02x}{b:02x}").into();
+            rows.push(row);
+        }
+        println!("{}", serde_json::to_string_pretty(&rows)?);
     } else if entries.is_empty() {
         println!("no recently closed sessions");
     } else {
@@ -242,6 +295,7 @@ pub(crate) mod tests {
             completions: 0,
             reported_completions: None,
             completion_epoch: None,
+            project_slot: None,
             visible: false,
         }
     }

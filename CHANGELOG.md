@@ -7,6 +7,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
+- Project colors now stay assigned while agents are active, with intermediate palette shades for larger workspaces. History shares those colors and gives archived projects their own shades. Search closed chats with `/`, toggle the selected project with `p`, and remove a history entry with `x`. Telescope also supports project filtering and removal. Scripts can use `recent --project PROJECT --search WORDS` and `forget ID`.
+
 - Recently closed conversations show a compact timeline of titles with details for the selected row. Neovim Telescope now searches workspace history and revives the selection with Enter. Press `h` in normal mode or run `:Telescope tmux_agent_plane history`.
 
 - `h` in the sidebar and picker lists recently closed agent conversations in the current workspace; `Enter` revives one in its original project and folder. The newest 100 closed conversations survive daemon and tmux restarts. `recent [--json]` and `revive <id>` expose the same history to agents. All six integrated kinds support resume, including Codex when its terminal title publishes the conversation ID.

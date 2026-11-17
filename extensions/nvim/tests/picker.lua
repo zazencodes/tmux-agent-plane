@@ -83,6 +83,22 @@ local function test()
   picker = require("telescope.actions.state").get_current_picker(vim.api.nvim_get_current_buf())
   wait_for(function() return picker.manager and picker.manager:num_results() == 2 end, "workspace history")
   assert(picker.prompt_title == "Recently closed · main")
+  local entry = picker:get_selection()
+  local _, highlights = entry.display(entry)
+  assert(highlights[1][2] == "AgentPlaneProject" .. entry.value.project_color:sub(2))
+  keys("p")
+  wait_for(function() return picker.manager:num_results() == 1 end, "selected project")
+  keys("p")
+  wait_for(function() return picker.manager:num_results() == 2 end, "all history projects")
+  local confirm = vim.fn.confirm
+  vim.fn.confirm = function() return 2 end
+  keys("x")
+  assert(vim.fn.filereadable(root .. "/forget.call") == 0)
+  vim.fn.confirm = function() return 1 end
+  keys("x")
+  vim.fn.confirm = confirm
+  wait_for(function() return picker.manager:num_results() == 1 end, "remove selected history")
+  assert(vim.deep_equal(vim.json.decode(vim.fn.readfile(root .. "/forget.call")[1]), { "forget", "10" }))
   keys("iShip<Esc>")
   wait_for(function() return picker.manager:num_results() == 1 end, "history search")
   keys("<CR>")

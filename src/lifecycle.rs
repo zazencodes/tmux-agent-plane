@@ -339,8 +339,19 @@ fn control_loop(listener: UnixListener, done: &AtomicBool) -> Result<()> {
                 (&mut socket)
                     .take(REQUEST_LIMIT)
                     .read_to_string(&mut command)?;
-                if let Some(workspace) = command.strip_prefix("cleanup ") {
-                    let response = match crate::cleanup::request(workspace) {
+                let result = if let Some(id) = command.strip_prefix("forget ") {
+                    Some(
+                        id.parse()
+                            .context("invalid history id")
+                            .and_then(|id| crate::history::RECORDER.lock().unwrap().forget(id)),
+                    )
+                } else {
+                    command
+                        .strip_prefix("cleanup ")
+                        .map(crate::cleanup::request)
+                };
+                if let Some(result) = result {
+                    let response = match result {
                         Ok(()) => "ok".into(),
                         Err(error) => format!("{error:#}"),
                     };

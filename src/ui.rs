@@ -519,9 +519,60 @@ const GROUP_COLOURS: [Color; 8] = [
 /// Colour by position among all sessions, so groups differ until the palette runs out and
 /// searching or filtering rows never recolours one.
 pub(crate) fn group_colour(agents: &[Agent], session: &str) -> Color {
-    let sessions: BTreeSet<&str> = agents.iter().map(|a| a.session.as_str()).collect();
-    let position = sessions.iter().position(|s| *s == session).unwrap_or(0);
-    GROUP_COLOURS[position % GROUP_COLOURS.len()]
+    let [r, g, b] = project_rgb(
+        agents,
+        agents
+            .iter()
+            .find(|a| a.session == session)
+            .map(|a| a.workspace.as_str())
+            .unwrap_or(""),
+        session,
+    );
+    Color::Rgb(r, g, b)
+}
+
+/// Keep the sidebar's first eight colours. Subdivide each interval as more projects appear.
+fn palette(slot: usize) -> [u8; 3] {
+    let n = GROUP_COLOURS.len();
+    let rgb = |i| match GROUP_COLOURS[i % n] {
+        Color::Rgb(r, g, b) => [r, g, b],
+        _ => unreachable!(),
+    };
+    let a = rgb(slot % n);
+    let round = slot / n;
+    if round == 0 {
+        return a;
+    }
+    let level = 1 << round.ilog2();
+    let fraction = (2 * (round - level) + 1) as f64 / (2 * level) as f64;
+    let b = rgb(slot % n + 1);
+    std::array::from_fn(|i| (a[i] as f64 + (b[i] as f64 - a[i] as f64) * fraction).round() as u8)
+}
+
+pub(crate) fn project_rgb(agents: &[Agent], workspace: &str, session: &str) -> [u8; 3] {
+    if let Some(slot) = agents
+        .iter()
+        .find(|a| a.workspace == workspace && a.session == session)
+        .and_then(|a| a.project_slot)
+    {
+        return palette(slot);
+    }
+    let sessions: BTreeSet<_> = agents
+        .iter()
+        .filter(|a| a.workspace == workspace)
+        .map(|a| a.session.as_str())
+        .collect();
+    let slot = sessions
+        .iter()
+        .position(|s| *s == session)
+        .unwrap_or_else(|| {
+            // Archived projects use their recorded project name even after the tmux session is gone.
+            let hash = session.bytes().fold(2166136261u32, |h, b| {
+                (h ^ u32::from(b)).wrapping_mul(16777619)
+            });
+            GROUP_COLOURS.len() + hash as usize % 1024
+        });
+    palette(slot)
 }
 
 fn draw(f: &mut Frame, app: &mut App) {
@@ -539,7 +590,7 @@ fn draw(f: &mut Frame, app: &mut App) {
 
 fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
     if app.sidebar.history.open {
-        app.sidebar.history.draw(f, area);
+        app.sidebar.history.draw(f, area, &app.sidebar.all_agents);
         return;
     }
     if app.sidebar.help.open {
@@ -1183,6 +1234,7 @@ mod tests {
             completions: 0,
             reported_completions: None,
             completion_epoch: None,
+            project_slot: None,
             visible: false,
         }
     }

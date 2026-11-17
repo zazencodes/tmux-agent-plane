@@ -134,6 +134,7 @@ mod tests {
             completions: 0,
             reported_completions: None,
             completion_epoch: None,
+            project_slot: None,
             visible: false,
         }
     }

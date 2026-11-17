@@ -135,6 +135,9 @@ pub struct Agent {
     /// Stable publisher lifetime, independent of the selected native session.
     #[serde(default)]
     pub completion_epoch: Option<String>,
+    /// Workspace palette slot retained while this project has live agents.
+    #[serde(default)]
+    pub project_slot: Option<usize>,
     /// The pane is on screen right now.
     pub visible: bool,
 }

@@ -219,6 +219,12 @@ try:
         "closed history survives tmux restart",
         {e["id"] for e in closed()} == {identity, archived_entry["id"]},
     )
+    found = json.loads(h.plane("recent", "--json", "--project", "pro", "--search", "RECENT worker").stdout)
+    check("project and chat search compose", [e["id"] for e in found] == [identity])
+    h.plane("forget", str(identity))
+    h.plane("daemon", "restart")
+    check("forgotten entry stays removed after restart", [e["id"] for e in closed()] == [archived_entry["id"]])
+    check("removing a stale selection fails", h.plane("forget", str(identity), check=False).returncode != 0)
     print("PASS recent history lifecycle and both UIs", flush=True)
 finally:
     for agent in (h.index() or {}).get("agents", []):

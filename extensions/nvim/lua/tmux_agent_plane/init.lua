@@ -54,10 +54,12 @@ local function agents(workspace, history)
     or { "name", "title", "session", "workspace", "pane", "state", "location" }
   for i, row in ipairs(rows) do
     if history then
-      if type(row) ~= "table" or type(row.id) ~= "number" or type(row.agent) ~= "table" or type(row.closed_at) ~= "number" then
+      if type(row) ~= "table" or type(row.id) ~= "number" or type(row.agent) ~= "table" or type(row.closed_at) ~= "number"
+        or type(row.project_color) ~= "string" or not row.project_color:match("^#%x%x%x%x%x%x$") then
         error_message("tmux-agent-plane recent --json: invalid history entry")
         return
       end
+      row.agent.project_color = row.project_color
       row.agent.history_id = row.id
       row.agent.closed_at = row.closed_at
       rows[i] = row.agent
@@ -92,18 +94,24 @@ local function pick(opts, history)
 
   local actions = require("telescope.actions")
   local action_state = require("telescope.actions.state")
-  local picker = require("telescope.pickers").new(opts, {
-    prompt_title = (history and "Recently closed · " or "Agents · ") .. workspace,
-    previewer = false,
-    finder = require("telescope.finders").new_table({
-      results = rows,
+  local project = history and opts.project or nil
+  local function finder()
+    local visible = project and vim.tbl_filter(function(a) return a.session == project end, rows) or rows
+    return require("telescope.finders").new_table({
+      results = visible,
       entry_maker = function(agent)
         if history then
           local title = agent.title ~= "" and agent.title or agent.name
+          local group = "AgentPlaneProject" .. agent.project_color:sub(2)
+          vim.api.nvim_set_hl(0, group, { fg = agent.project_color })
           return {
             value = agent,
             ordinal = title .. " " .. agent.name .. " " .. agent.session .. " " .. agent.kind,
-            display = title .. "  ·  " .. agent.session .. "  ·  " .. os.date("%b %d %H:%M", math.floor(agent.closed_at / 1000)),
+            display = function()
+              local prefix = "▏ " .. agent.session
+              local when = os.date("%b %d %H:%M", math.floor(agent.closed_at / 1000))
+              return prefix .. "  " .. title .. "  ·  " .. when, { { { 0, #prefix }, group } }
+            end,
           }
         end
         local detail = type(agent.detail) == "string" and agent.detail or ""
@@ -114,12 +122,41 @@ local function pick(opts, history)
           display = agent.name .. (agent.orchestrator and " [orch]" or "") .. "  " .. description .. "  [" .. agent.state .. " · " .. agent.location .. "]",
         }
       end,
-    }),
+    })
+  end
+  local picker = require("telescope.pickers").new(opts, {
+    prompt_title = (history and "Recently closed · " or "Agents · ") .. workspace,
+    prompt_prefix = project and (project .. " › ") or opts.prompt_prefix,
+    previewer = false,
+    finder = finder(),
     sorter = require("telescope.sorters").get_fzy_sorter(opts),
     attach_mappings = function(prompt_bufnr, map)
       for _, mode in ipairs({ "i", "n" }) do
         map(mode, "<Down>", actions.move_selection_next)
         map(mode, "<Up>", actions.move_selection_previous)
+      end
+      if history then
+        map("n", "p", function()
+          local entry = action_state.get_selected_entry()
+          if project then project = nil
+          elseif entry then project = entry.value.session
+          else return end
+          local current = action_state.get_current_picker(prompt_bufnr)
+          current:refresh(finder(), {
+            new_prefix = project and (project .. " › ") or opts.prompt_prefix or require("telescope.config").values.prompt_prefix,
+            reset_prompt = false,
+          })
+        end)
+        map("n", "x", function()
+          local entry = action_state.get_selected_entry()
+          if not entry then return end
+          local a = entry.value
+          if vim.fn.confirm("Remove " .. a.name .. " from history?", "&Yes\n&No", 2) == 1
+            and run({ "forget", tostring(a.history_id) }) then
+            rows = vim.tbl_filter(function(row) return row.history_id ~= a.history_id end, rows)
+            action_state.get_current_picker(prompt_bufnr):refresh(finder(), { reset_prompt = false })
+          end
+        end)
       end
       map("n", "h", function()
         actions.close(prompt_bufnr)

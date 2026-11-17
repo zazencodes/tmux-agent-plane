@@ -105,6 +105,34 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
+fn assign_project_slots(agents: &mut [Agent], previous: &HashMap<String, Agent>) {
+    use std::collections::{BTreeMap, BTreeSet};
+    let mut projects = BTreeMap::new();
+    for a in agents.iter() {
+        projects.insert((a.workspace.clone(), a.session.clone()), None);
+    }
+    let mut used = HashMap::<String, BTreeSet<usize>>::new();
+    for a in previous.values() {
+        if let Some(slot) = a.project_slot
+            && let Some(entry) = projects.get_mut(&(a.workspace.clone(), a.session.clone()))
+        {
+            *entry = Some(slot);
+            used.entry(a.workspace.clone()).or_default().insert(slot);
+        }
+    }
+    for ((workspace, _), slot) in &mut projects {
+        slot.get_or_insert_with(|| {
+            let taken = used.entry(workspace.clone()).or_default();
+            let free = (0..).find(|i| !taken.contains(i)).unwrap();
+            taken.insert(free);
+            free
+        });
+    }
+    for a in agents {
+        a.project_slot = projects[&(a.workspace.clone(), a.session.clone())];
+    }
+}
+
 fn run_inner() -> Result<()> {
     let dir = index::state_dir()?;
     std::fs::create_dir_all(&dir).context("creating daemon state directory")?;
@@ -139,7 +167,6 @@ fn run_inner() -> Result<()> {
     let mut placer = crate::projects::Placer::default();
     let mut tasks = crate::tasks::Tracker::default();
     let mut roster = crate::restore::Recorder::start()?;
-    let mut history = crate::history::Recorder::default();
 
     loop {
         if SHUTDOWN.load(Ordering::Relaxed) {
@@ -168,6 +195,7 @@ fn run_inner() -> Result<()> {
             .collect();
         let batch = fold(&mut prev, detected, &panes, now);
         let mut agents = batch.values;
+        assign_project_slots(&mut agents, &before);
         let mut issues = batch.issues;
         issues.extend(workspace.issues);
         issues.extend(links::resolve(&mut agents, &pids, &panes, |pane, link| {
@@ -179,6 +207,7 @@ fn run_inner() -> Result<()> {
         }));
         for agent in &agents {
             if let Some(kept) = prev.get_mut(&agent.pane) {
+                kept.project_slot = agent.project_slot;
                 kept.parent.clone_from(&agent.parent);
                 kept.parent_ended = agent.parent_ended;
             }
@@ -207,7 +236,12 @@ fn run_inner() -> Result<()> {
         let clean = !issues
             .iter()
             .any(|i| i.component.starts_with("scan:") || i.component.starts_with("advance:"));
-        issues.extend(history.tick(&agents, clean, now));
+        issues.extend(
+            crate::history::RECORDER
+                .lock()
+                .unwrap()
+                .tick(&agents, clean, now),
+        );
         let restore = roster.tick(&agents, &panes, &geometry, &tasks.values, clean, now);
         issues.extend(restore.issues);
         let views = windows(&panes);
@@ -496,6 +530,7 @@ fn advance(before: Option<&Agent>, d: Detected, now: u64) -> Result<Agent> {
         completions,
         reported_completions: d.completed_turns,
         completion_epoch: d.completion_epoch,
+        project_slot: None,
         visible,
     })
 }
@@ -657,6 +692,29 @@ pub fn status_segment(agents: &[Agent]) -> String {
 mod tests {
     use super::*;
     use crate::index::Kind;
+
+    #[test]
+    fn active_projects_keep_colours_across_arrivals_and_departures() {
+        let mut agents: Vec<_> = (0..32)
+            .map(|i| {
+                let mut a = crate::history::tests::agent(None);
+                a.session = format!("project-{i:02}");
+                a.pane = format!("%{i}");
+                a
+            })
+            .collect();
+        assign_project_slots(&mut agents, &HashMap::new());
+        let rgb = |agents: &[Agent], name: &str| crate::ui::project_rgb(agents, "main", name);
+        let colours: std::collections::HashSet<_> =
+            agents.iter().map(|a| rgb(&agents, &a.session)).collect();
+        assert_eq!(colours.len(), agents.len());
+        let retained = rgb(&agents, "project-09");
+        let before = agents.iter().map(|a| (a.pane.clone(), a.clone())).collect();
+        agents.remove(0);
+        agents[0].session = "another-project".into();
+        assign_project_slots(&mut agents, &before);
+        assert_eq!(rgb(&agents, "project-09"), retained);
+    }
 
     #[test]
     fn the_status_says_when_global_keys_are_off_and_how_to_turn_them_on() {

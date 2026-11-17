@@ -105,6 +105,8 @@ tmux-agent-plane task read <name> [--lines N]
 tmux-agent-plane task restart <name>      # rerun its command in the same window
 tmux-agent-plane task stop <name>         # end it; it leaves the list
 tmux-agent-plane recent [--json]          # recently closed conversations, newest first, across workspaces
+tmux-agent-plane recent --project <project> --search <words>  # either filter works alone
+tmux-agent-plane forget <id>               # remove a closed history entry; keep the native transcript
 tmux-agent-plane revive <id> [--focus]    # exact conversation from recent; new window in its original project/workspace
 tmux-agent-plane restore                  # agents from before tmux restarted; lists only
 tmux-agent-plane restore --tasks|--no-tasks|--discard  # bring them back (with tasks or not), or forget them

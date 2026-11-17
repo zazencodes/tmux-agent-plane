@@ -1163,10 +1163,10 @@ impl Sidebar {
             self.navigation.first_g = false;
         }
         // A project name being typed, the restore view and the workspaces consume every key.
-        let consumed = self.cleanup_confirmation_key(key)
+        let consumed = self.history_key(key, origin)
+            || self.cleanup_confirmation_key(key)
             || self.project_key(key)
             || self.move_key(key)
-            || self.history_key(key, origin)
             || self.restore_key(key, origin)
             || self.workspace_key(key, origin)
             || self.help_key(key)
@@ -1617,7 +1617,9 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
             {
                 sidebar.pressed(index::now_ms());
                 // Help consumes every closing key before setup, kill or navigation.
-                if sidebar.quota_key(key) || sidebar.action_key(key, origin) {
+                if (!sidebar.history.open && sidebar.quota_key(key))
+                    || sidebar.action_key(key, origin)
+                {
                     if !event::poll(Duration::ZERO)? {
                         break;
                     }
@@ -1792,7 +1794,7 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         return;
     }
     if sidebar.history.open {
-        sidebar.history.draw(f, f.area());
+        sidebar.history.draw(f, f.area(), &sidebar.all_agents);
         return;
     }
     if sidebar.restore.is_open() {
@@ -2540,6 +2542,7 @@ mod tests {
             completions: 0,
             reported_completions: None,
             completion_epoch: None,
+            project_slot: None,
             visible: false,
         }
     }

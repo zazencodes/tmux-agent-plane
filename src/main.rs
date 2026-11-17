@@ -184,9 +184,17 @@ enum Cmd {
     },
     /// List recently closed agent conversations
     Recent {
+        /// List only conversations from this project
+        #[arg(long)]
+        project: Option<String>,
+        /// Search conversation titles, names, projects and agent kinds
+        #[arg(long, default_value = "")]
+        search: String,
         #[arg(long)]
         json: bool,
     },
+    /// Remove a closed conversation from plane history, keeping its native transcript
+    Forget { id: u64 },
     /// Revive a conversation by its id from `recent`
     Revive {
         id: u64,
@@ -282,7 +290,12 @@ fn main() -> anyhow::Result<()> {
             no_tasks,
             discard,
         } => restore::run_cli(tasks, no_tasks, discard),
-        Cmd::Recent { json } => history::list(json),
+        Cmd::Recent {
+            json,
+            project,
+            search,
+        } => history::list(json, project.as_deref(), &search),
+        Cmd::Forget { id } => history::forget(id),
         Cmd::Revive { id, focus } => {
             let agent = history::revive(id)?;
             if focus {
