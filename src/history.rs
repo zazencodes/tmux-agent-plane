@@ -174,7 +174,7 @@ fn closed_entries(workspace: Option<&str>, live: &[Agent]) -> Result<Vec<Entry>>
 pub fn reason(entry: &Entry) -> Option<String> {
     if entry.agent.session_id.is_none() {
         Some(if entry.agent.kind == index::Kind::Codex {
-            "conversation id missing; enable Codex's terminal title session-id".into()
+            "Codex closed without a session ID. For future chats, add Session ID in /terminal-title.".into()
         } else {
             "it published no session id".into()
         })

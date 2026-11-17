@@ -2,13 +2,13 @@
 use super::{Origin, Sidebar, cancels};
 use crate::history::{self, Entry};
 use crate::index::Agent;
-use crate::ui::{OVERLAY, SUBTEXT, TEXT, age, hints, project_rgb, truncate};
+use crate::ui::{SUBTEXT, SURFACE2, TEXT, age, hints, project_rgb, truncate};
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph};
 
 #[derive(Default)]
 pub(crate) struct History {
@@ -65,7 +65,8 @@ impl History {
                 .spacing(2)
                 .areas(content)
         } else {
-            Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).areas(content)
+            let height = 10.min(content.height.saturating_sub(3));
+            Layout::vertical([Constraint::Fill(1), Constraint::Length(height)]).areas(content)
         };
         let width = body.width as usize;
         f.render_widget(
@@ -105,9 +106,8 @@ impl History {
                 } else {
                     &agent.title
                 };
-                let available = width.saturating_sub(when.len() + 3);
+                let available = width.saturating_sub(when.len());
                 ListItem::new(Line::from(vec![
-                    Span::styled(" ▏", color),
                     Span::styled(when, SUBTEXT),
                     Span::styled(truncate(title, available), color),
                     Span::styled(format!("  · {}", agent.session), color),
@@ -128,9 +128,7 @@ impl History {
             );
         } else {
             f.render_stateful_widget(
-                List::new(items)
-                    .highlight_style(Style::default().bg(OVERLAY))
-                    .highlight_symbol("▸"),
+                List::new(items).highlight_style(Style::default().bg(SURFACE2).bold()),
                 body,
                 &mut self.list,
             );
@@ -147,26 +145,52 @@ impl History {
                 .or_else(|| selected.and_then(history::reason))
                 .unwrap_or_else(|| selected.map(|e| e.agent.cwd.clone()).unwrap_or_default())
         };
-        let mut lines = Vec::new();
+        let block = Block::default()
+            .borders(Borders::TOP)
+            .border_style(SURFACE2)
+            .title(Line::styled(" Conversation ", SUBTEXT))
+            .padding(Padding::horizontal(1));
+        let inner = block.inner(detail);
+        f.render_widget(block, detail);
         if let Some(entry) = selected {
             let a = &entry.agent;
-            if wide {
-                lines.push(Line::styled(
-                    a.title.clone(),
-                    Style::default().fg(TEXT).bold(),
-                ));
-                lines.push(Line::default());
-            }
-            let metadata = format!("{} · {} · {}", a.name, a.session, a.kind.as_str());
-            lines.push(Line::styled(truncate(&metadata, detail.width.into()), TEXT));
+            let [r, g, b] = project_rgb(agents, &a.workspace, &a.session);
+            let project_style = Style::default()
+                .fg(ratatui::style::Color::Rgb(r, g, b))
+                .bold();
+            let [summary, metadata, status] = Layout::vertical([
+                Constraint::Length(2),
+                Constraint::Length(2),
+                Constraint::Fill(1),
+            ])
+            .areas(inner);
+            let title = if a.title.trim().is_empty() {
+                &a.name
+            } else {
+                &a.title
+            };
+            f.render_widget(
+                Paragraph::new(title.as_str())
+                    .style(Style::default().fg(TEXT).bold())
+                    .wrap(ratatui::widgets::Wrap { trim: true }),
+                summary,
+            );
+            f.render_widget(
+                Paragraph::new(vec![
+                    Line::styled(a.session.as_str(), project_style),
+                    Line::styled(format!("{} · {}", a.name, a.kind.as_str()), SUBTEXT),
+                ]),
+                metadata,
+            );
+            let block = Block::default().padding(Padding::top(u16::from(status.height > 3)));
+            f.render_widget(
+                Paragraph::new(message)
+                    .block(block)
+                    .style(TEXT)
+                    .wrap(ratatui::widgets::Wrap { trim: true }),
+                status,
+            );
         }
-        lines.push(Line::from(message));
-        f.render_widget(
-            Paragraph::new(lines)
-                .style(SUBTEXT)
-                .wrap(ratatui::widgets::Wrap { trim: true }),
-            detail,
-        );
         let actions = if self.removing.is_some() {
             Line::styled(" Remove from history? y/n", TEXT)
         } else if self.editing.is_some() {
@@ -372,6 +396,33 @@ mod tests {
         assert!(sidebar.history.removing.is_none());
         sidebar.action_key(KeyEvent::from(KeyCode::Enter), origin);
         assert_eq!(sidebar.history.chosen, Some(2));
+    }
+
+    #[test]
+    fn sidebar_detail_divider_stays_put_and_the_codex_hint_fits() {
+        let mut sidebar = browsing();
+        sidebar.history.entries[1].agent.kind = crate::index::Kind::Codex;
+        sidebar.history.entries[1].agent.session_id = None;
+        let mut terminal = Terminal::new(TestBackend::new(38, 24)).unwrap();
+        for selected in [0, 1] {
+            sidebar.history.list.select(Some(selected));
+            terminal
+                .draw(|f| sidebar.history.draw(f, f.area(), &[]))
+                .unwrap();
+            let rows: Vec<String> = (0..24)
+                .map(|y| {
+                    (0..38)
+                        .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                        .collect()
+                })
+                .collect();
+            assert!(rows[13].contains("Conversation"));
+            assert!(rows[13].contains('─'));
+            assert!(!rows[..13].iter().any(|row| row.contains(['▏', '▸'])));
+            if selected == 1 {
+                assert!(rows[14..23].join(" ").contains("/terminal-title."));
+            }
+        }
     }
 
     #[test]

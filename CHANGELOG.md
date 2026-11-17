@@ -41,6 +41,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Sidebar history gives the selected conversation a dedicated details panel. Project-colored titles and a highlighted row replace the left rail and arrow.
+
 - Kill confirmations show only `kill [y/n]` beside the selected row, leaving its name visible. Session-ending warnings remain explicit.
 
 - Kill and task-stop prompts are compact, borderless strips sized to their text, with the confirmation keys shown once in both sidebar and picker.
