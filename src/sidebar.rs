@@ -84,7 +84,9 @@ fn enter_locked(window: &str) -> Result<()> {
     if !is_open()? {
         crate::bindings::require_enabled()?;
         tmux::run(&["set-option", "-g", OPEN, "1"])?;
-        add_everywhere()?;
+        let pane = add(window)?;
+        tmux::run(&["select-pane", "-t", &pane])?;
+        return add_everywhere();
     }
     let pane = add(window)?;
     tmux::run(&["select-pane", "-t", &pane]).map(drop)
@@ -116,13 +118,20 @@ fn is_open() -> Result<bool> {
 }
 
 fn add_everywhere() -> Result<()> {
-    let windows = tmux::run(&["list-windows", "-a", "-F", "#{window_id}"])?;
-    let mut done = Vec::new();
-    // A window linked into several sessions is listed once per session.
-    for window in windows.lines() {
-        if !done.contains(&window) {
-            add(window)?;
-            done.push(window);
+    let panes = tmux::run(&[
+        "list-panes",
+        "-a",
+        "-F",
+        &format!("#{{window_id}} #{{{MARK}}}"),
+    ])?;
+    let mut windows = BTreeMap::new();
+    for line in panes.lines() {
+        let (window, mark) = line.split_once(' ').context("invalid sidebar inventory")?;
+        *windows.entry(window).or_insert(false) |= mark == "1";
+    }
+    for (window, has_sidebar) in windows {
+        if !has_sidebar {
+            create(window)?;
         }
     }
     Ok(())
@@ -141,6 +150,10 @@ fn add(window: &str) -> Result<String> {
     if let Some(pane) = panes.lines().find_map(|line| line.strip_suffix(" 1")) {
         return Ok(pane.to_string());
     }
+    create(window)
+}
+
+fn create(window: &str) -> Result<String> {
     let pane = tmux::run(&[
         "split-window",
         "-h",
@@ -182,9 +195,18 @@ fn close_locked() -> Result<()> {
         .collect();
     // From `q`, this process runs in one of them: kill that pane last, or it dies halfway.
     let own = std::env::var("TMUX_PANE").ok();
-    panes.sort_by_key(|pane| Some(*pane) == own.as_deref());
-    for pane in panes {
-        tmux::run(&["kill-pane", "-t", pane])?;
+    panes.sort_by_key(|pane| (Some(*pane) == own.as_deref(), *pane));
+    panes.dedup();
+    // Keep each command queue within tmux's message limit on large servers.
+    for batch in panes.chunks(64) {
+        let mut commands = Vec::new();
+        for pane in batch {
+            if !commands.is_empty() {
+                commands.push(";");
+            }
+            commands.extend(["kill-pane", "-t", *pane]);
+        }
+        tmux::run(&commands)?;
     }
     Ok(())
 }

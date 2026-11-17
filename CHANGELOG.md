@@ -41,6 +41,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Opening the sidebar focuses your window first, then sets up the remaining windows. Closing sidebars batches the tmux commands on large servers.
+
 - Sidebar history gives the selected conversation a dedicated details panel. Project-colored titles and a highlighted row replace the left rail and arrow.
 
 - Kill confirmations show only `kill [y/n]` beside the selected row, leaving its name visible. Session-ending warnings remain explicit.
