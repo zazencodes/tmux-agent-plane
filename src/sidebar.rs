@@ -703,7 +703,11 @@ impl Sidebar {
     /// A left click on `row`: selects the agent drawn there, unless something is being typed or
     /// confirmed. True when the selection moved.
     fn click(&mut self, row: u16) -> bool {
-        if self.editing.is_some() || self.typing_query() || confirmation_footer(self, 0).is_some() {
+        if self.editing.is_some()
+            || self.typing_query()
+            || confirmation_footer(self, 0).is_some()
+            || kill_confirmation(self, 0).is_some()
+        {
             return false;
         }
         let Some(&(_, agent)) = self.clickable.iter().find(|(y, _)| *y == row) else {
@@ -1855,7 +1859,21 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
             .and_then(|row| row.checked_sub(sidebar.agents.len())),
     );
     fill_viewport(&mut task_state, &task_items, tasks_area.height);
-    f.render_stateful_widget(List::new(task_items), tasks_area, &mut task_state);
+    f.render_stateful_widget(
+        List::new(task_items.iter().cloned()),
+        tasks_area,
+        &mut task_state,
+    );
+    let task_anchor = task_state.selected().map(|selected| {
+        tasks_area.y
+            + task_items
+                .iter()
+                .skip(task_state.offset())
+                .take(selected.saturating_sub(task_state.offset()) + 1)
+                .map(|item| item.height() as u16)
+                .sum::<u16>()
+                .saturating_sub(1)
+    });
     let inner = list_area.width.saturating_sub(2) as usize;
     let block = panel(list_title(sidebar));
     let content = block.inner(list_area);
@@ -1915,8 +1933,12 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
             agent_state.select(None);
         }
         fill_viewport(&mut agent_state, &items, agents_area.height);
+        f.render_stateful_widget(
+            List::new(items.iter().cloned()),
+            agents_area,
+            &mut agent_state,
+        );
         sidebar.clickable = agent_rows(&sidebar.agents, &items, agent_state.offset(), agents_area);
-        f.render_stateful_widget(List::new(items), agents_area, &mut agent_state);
         *sidebar.list.offset_mut() = agent_state.offset();
     }
 
@@ -1937,6 +1959,14 @@ fn draw(f: &mut Frame, sidebar: &mut Sidebar) {
         Text::from,
     );
     f.render_widget(Paragraph::new(footer), help_area);
+    let anchor = task_anchor.or_else(|| {
+        sidebar
+            .clickable
+            .iter()
+            .find(|(_, row)| Some(*row) == sidebar.list.selected())
+            .map(|(y, _)| *y)
+    });
+    crate::ui::draw_kill_confirmation(f, sidebar, body_area, anchor.unwrap_or(agents_area.y));
 }
 
 /// The main keys, always at the bottom of the sidebar; each line fits its narrowest width.
@@ -1949,30 +1979,17 @@ const KEY_HINTS: [&[(&str, &str)]; 3] = [
 /// The key hints, then a line for events, notices and the selection's own keys.
 const FOOTER_HEIGHT: u16 = KEY_HINTS.len() as u16 + 1;
 
-/// The prompt of whichever action is waiting on a key.
+/// Prompts that use the footer rather than the selected-row overlay.
 pub(crate) fn confirmation_footer(sidebar: &Sidebar, width: usize) -> Option<Vec<Line<'static>>> {
     sidebar
-        .killing
+        .cleaning
         .as_ref()
-        .map(|kill| kill_footer(kill, width))
-        .or_else(|| {
-            sidebar
-                .cleaning
-                .as_ref()
-                .map(|cleanup| cleanup_footer(cleanup, width))
-        })
+        .map(|cleanup| cleanup_footer(cleanup, width))
         .or_else(|| {
             sidebar
                 .new_agent
                 .as_ref()
                 .map(|picker| new_agent_footer(picker, width))
-        })
-        .or_else(|| {
-            sidebar
-                .tasks
-                .stopping
-                .as_ref()
-                .map(|task| tasks::stop_footer(task, width))
         })
         .or_else(|| {
             sidebar
@@ -1985,6 +2002,20 @@ pub(crate) fn confirmation_footer(sidebar: &Sidebar, width: usize) -> Option<Vec
                 .project_move
                 .as_ref()
                 .map(|picker| project_move::footer(picker, width))
+        })
+}
+
+pub(crate) fn kill_confirmation(sidebar: &Sidebar, width: usize) -> Option<Vec<Line<'static>>> {
+    sidebar
+        .killing
+        .as_ref()
+        .map(|kill| kill_footer(kill, width))
+        .or_else(|| {
+            sidebar
+                .tasks
+                .stopping
+                .as_ref()
+                .map(|task| tasks::stop_footer(task, width))
         })
 }
 
@@ -3657,6 +3688,45 @@ mod tests {
     }
 
     #[test]
+    fn kill_overlay_keeps_rows_scroll_and_footer_in_place() {
+        use ratatui::{Terminal, backend::TestBackend};
+        for (width, height) in [(38, 28), (20, 12), (8, 4), (1, 1), (0, 0)] {
+            for selected in [0, 9] {
+                let mut sidebar = showing(
+                    (0..10)
+                        .map(|i| agent(&format!("%{i}"), State::Idle))
+                        .collect(),
+                );
+                sidebar.select(Some(selected));
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|f| draw(f, &mut sidebar)).unwrap();
+                let before = terminal.backend().buffer().clone();
+                let rows = sidebar.clickable.clone();
+                let offset = sidebar.list.offset();
+                let mut kill = confirmation(State::Idle);
+                kill.agent = sidebar.agents[selected].clone();
+                sidebar.killing = Some(kill);
+                terminal.draw(|f| draw(f, &mut sidebar)).unwrap();
+                assert_eq!(sidebar.clickable, rows);
+                assert_eq!(sidebar.list.offset(), offset);
+                if width >= 20 {
+                    let anchor = rows.iter().find(|(_, row)| *row == selected).unwrap().0;
+                    let expected_top = anchor.min(height - FOOTER_HEIGHT - 1 - 5);
+                    assert_eq!(terminal.backend().buffer()[(0, expected_top)].symbol(), "╭");
+                }
+                for y in height.saturating_sub(FOOTER_HEIGHT)..height {
+                    for x in 0..width {
+                        assert_eq!(before[(x, y)], terminal.backend().buffer()[(x, y)]);
+                    }
+                }
+                sidebar.killing = None;
+                terminal.draw(|f| draw(f, &mut sidebar)).unwrap();
+                assert_eq!(&before, terminal.backend().buffer());
+            }
+        }
+    }
+
+    #[test]
     fn kill_never_offers_own_sidebar_and_prompt_keeps_name_state_and_default_yes_legible() {
         let mut sidebar = showing(vec![agent("%1", State::Idle)]);
         assert!(sidebar.kill_key(
@@ -3678,7 +3748,7 @@ mod tests {
         let lines = kill_footer(&kill, 38);
         assert_eq!(lines.len(), 3);
         assert!(lines[2].to_string().contains("ends session remote? [Y/n]"));
-        // Render confirmation over a local error/event; no hidden normal key hints.
+        // The confirmation overlays the list while the footer stays visible.
         use ratatui::{Terminal, backend::TestBackend};
         sidebar.killing = Some(kill);
         sidebar.notice = Some("rename error".into());
@@ -3691,10 +3761,14 @@ mod tests {
                     .collect()
             })
             .collect();
-        assert!(rows[9].contains("kill-name-is-long"));
-        assert!(rows[10].contains("working"));
-        assert!(rows[11].contains("ends session remote? [Y/n]"));
-        assert!(!rows.iter().any(|row| row.contains("rename error")));
+        assert!(rows.iter().any(|row| row.contains("kill-name-is-long")));
+        assert!(rows.iter().any(|row| row.contains("working")));
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("ends session remote? [Y/n]"))
+        );
+        assert!(rows[11].contains("rename error"));
+        assert!(rows[8].contains("x kill"));
     }
 
     pub(super) fn rendered(sidebar: &mut Sidebar) -> String {

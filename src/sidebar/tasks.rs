@@ -454,10 +454,16 @@ mod tests {
         let mut sidebar = with_tasks();
         key(&mut sidebar, KeyCode::Char('t'));
         sidebar.select(sidebar.task_row("%57"));
+        let before_screen = rendered(&mut sidebar);
         assert!(key(&mut sidebar, KeyCode::Char('x')));
         assert_eq!(sidebar.tasks.stopping.as_ref().unwrap().pane, "%57");
         assert!(sidebar.killing.is_none());
         let screen = rendered(&mut sidebar);
+        assert_eq!(
+            before_screen.lines().skip(15).collect::<Vec<_>>(),
+            screen.lines().skip(15).collect::<Vec<_>>()
+        );
+        assert!(screen.contains("confirm"), "{screen}");
         assert!(screen.contains("stop web-dev"), "{screen}");
         assert!(screen.contains("(running)? [Y/n]"), "{screen}");
         let before = sidebar.navigation.pane.clone();

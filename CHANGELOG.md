@@ -21,6 +21,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Kill and task-stop confirmations appear over the selected row in the sidebar and picker, keeping the list, preview and helper keys in place.
+
 - Codex agents can delegate into a window or session without asking the user to identify their parent. An optional known `--parent` preserves family tracking; otherwise the CLI explicitly reports an independent agent and records no parent.
 
 - Antigravity agents stay working during generation and tool execution when native summaries prematurely report idle, so waits and completion notices follow the actual turn.

@@ -813,6 +813,44 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App) {
         Text::from,
     );
     f.render_widget(Paragraph::new(footer), help_area);
+    let sidebar = &app.sidebar;
+    let anchor = list_area.y
+        + 1
+        + sidebar
+            .list
+            .selected()
+            .unwrap_or(0)
+            .saturating_sub(sidebar.list.offset()) as u16;
+    let body = Rect {
+        height: help_area.y.saturating_sub(area.y),
+        ..area
+    };
+    draw_kill_confirmation(f, sidebar, body, anchor);
+}
+
+/// Paint last, anchored to the selected row; the normal layout and footer stay put.
+pub(crate) fn draw_kill_confirmation(f: &mut Frame, sidebar: &Sidebar, area: Rect, anchor: u16) {
+    let width = area.width.min(48);
+    let Some(mut lines) =
+        crate::sidebar::kill_confirmation(sidebar, width.saturating_sub(2) as usize)
+    else {
+        return;
+    };
+    lines.push(hints(&[("⏎/y", "yes"), ("n", "no")]));
+    let height = (lines.len() as u16 + 2).min(area.height);
+    let popup = Rect::new(
+        area.right().saturating_sub(width),
+        anchor.clamp(area.y, area.bottom().saturating_sub(height).max(area.y)),
+        width,
+        height,
+    );
+    f.render_widget(Clear, popup);
+    f.render_widget(
+        Paragraph::new(lines)
+            .style(Style::default().bg(SURFACE0))
+            .block(panel(Line::from(" confirm ")).border_style(colour(State::Blocked))),
+        popup,
+    );
 }
 
 /// The message for an empty list, in the sidebar and the picker. With several workspaces it names
