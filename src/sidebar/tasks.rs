@@ -281,26 +281,6 @@ pub(crate) fn items(
         .collect()
 }
 
-/// The stop question, styled like a kill's: the name, then its state and `[Y/n]`.
-pub(crate) fn stop_footer(task: &Task, width: usize) -> Vec<Line<'static>> {
-    let name = &task.definition.name;
-    let narrow = name.chars().count() + 6 > width;
-    let label = task.status.label();
-    let (first, second) = if narrow {
-        (truncate(name, width), format!("stop {label}? [Y/n]"))
-    } else {
-        (format!(" stop {name}"), format!(" ({label})? [Y/n]"))
-    };
-    let style = match task.status {
-        Status::Running => Style::default().fg(colour(State::Done)),
-        Status::Exited { exit_code, .. } => exit_style(exit_code),
-    };
-    vec![
-        Line::styled(first, Style::default().fg(TEXT).bold()),
-        Line::styled(truncate(&second, width), style),
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::tests::{agent, rendered, showing};
@@ -464,9 +444,9 @@ mod tests {
             screen.lines().skip(15).collect::<Vec<_>>()
         );
         assert!(!screen.contains("confirm"), "{screen}");
-        assert_eq!(screen.matches("[Y/n]").count(), 1);
-        assert!(screen.contains("stop web-dev"), "{screen}");
-        assert!(screen.contains("(running)? [Y/n]"), "{screen}");
+        assert_eq!(screen.matches("[y/n]").count(), 1);
+        assert!(screen.contains("kill [y/n]"), "{screen}");
+        assert!(!screen.contains("stop web-dev"), "{screen}");
         let before = sidebar.navigation.pane.clone();
         assert!(key(&mut sidebar, KeyCode::Char('j')));
         assert!(sidebar.tasks.stopping.is_none());
@@ -566,9 +546,6 @@ mod tests {
                 assert!(item.width() <= width, "{width}");
             }
         }
-        let footer = stop_footer(&long, 20);
-        assert!(footer.iter().all(|line| line.width() <= 20));
-        assert!(footer[1].to_string().contains("[Y/n]"));
     }
 
     #[test]

@@ -2027,17 +2027,25 @@ pub(crate) fn confirmation_footer(sidebar: &Sidebar, width: usize) -> Option<Vec
 }
 
 pub(crate) fn kill_confirmation(sidebar: &Sidebar, width: usize) -> Option<Vec<Line<'static>>> {
-    sidebar
-        .killing
-        .as_ref()
-        .map(|kill| kill_footer(kill, width))
-        .or_else(|| {
-            sidebar
-                .tasks
-                .stopping
-                .as_ref()
-                .map(|task| tasks::stop_footer(task, width))
-        })
+    if sidebar.killing.is_none() && sidebar.tasks.stopping.is_none() {
+        return None;
+    }
+    let mut lines = vec![Line::styled(
+        " kill [y/n] ",
+        Style::default().fg(TEXT).bold(),
+    )];
+    if let Some(kill) = &sidebar.killing
+        && !kill.ends_sessions.is_empty()
+    {
+        lines.push(Line::styled(
+            truncate(
+                &format!(" ends session {}", kill.ends_sessions.join(", ")),
+                width,
+            ),
+            colour(State::Blocked),
+        ));
+    }
+    Some(lines)
 }
 
 fn cleanup_footer(confirmation: &CleanupConfirmation, width: usize) -> Vec<Line<'static>> {
@@ -2072,46 +2080,6 @@ fn new_agent_footer(picker: &NewAgent, width: usize) -> Vec<Line<'static>> {
         }
     }));
     lines.push(hints(&[("⏎", "start"), ("esc", "cancel")]));
-    lines
-}
-
-/// Two lines keep both name and state readable in a narrow pane. Remote session
-/// destruction gets a third, explicit risk line; [Y/n] always remains visible.
-fn kill_footer(confirmation: &KillConfirmation, width: usize) -> Vec<Line<'static>> {
-    let agent = &confirmation.agent;
-    let narrow = agent.name.chars().count() + 6 > width;
-    let name = if narrow {
-        truncate(&agent.name, width)
-    } else {
-        format!(" kill {}", agent.name)
-    };
-    let state = format!(
-        "{}{}",
-        if narrow {
-            format!("kill {}", agent.state.as_str())
-        } else {
-            format!(" ({})", agent.state.as_str())
-        },
-        if confirmation.ends_sessions.is_empty() {
-            "? [Y/n]"
-        } else {
-            ""
-        }
-    );
-    let mut lines = vec![
-        Line::styled(name, Style::default().fg(TEXT).bold()),
-        Line::styled(state, colour(agent.state)),
-    ];
-    if !confirmation.ends_sessions.is_empty() {
-        let risk = truncate(
-            &format!(" ends session {}", confirmation.ends_sessions.join(", ")),
-            width.saturating_sub(7),
-        );
-        lines.push(Line::styled(
-            format!("{risk}? [Y/n]"),
-            colour(State::Blocked),
-        ));
-    }
     lines
 }
 
@@ -3732,18 +3700,18 @@ mod tests {
                 assert_eq!(sidebar.list.offset(), offset);
                 if width >= 20 {
                     let anchor = rows.iter().find(|(_, row)| *row == selected).unwrap().0;
-                    let expected_top = anchor.min(height - FOOTER_HEIGHT - 1 - 2);
+                    let expected_top = anchor.min(height - FOOTER_HEIGHT - 1 - 1);
                     let buffer = terminal.backend().buffer();
                     let line: String = (0..width)
                         .map(|x| buffer[(x, expected_top)].symbol())
                         .collect();
                     assert!(line.contains("kill "), "{line}");
                     let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
-                    assert_eq!(text.matches("[Y/n]").count(), 1);
+                    assert_eq!(text.matches("[y/n]").count(), 1);
                     assert!(!text.contains("confirm"));
                     assert!(!text.contains("⏎/y"));
                     for y in 0..height.saturating_sub(FOOTER_HEIGHT) {
-                        if !(expected_top..expected_top + 2).contains(&y) {
+                        if !(expected_top..expected_top + 1).contains(&y) {
                             for x in 0..width {
                                 assert_eq!(before[(x, y)], buffer[(x, y)]);
                             }
@@ -3763,7 +3731,7 @@ mod tests {
     }
 
     #[test]
-    fn kill_never_offers_own_sidebar_and_prompt_keeps_name_state_and_default_yes_legible() {
+    fn kill_prompt_is_compact_and_keeps_session_warning() {
         let mut sidebar = showing(vec![agent("%1", State::Idle)]);
         assert!(sidebar.kill_key(
             KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
@@ -3772,21 +3740,18 @@ mod tests {
         assert!(sidebar.killing.is_none()); // No tmux/index call for the own-pane exclusion.
         let mut kill = confirmation(State::Working);
         kill.agent.name = "kill-name-is-long".into();
+        sidebar.killing = Some(kill);
         for width in [20, 38] {
-            let lines = kill_footer(&kill, width);
-            assert_eq!(lines.len(), 2);
-            assert!(lines[0].to_string().contains("kill-name-is-long"));
-            assert!(lines[1].to_string().contains("working"));
-            assert!(lines[1].to_string().ends_with("[Y/n]"));
-            assert!(lines.iter().all(|line| line.width() <= width));
+            let lines = kill_confirmation(&sidebar, width).unwrap();
+            assert_eq!(lines.len(), 1);
+            assert_eq!(lines[0].to_string(), " kill [y/n] ");
         }
-        kill.ends_sessions = vec!["remote".into()];
-        let lines = kill_footer(&kill, 38);
-        assert_eq!(lines.len(), 3);
-        assert!(lines[2].to_string().contains("ends session remote? [Y/n]"));
+        sidebar.killing.as_mut().unwrap().ends_sessions = vec!["remote".into()];
+        let lines = kill_confirmation(&sidebar, 38).unwrap();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[1].to_string().contains("ends session remote"));
         // The confirmation overlays the list while the footer stays visible.
         use ratatui::{Terminal, backend::TestBackend};
-        sidebar.killing = Some(kill);
         sidebar.notice = Some("rename error".into());
         let mut terminal = Terminal::new(TestBackend::new(38, 12)).unwrap();
         terminal.draw(|frame| draw(frame, &mut sidebar)).unwrap();
@@ -3797,12 +3762,9 @@ mod tests {
                     .collect()
             })
             .collect();
-        assert!(rows.iter().any(|row| row.contains("kill-name-is-long")));
-        assert!(rows.iter().any(|row| row.contains("working")));
-        assert!(
-            rows.iter()
-                .any(|row| row.contains("ends session remote? [Y/n]"))
-        );
+        assert!(rows.iter().any(|row| row.contains("kill [y/n]")));
+        assert!(!rows.iter().any(|row| row.contains("kill-name-is-long")));
+        assert!(rows.iter().any(|row| row.contains("ends session remote")));
         assert!(rows[11].contains("rename error"));
         assert!(rows[8].contains("x kill"));
     }
