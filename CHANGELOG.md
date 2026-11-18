@@ -43,6 +43,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Configure is the single source of model and effort defaults for new agents and built-in background jobs. Existing built-in naming presets follow these settings automatically. Unrelated spawn flags keep your defaults, and the agent skill ignores legacy model and effort arguments in `config.toml`.
+
 - Configure groups preferences together and shows model and effort side by side for each agent. Move between fields with the left and right arrows.
 
 - Opening the sidebar focuses your window first, then sets up the remaining windows. Closing sidebars batches the tmux commands on large servers.

@@ -108,13 +108,12 @@ ln -s ~/.tmux/plugins/tmux-agent-plane/skill/tmux-agent-plane ~/.agents/skills/t
 
 **5. Your agent preferences (optional).** Standing instructions for agents using the skill go in `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/config.toml`. The skill tells every agent that loads it to read this file, if it exists, and follow it over the skill's defaults. Only agents read it; the binary's own settings stay in `config.json` beside it. Without the file, agents use the skill as written.
 
-`instructions` apply to every agent. Each `[spawn.<kind>]` table holds the `args` agents pass after `--` whenever they spawn that kind, each array item as one argument, unless your request names other values for those options, plus `instructions` for that kind:
+Use `instructions` for rules that apply to every agent or `[spawn.<kind>].instructions` for one kind. Set model and effort in Configure. Optional `[spawn.<kind>].args` supply other CLI flags. The skill ignores model and effort overrides in those arrays.
 
 ```toml
 instructions = ["Start helpers with --in window in the current project."]
 
 [spawn.codex]
-args = ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="medium"']
 instructions = ["Never use GPT-6-Astra (gpt-6-astra)."]
 ```
 
@@ -444,7 +443,7 @@ An agent started with `spawn` records the agent that spawned it, and helpers tha
 
 `spawn` starts a persistent interactive session in tmux’s configured `default-shell`. It passes the launch command directly to an interactive login shell, which loads your startup files before running the agent, so aliases and flags apply even with long or multi-line tasks. Each argument is quoted separately. When the agent exits, a fresh interactive login shell stays open. `spawn` supplies its own launch command, so tmux’s `default-command` is not used.
 
-Everything after `--` is passed verbatim to the agent CLI, each argument quoted separately, ahead of the task. `tmux-agent-plane spawn codex "Review the API" -- -m gpt-6.1-sol` runs `codex '-m' 'gpt-6.1-sol' 'Review the API'`. The arguments work with or without a task. When no arguments follow `--`, `spawn` uses the model and effort defaults from [Configuration](#configuration); empty defaults leave the choice to the agent CLI.
+Everything after `--` is passed verbatim to the agent CLI, each argument quoted separately, ahead of the task. `tmux-agent-plane spawn codex "Review the API" -- -m gpt-6.1-sol` runs `codex '-m' 'gpt-6.1-sol' 'Review the API'`. The arguments work with or without a task. Launches use the model and effort from [Configuration](#configuration). An explicit effort overrides the saved effort. An explicit model uses its own effort unless you also specify one. Other flags keep your defaults.
 
 | Kind | Command sent to the shell with a task and agent arguments |
 | --- | --- |
@@ -463,7 +462,7 @@ Press `o` in the sidebar or picker to open configuration at the bottom left. Use
 
 - **Sidebar panels:** choose whether new sidebars show tasks, quota and the graph. Tasks and the graph start enabled; quota starts hidden. A change applies to this sidebar immediately and to other sidebars when they next open, except the graph, which every sidebar follows within half a second. Pressing `p` in a sidebar saves the same setting.
 - **Background agent:** choose a CLI preset or custom command for automatic naming, then review and accept its command. Enable automatic naming separately.
-- **Agent defaults:** set each kind's model and effort for the launcher and `spawn` when no explicit agent arguments are supplied. For Claude, Codex and Antigravity, open Model to choose from the installed CLI’s catalog. Open Effort to see the levels for that model. Changing the model sets effort to Automatic, which uses the CLI’s own default. Other agents accept typed CLI values.
+- **Agent defaults:** set each kind's model and effort for the launcher, `spawn`, and built-in background presets. For Claude, Codex and Antigravity, open Model to choose from the installed CLI’s catalog. Open Effort to see the levels for that model. Changing the model sets effort to Automatic, which uses the CLI’s own default. Other agents accept typed CLI values.
 
 Settings live in `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/config.json`. The daemon picks up changes without a restart. The separate `config.toml` in [Install step 5](#install) holds instructions for agents using the skill.
 
@@ -471,7 +470,7 @@ Settings live in `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/config.json
 
 AI naming is **off by default**. In `o` → Configure, choose and accept a background agent, then turn on Automatic naming. Setup checks that the executable is installed and shows the command, model and data disclosure. Choosing a command leaves the naming switch unchanged. Setup itself runs no model and changes no folder trust; authenticate the chosen CLI normally first.
 
-The naming command receives the agent's task title, working-directory path and blocked detail through your CLI's existing authentication. Its configured AI provider may receive those fields. Screen captures and file contents are excluded. Review the command before enabling it; presets select a model and effort, and custom commands control their own.
+The naming command receives the agent's task title, working-directory path and blocked detail through your CLI's existing authentication. Its configured AI provider may receive those fields. Screen captures and file contents are excluded. Review the command before enabling it; presets follow the selected agent’s model and effort in Configure, and custom commands control their own.
 
 Only agents still carrying an unassigned default name qualify, once they have a meaningful task title. Names given with `--name`, `rename` or sidebar `r` are preserved. Generated names are two or three lowercase words joined by hyphens, unique and at most 20 characters.
 

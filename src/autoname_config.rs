@@ -1,4 +1,5 @@
 //! The single XDG configuration file, shared by setup and the daemon.
+use crate::index::Kind;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -21,6 +22,61 @@ pub struct AgentDefaults {
 }
 
 impl Config {
+    pub fn spawn_args(&self, kind: Kind, explicit: Vec<String>) -> Vec<String> {
+        let mut model = false;
+        let mut effort = false;
+        let mut flags = explicit
+            .iter()
+            .map(String::as_str)
+            .take_while(|arg| *arg != "--");
+        while let Some(arg) = flags.next() {
+            let (flag, attached) = arg
+                .split_once('=')
+                .map_or((arg, None), |(flag, value)| (flag, Some(value)));
+            let short_model =
+                matches!(kind, Kind::Codex | Kind::Opencode | Kind::Grok) && arg.starts_with("-m");
+            if flag == "--model" || short_model || (kind == Kind::Agy && flag == "-model") {
+                model = true;
+            }
+            if matches!(
+                flag,
+                "--effort" | "--thinking" | "--variant" | "--reasoning-effort"
+            ) || (kind == Kind::Agy && flag == "-effort")
+            {
+                effort = true;
+            }
+            if kind == Kind::Codex {
+                let setting = if matches!(flag, "--config" | "-c") {
+                    attached.or_else(|| flags.next())
+                } else {
+                    arg.strip_prefix("-c")
+                };
+                match setting
+                    .and_then(|s| s.split_once('='))
+                    .map(|(key, _)| key.trim())
+                {
+                    Some("model") => model = true,
+                    Some("model_reasoning_effort") => effort = true,
+                    _ => {}
+                }
+            }
+        }
+        // Effort belongs to the configured model. A one-off model chooses its own effort.
+        if model {
+            return explicit;
+        }
+        let mut defaults = self.launch_args(kind);
+        if effort {
+            defaults.truncate(if defaults.first().is_some_and(|arg| arg == "--model") {
+                2
+            } else {
+                0
+            });
+        }
+        defaults.extend(explicit);
+        defaults
+    }
+
     pub fn launch_args(&self, kind: crate::index::Kind) -> Vec<String> {
         let Some(defaults) = self.defaults.get(kind.as_str()) else {
             return Vec::new();
@@ -74,6 +130,7 @@ impl Default for Sidebar {
 #[serde(default, deny_unknown_fields)]
 pub struct AutoName {
     pub enabled: bool,
+    pub preset: Option<Kind>,
     /// Executable followed by literal arguments; exactly one argument is {prompt}.
     pub command: Vec<String>,
     pub output: Output,
@@ -108,7 +165,24 @@ fn read_path(path: &Path) -> Result<Config> {
 }
 
 fn parse(bytes: &[u8]) -> Result<Config> {
-    let config: Config = serde_json::from_slice(bytes)?;
+    let mut config: Config = serde_json::from_slice(bytes)?;
+    let bg = &mut config.auto_name;
+    if bg.preset.is_some() {
+        anyhow::ensure!(
+            bg.command.is_empty(),
+            "choose a background preset or a custom command"
+        );
+        return Ok(config);
+    }
+    if let Some(kind) = legacy_preset(&bg.command, bg.output)
+        && serde_json::from_slice::<serde_json::Value>(bytes)?["auto_name"]
+            .get("preset")
+            .is_none()
+    {
+        bg.preset = Some(kind);
+        bg.command.clear();
+        return Ok(config);
+    }
     if config.auto_name.enabled || !config.auto_name.command.is_empty() {
         validate_command(&config.auto_name.command)?;
     }
@@ -178,102 +252,137 @@ pub fn write(config: &Config) -> Result<()> {
     result
 }
 
-pub fn preset(choice: char) -> Option<Vec<String>> {
-    let args: &[&str] = match choice {
-        '1' => &[
-            "claude",
-            "--model",
-            "haiku",
-            "--effort",
-            "low",
-            "--print",
-            "--output-format",
-            "text",
-            "--tools",
-            "",
-            "--strict-mcp-config",
-            "--no-session-persistence",
-            "{prompt}",
-        ],
-        '2' => &[
-            "codex",
-            "exec",
-            "--model",
-            "gpt-6-luna",
-            "--config",
-            "model_reasoning_effort=\"low\"",
-            "--ephemeral",
-            "--skip-git-repo-check",
-            "--sandbox",
-            "read-only",
-            "--color",
-            "never",
-            "{prompt}",
-        ],
-        '3' => &[
-            "pi",
-            "--provider",
-            "google",
-            "--model",
-            "gemini-flash-lite-latest",
-            "--thinking",
-            "minimal",
-            "--print",
-            "--no-session",
-            "--no-tools",
-            "--no-extensions",
-            "--no-skills",
-            "--no-context-files",
-            "{prompt}",
-        ],
-        '4' => &[
-            "opencode",
-            "run",
-            "--model",
-            "opencode/ling-2.6-flash-free",
-            "--pure",
-            "--format",
-            "json",
-            "--agent",
-            "plan",
-            "{prompt}",
-        ],
-        '5' => &[
-            "agy",
-            "--model",
-            "gemini-3.8-flash",
-            "--effort",
-            "low",
-            "--output-format",
-            "text",
-            "--mode",
-            "plan",
-            "--sandbox",
-            "--print-timeout",
-            "55s",
-            "--print",
-            "{prompt}",
-        ],
-        '6' => &[
-            "grok",
-            "--model",
-            "grok-4.5",
-            "--reasoning-effort",
-            "low",
-            "--tools",
-            "",
-            "--disable-web-search",
-            "--no-subagents",
-            "--max-turns",
-            "1",
-            "--single",
-            "{prompt}",
-        ],
+pub fn preset_kind(choice: char) -> Option<Kind> {
+    Some(match choice {
+        '1' => Kind::Claude,
+        '2' => Kind::Codex,
+        '3' => Kind::Pi,
+        '4' => Kind::Opencode,
+        '5' => Kind::Agy,
+        '6' => Kind::Grok,
         _ => return None,
-    };
-    Some(args.iter().map(|s| s.to_string()).collect())
+    })
 }
 
+impl Config {
+    pub fn preset_command(&self, kind: Kind) -> Vec<String> {
+        let tail: &[&str] = match kind {
+            Kind::Claude => &[
+                "--print",
+                "--output-format",
+                "text",
+                "--tools",
+                "",
+                "--strict-mcp-config",
+                "--no-session-persistence",
+                "{prompt}",
+            ],
+            Kind::Codex => &[
+                "--ephemeral",
+                "--skip-git-repo-check",
+                "--sandbox",
+                "read-only",
+                "--color",
+                "never",
+                "{prompt}",
+            ],
+            Kind::Pi => &[
+                "--print",
+                "--no-session",
+                "--no-tools",
+                "--no-extensions",
+                "--no-skills",
+                "--no-context-files",
+                "{prompt}",
+            ],
+            Kind::Opencode => &["--pure", "--format", "json", "--agent", "plan", "{prompt}"],
+            Kind::Agy => &[
+                "--output-format",
+                "text",
+                "--mode",
+                "plan",
+                "--sandbox",
+                "--print-timeout",
+                "55s",
+                "--print",
+                "{prompt}",
+            ],
+            Kind::Grok => &[
+                "--tools",
+                "",
+                "--disable-web-search",
+                "--no-subagents",
+                "--max-turns",
+                "1",
+                "--single",
+                "{prompt}",
+            ],
+        };
+        let mut command = vec![kind.as_str().into()];
+        match kind {
+            Kind::Codex => command.push("exec".into()),
+            Kind::Opencode => command.push("run".into()),
+            _ => {}
+        }
+        command.extend(self.launch_args(kind));
+        command.extend(tail.iter().map(|s| s.to_string()));
+        command
+    }
+
+    pub fn resolve_background(mut self) -> Self {
+        if let Some(kind) = self.auto_name.preset {
+            self.auto_name.command = self.preset_command(kind);
+        }
+        self
+    }
+}
+// Only exact commands saved by previous releases are migrated.
+fn legacy_preset(command: &[String], output: Output) -> Option<Kind> {
+    let (kind, old_flags): (Kind, &[&str]) = match command.first()?.as_str() {
+        "claude" => (Kind::Claude, &["--model", "haiku", "--effort", "low"]),
+        "codex" => (
+            Kind::Codex,
+            &[
+                "--model",
+                "gpt-6-luna",
+                "--config",
+                "model_reasoning_effort=\"low\"",
+            ],
+        ),
+        "pi" => (
+            Kind::Pi,
+            &[
+                "--provider",
+                "google",
+                "--model",
+                "gemini-flash-lite-latest",
+                "--thinking",
+                "minimal",
+            ],
+        ),
+        "opencode" => (Kind::Opencode, &["--model", "opencode/ling-2.6-flash-free"]),
+        "agy" => (
+            Kind::Agy,
+            &["--model", "gemini-3.8-flash", "--effort", "low"],
+        ),
+        "grok" => (
+            Kind::Grok,
+            &["--model", "grok-4.5", "--reasoning-effort", "low"],
+        ),
+        _ => return None,
+    };
+    if (kind == Kind::Opencode) != (output == Output::Opencode) {
+        return None;
+    }
+    let mut old = Config::default().preset_command(kind);
+    let pos = if matches!(kind, Kind::Codex | Kind::Opencode) {
+        2
+    } else {
+        1
+    };
+    old.splice(pos..pos, old_flags.iter().map(|s| s.to_string()));
+    (old == command).then_some(kind)
+}
 /// Describe exactly the explicit settings in the reviewed command array.
 pub fn model_summary(command: &[String]) -> String {
     let value = |flag: &str| {
@@ -292,13 +401,11 @@ pub fn model_summary(command: &[String]) -> String {
                     .strip_suffix('"')
             })
         });
-    match (model, effort) {
-        (Some(model), Some(effort)) => format!("Model: {model}\nThinking: {effort}\n"),
-        (Some("opencode/ling-2.6-flash-free"), None) => {
-            "Model: Ling 2.6 Flash Free\nThinking: off (non-reasoning model)\n".into()
-        }
-        _ => "Model / thinking: custom command\n".into(),
-    }
+    format!(
+        "Model: {}\nThinking: {}\n",
+        model.unwrap_or("agent default"),
+        effort.unwrap_or("automatic")
+    )
 }
 
 #[cfg(test)]
@@ -322,113 +429,45 @@ mod tests {
     }
 
     #[test]
+    fn unrelated_spawn_flags_keep_defaults_and_overrides_win() {
+        let cfg = parse(br#"{"defaults":{"codex":{"model":"saved","effort":"high"}}}"#).unwrap();
+        let args = |items: &[&str]| {
+            cfg.spawn_args(Kind::Codex, items.iter().map(|s| s.to_string()).collect())
+        };
+        assert_eq!(
+            args(&["--no-alt-screen"]),
+            [
+                "--model",
+                "saved",
+                "--config",
+                "model_reasoning_effort=\"high\"",
+                "--no-alt-screen"
+            ]
+        );
+        assert_eq!(args(&["-m", "other"]), ["-m", "other"]);
+        assert_eq!(
+            args(&["-c", "model_reasoning_effort='low'"]),
+            ["--model", "saved", "-c", "model_reasoning_effort='low'"]
+        );
+    }
+
+    #[test]
     fn agy_takes_the_prompt_as_the_value_of_print() {
-        let command = preset('5').unwrap();
+        let command = Config::default().preset_command(Kind::Agy);
         let print = command.iter().position(|arg| arg == "--print").unwrap();
         assert_eq!(command[print + 1], "{prompt}");
     }
 
     #[test]
-    fn presets_pin_the_exact_model_and_lowest_verified_thinking_argv() {
-        let expected: [&[&str]; 6] = [
-            &[
-                "claude",
-                "--model",
-                "haiku",
-                "--effort",
-                "low",
-                "--print",
-                "--output-format",
-                "text",
-                "--tools",
-                "",
-                "--strict-mcp-config",
-                "--no-session-persistence",
-                "{prompt}",
-            ],
-            &[
-                "codex",
-                "exec",
-                "--model",
-                "gpt-6-luna",
-                "--config",
-                "model_reasoning_effort=\"low\"",
-                "--ephemeral",
-                "--skip-git-repo-check",
-                "--sandbox",
-                "read-only",
-                "--color",
-                "never",
-                "{prompt}",
-            ],
-            &[
-                "pi",
-                "--provider",
-                "google",
-                "--model",
-                "gemini-flash-lite-latest",
-                "--thinking",
-                "minimal",
-                "--print",
-                "--no-session",
-                "--no-tools",
-                "--no-extensions",
-                "--no-skills",
-                "--no-context-files",
-                "{prompt}",
-            ],
-            &[
-                "opencode",
-                "run",
-                "--model",
-                "opencode/ling-2.6-flash-free",
-                "--pure",
-                "--format",
-                "json",
-                "--agent",
-                "plan",
-                "{prompt}",
-            ],
-            &[
-                "agy",
-                "--model",
-                "gemini-3.8-flash",
-                "--effort",
-                "low",
-                "--output-format",
-                "text",
-                "--mode",
-                "plan",
-                "--sandbox",
-                "--print-timeout",
-                "55s",
-                "--print",
-                "{prompt}",
-            ],
-            &[
-                "grok",
-                "--model",
-                "grok-4.5",
-                "--reasoning-effort",
-                "low",
-                "--tools",
-                "",
-                "--disable-web-search",
-                "--no-subagents",
-                "--max-turns",
-                "1",
-                "--single",
-                "{prompt}",
-            ],
-        ];
-        for (choice, expected) in ('1'..='6').zip(expected) {
-            let command = preset(choice).unwrap();
-            assert_eq!(command, expected);
-            let summary = model_summary(&command);
-            assert!(summary.contains("Model:"));
-            assert!(summary.contains("Thinking:"));
-            assert!(!summary.contains("custom command"));
-        }
+    fn saved_background_preset_follows_the_current_launch_defaults() {
+        let cfg = parse(br#"{"auto_name":{"command":["agy","--model","gemini-3.8-flash","--effort","low","--output-format","text","--mode","plan","--sandbox","--print-timeout","55s","--print","{prompt}"]},"defaults":{"agy":{"model":"new-model","effort":"high"}}}"#).unwrap();
+        assert_eq!(cfg.auto_name.preset, Some(Kind::Agy));
+        assert!(cfg.auto_name.command.is_empty());
+        assert_eq!(
+            cfg.clone().resolve_background().auto_name.command[1..5],
+            cfg.launch_args(Kind::Agy)
+        );
+        assert_eq!(parse(&serde_json::to_vec(&cfg).unwrap()).unwrap(), cfg);
     }
 
     #[test]
@@ -476,7 +515,8 @@ mod tests {
             assert!(parse(bytes).is_err());
         }
         for choice in '1'..='6' {
-            validate_command(&preset(choice).unwrap()).unwrap();
+            validate_command(&Config::default().preset_command(preset_kind(choice).unwrap()))
+                .unwrap();
         }
     }
 }

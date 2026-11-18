@@ -20,7 +20,7 @@ You appear in this list when your kind's tracking requirements are met. `list` m
 When you load this skill, read `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/config.toml` if it exists. It holds the user's preferences for agents using this skill and overrides this skill's defaults. When it is absent, use the defaults below.
 
 - `instructions`: a list of rules; follow every one.
-- `[spawn.<kind>]`: when you spawn that kind, pass its `args` after `--`, each array item as one shell-quoted argument (`spawn codex "<task>" ... -- '-m' 'gpt-6.1-sol'`), and follow its `instructions`. When the user's request names a different value for one of those options, use the user's value for that option.
+- `[spawn.<kind>].instructions` applies to that kind. Configure owns model and effort. Let `spawn` use its saved settings unless the user explicitly requests an override for this launch. When applying `[spawn.<kind>].args`, omit model and effort overrides, including their values. Preserve other user-specified flags.
 
 ## First: name yourself
 
@@ -32,7 +32,7 @@ tmux-agent-plane rename self <name>
 
 A name is one short kebab-case word for the work, 2 to 3 words joined by `-`, at most 20 characters: `auth-refactor`, `billing-tests`, `release-notes`. Never rename an agent the user has already named.
 
-Optional AI auto-naming is off by default and configured by the user with `o` in the sidebar. This bottom-left menu also sets per-kind launch model and effort defaults in config.json; the launcher and `spawn` apply them when no explicit agent arguments are supplied. Claude, Codex and Antigravity offer model catalogs and model-specific effort levels. Changing the model resets effort to Automatic. Use arrows/j/k to select, Enter/Space to choose or toggle, Done to close, and Esc/Ctrl+C to leave. It only names agents with a meaningful title and an unassigned default name. Explicit `--name`, `rename` and sidebar `r` assignments are always preserved.
+Optional AI auto-naming is off by default and configured by the user with `o` in the sidebar. This bottom-left menu also sets per-kind launch model and effort defaults in config.json; the launcher, `spawn`, and built-in background presets share them. Claude, Codex and Antigravity offer model catalogs and model-specific effort levels. Changing the model resets effort to Automatic. Use arrows/j/k to select, Enter/Space to choose or toggle, Done to close, and Esc/Ctrl+C to leave. It only names agents with a meaningful title and an unassigned default name. Explicit `--name`, `rename` and sidebar `r` assignments are always preserved.
 
 ## Report project leadership
 
@@ -97,7 +97,7 @@ tmux-agent-plane focus <agent>            # bring it on screen for the user
 tmux-agent-plane toggle-sidebar self  # requires known caller identity; opens/closes every sidebar
 tmux-agent-plane kill <agent>             # close its pane, ending it
 tmux-agent-plane quota [--json]           # how much of each plan is left (Claude, Codex, agy, Grok), read fresh
-tmux-agent-plane background "<prompt>"    # one-shot cheap model from o → Configure for naming, cleanup and user scripts/hooks; prints its answer. Never use it to delegate; use spawn
+tmux-agent-plane background "<prompt>"    # one-shot background model from o → Configure for naming, cleanup and user scripts/hooks; prints its answer. Never use it to delegate; use spawn
 tmux-agent-plane spawn claude|codex|pi|opencode|agy|grok ["<task>"] [--in pane|window|session] [--session SESSION] [--workspace W] [--cwd DIR] [--name NAME] [--parent NAME] [--wait] [--timeout S] [-- AGENT_ARGS...]
 tmux-agent-plane task list [--json]       # background tasks: state, ports, cwd, starter, command
 tmux-agent-plane task start <name> [--cwd DIR] -- <command>...  # reuses a running task with the same command
@@ -128,7 +128,7 @@ tmux-agent-plane restore --tasks|--no-tasks|--discard  # bring them back (with t
 - `spawn` placements are final. Only agents started by hand join a session named after their folder automatically, once, with any client viewing them.
 - Give the full task as the prompt: the new agent has none of your context. Say which files, what done looks like, and what to report back.
 - Always name agents you spawn (`--name reviewer`), following the naming rule above.
-- Pass agent CLI flags after `--`: `spawn codex "<task>" --in window --name reviewer -- -m <model>`. Pass any model or effort the user names that way (for agy, a model id from `agy models`, such as `--model gemini-4-hydrogen-high`). Each argument reaches the agent verbatim, ahead of the task; `spawn` adds none of its own.
+- Pass agent CLI flags after `--`: `spawn codex "<task>" --in window --name reviewer -- -m <model>`. Pass any model or effort the user names that way (for agy, a model id from `agy models`, such as `--model gemini-4-hydrogen-high`). Each argument reaches the agent verbatim, ahead of the task; unrelated flags keep the configured model and effort. An explicit model uses its own effort unless both are supplied.
 - `spawn` prints `<name> <pane> <location>`. The spawned agent records a parent from a reliably identified caller pane or an optional known Codex `--parent`. Codex delegation without `--parent` is independent and records no family link. The link lasts as long as the spawned agent; `list` shows `ended` once its parent has exited.
 - A folder the agent has not trusted yet stops at a trust prompt, and `spawn` reports that the agent did not start. `read <pane>`, then answer with `keys <pane> ...` only when the user asked for that folder.
 

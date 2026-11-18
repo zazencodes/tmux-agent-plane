@@ -219,6 +219,7 @@ def settle(seconds=1.3):
 def save_config(command=None, **changes):
     config = json.loads(CONFIG.read_text())
     if command is not None:
+        config['auto_name'].pop('preset', None)
         config['auto_name']['command'] = command
         config['auto_name']['output'] = 'text'
     config['auto_name'].update(changes)
@@ -311,7 +312,7 @@ try:
     wait('configure closes', lambda: 'd all' in client.text())
     # The supported agy preset resolves to our private fake binary, never the real CLI.
     client.key(b'o5')
-    wait('disclosure before saving', lambda: 'accept' in client.text() and 'What is sent' in client.text() and 'Model     gemini-3.8-flash' in client.text() and 'Thinking  low' in client.text())
+    wait('disclosure before saving', lambda: 'accept' in client.text() and 'What is sent' in client.text() and 'Model     agent default' in client.text() and 'Thinking  automatic' in client.text())
     client.snapshot('agy-consent-38-columns')
     assert not calls()
     client.key(b'\r')

@@ -222,7 +222,7 @@ impl Runtime {
     /// No extra tmux commands for disabled naming, an idle worker, or an ineligible agent.
     pub fn tick(&mut self, agents: &[Agent], panes: &[tmux::Pane], now: u64) -> Result<Vec<Issue>> {
         let config = match config::read() {
-            Ok(config) => config,
+            Ok(config) => config.resolve_background(),
             Err(error) => {
                 if let Some(job) = &self.job {
                     job.cancel.store(true, Ordering::Relaxed);
@@ -408,7 +408,7 @@ impl Runtime {
             return Ok(rejected(format!("AI name {name:?} is already assigned")));
         }
         // Re-read consent immediately before application, including edits made outside setup.
-        if config::read()?.auto_name != config.auto_name {
+        if config::read()?.resolve_background().auto_name != config.auto_name {
             return Ok(Outcome::Skipped);
         }
         // if-shell -F evaluates the *live* option in the same tmux command queue as the

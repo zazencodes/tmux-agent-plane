@@ -372,9 +372,7 @@ pub struct Spawn {
 }
 
 pub fn spawn(mut s: Spawn) -> Result<()> {
-    if s.agent_args.is_empty() {
-        s.agent_args = crate::autoname_config::read()?.launch_args(s.kind);
-    }
+    s.agent_args = crate::autoname_config::read()?.spawn_args(s.kind, s.agent_args);
     // Validate the interactive launch before creating a pane or contacting tmux.
     let launch = (s.kind.adapter().launch)(s.task.as_deref(), &s.agent_args)?;
     validate_session_placement(s.placement, s.session.as_deref())?;

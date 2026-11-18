@@ -15,7 +15,7 @@ const ASK_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The configured background command; fails when none is chosen or it is not installed.
 pub fn settings() -> Result<Config> {
-    let settings = config::read()?;
+    let settings = config::read()?.resolve_background();
     if settings.auto_name.command.is_empty() {
         bail!("press o to choose a background agent first");
     }

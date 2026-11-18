@@ -18,6 +18,7 @@ pub struct Setup {
     pub open: bool,
     command: Option<Vec<String>>,
     output: Output,
+    preset: Option<crate::index::Kind>,
     custom: Option<String>,
     error: Option<String>,
     config_error: Option<String>,
@@ -52,7 +53,8 @@ impl Setup {
             .iter()
             .map(|(choice, _)| *choice)
             .filter(|choice| {
-                config::preset(*choice).is_some_and(|c| config::executable(&c).is_err())
+                config::preset_kind(*choice)
+                    .is_some_and(|k| config::executable(&self.config.preset_command(k)).is_err())
             })
             .collect();
         self.open = true;
@@ -170,6 +172,7 @@ impl Setup {
                         0..=6 => KeyCode::Char(char::from(b'1' + self.selected as u8)),
                         7 => {
                             if !self.config.auto_name.enabled
+                                && self.config.auto_name.preset.is_none()
                                 && self.config.auto_name.command.is_empty()
                             {
                                 self.error = Some("Choose a background agent first".into());
@@ -240,6 +243,7 @@ impl Setup {
                         }) {
                         Ok(command) => {
                             self.command = Some(command);
+                            self.preset = None;
                             self.output = Output::Text;
                             self.custom = None;
                             self.error = None;
@@ -265,9 +269,20 @@ impl Setup {
             if matches!(key.code, KeyCode::Enter | KeyCode::Char(' ')) && key.modifiers.is_empty() {
                 let result: Result<Config> = (|| {
                     let mut config = config::read()?;
-                    config.auto_name.command = self.command.clone().unwrap();
+                    config.auto_name.preset = self.preset;
+                    let reviewed = self.command.as_ref().unwrap();
+                    config::executable(reviewed)?;
+                    if let Some(kind) = self.preset {
+                        anyhow::ensure!(
+                            config.preset_command(kind) == *reviewed,
+                            "Defaults changed. Reopen Configure to review."
+                        );
+                        config.auto_name.command.clear();
+                    } else {
+                        config.auto_name.command = reviewed.clone();
+                    }
                     config.auto_name.output = self.output;
-                    config::executable(&config.auto_name.command)?;
+
                     config::write(&config)?;
                     Ok(config)
                 })();
@@ -291,10 +306,12 @@ impl Setup {
         } else if key.modifiers.is_empty() {
             match key.code {
                 KeyCode::Char(choice @ '1'..='6') => {
-                    let command = config::preset(choice).unwrap();
+                    let kind = config::preset_kind(choice).unwrap();
+                    let command = self.config.preset_command(kind);
                     match config::executable(&command) {
                         Ok(_) => {
                             self.command = Some(command);
+                            self.preset = Some(kind);
                             self.output = if choice == '4' {
                                 Output::Opencode
                             } else {
@@ -519,7 +536,10 @@ impl Setup {
         )];
         let mut rows = Vec::new();
         for (choice, label) in CHOICES {
-            let current = config::preset(choice).as_ref() == Some(&self.config.auto_name.command);
+            let current = match config::preset_kind(choice) {
+                Some(kind) => self.config.auto_name.preset == Some(kind),
+                None => !self.config.auto_name.command.is_empty(),
+            };
             rows.push(choice_line(
                 choice,
                 label,
@@ -836,7 +856,7 @@ mod tests {
             ..Setup::default()
         };
         setup.config.auto_name.enabled = true;
-        setup.config.auto_name.command = config::preset('1').unwrap();
+        setup.config.auto_name.preset = config::preset_kind('1');
         let text = rendered(&mut setup, 38, 28);
         assert!(text.contains("Background agent"));
         assert!(text.contains("1 Claude Code") && text.contains("✓ saved"));
@@ -865,7 +885,10 @@ mod tests {
     fn a_wide_screen_shows_a_centred_card_with_nothing_cut_off() {
         for (command, custom) in [
             (None, None),
-            (config::preset('1'), None),
+            (
+                Some(Config::default().preset_command(crate::index::Kind::Claude)),
+                None,
+            ),
             (None, Some(String::new())),
         ] {
             let mut setup = Setup {
@@ -894,7 +917,7 @@ mod tests {
         use ratatui::{Terminal, backend::TestBackend};
         let mut setup = Setup {
             open: true,
-            command: config::preset('5'),
+            command: Some(Config::default().preset_command(crate::index::Kind::Agy)),
             ..Setup::default()
         };
         let mut terminal = Terminal::new(TestBackend::new(38, 28)).unwrap();
@@ -906,8 +929,8 @@ mod tests {
             .map(|y| (0..38).map(|x| buffer[(x, y)].symbol()).collect::<String>() + "\n")
             .collect();
         assert!(text.contains("accept"));
-        assert!(text.contains("Model     gemini-3.8-flash"));
-        assert!(text.contains("Thinking  low"));
+        assert!(text.contains("Model     agent default"));
+        assert!(text.contains("Thinking  automatic"));
         assert!(text.contains("What is sent"));
         assert!(text.contains("Its AI provider may receive"));
         assert!(text.contains("╭ configure"));
