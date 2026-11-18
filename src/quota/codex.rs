@@ -1,5 +1,4 @@
-//! Codex: ask its own app-server, which renews its own login. Calls only `initialize`,
-//! `account/read` and `account/rateLimits/read`; never anything that consumes or resets limits.
+//! Read account, quota and model metadata through the Codex app-server.
 
 use super::fetch::{find_on_path, stop, time};
 use super::{Failure, FailureKind, Outcome, Reading, Role, Time, Window};
@@ -15,6 +14,34 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(8);
 const LOGIN_REMEDY: &str = "run `codex login`";
 
 pub fn fetch() -> Outcome {
+    with_server(converse)
+}
+
+pub fn models() -> anyhow::Result<Vec<Value>> {
+    with_server(|rpc| {
+        let mut models = Vec::new();
+        let mut cursor = Value::Null;
+        loop {
+            let page = rpc
+                .call("model/list", json!({"cursor": cursor}), CALL_TIMEOUT)
+                .map_err(|e| e.failure("reading Codex models", false))?;
+            models.extend(
+                page["data"]
+                    .as_array()
+                    .ok_or_else(|| Failure::definitive("invalid Codex model list", None))?
+                    .iter()
+                    .cloned(),
+            );
+            cursor = page["nextCursor"].clone();
+            if cursor.is_null() {
+                return Ok(models);
+            }
+        }
+    })
+    .map_err(|e| anyhow::anyhow!(e.error))
+}
+
+fn with_server<T>(query: impl FnOnce(&mut Rpc) -> Result<T, Failure>) -> Result<T, Failure> {
     let Some(binary) = find_on_path("codex") else {
         return Err(Failure::new(
             FailureKind::NotSetUp,
@@ -52,7 +79,12 @@ pub fn fetch() -> Outcome {
         responses: receiver,
         next: 1,
     };
-    let outcome = converse(&mut rpc);
+    let outcome = rpc.call(
+        "initialize",
+        json!({"clientInfo": {"name": "tmux-agent-plane", "version": env!("CARGO_PKG_VERSION")}}),
+        START_TIMEOUT,
+    )
+    .map_err(|e| e.failure("codex app-server did not start", false)).and_then(|_| query(&mut rpc));
     // Closing stdin asks the server to exit; stop makes sure it does.
     rpc.stdin = None;
     stop(&mut child);
@@ -60,12 +92,6 @@ pub fn fetch() -> Outcome {
 }
 
 fn converse(rpc: &mut Rpc) -> Outcome {
-    rpc.call(
-        "initialize",
-        json!({"clientInfo": {"name": "tmux-agent-plane", "version": env!("CARGO_PKG_VERSION")}}),
-        START_TIMEOUT,
-    )
-    .map_err(|e| e.failure("codex app-server did not start", false))?;
     let account = rpc.call("account/read", json!({}), CALL_TIMEOUT).ok();
     if let Some(failure) = signed_out(account.as_ref()) {
         return Err(failure);

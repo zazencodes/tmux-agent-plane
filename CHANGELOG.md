@@ -7,6 +7,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Added
 
+- Configure lists models from Claude Code, Codex and Antigravity and offers the effort levels each model supports. Choosing a different model returns effort to Automatic.
+
 - Project colors now stay assigned while agents are active, with intermediate palette shades for larger workspaces. History shares those colors and gives archived projects their own shades. Search closed chats with `/`, toggle the selected project with `p`, and remove a history entry with `x`. Telescope also supports project filtering and removal. Scripts can use `recent --project PROJECT --search WORDS` and `forget ID`.
 
 - Recently closed conversations show a compact timeline of titles with details for the selected row. Neovim Telescope now searches workspace history and revives the selection with Enter. Press `h` in normal mode or run `:Telescope tmux_agent_plane history`.

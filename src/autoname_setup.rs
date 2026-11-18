@@ -1,8 +1,10 @@
-//! Sidebar-local setup; no model process runs during configuration.
+//! Shared configuration panel for the sidebar and picker.
+mod catalog;
 use crate::autoname_config::{self as config, Config, Output};
 use crate::index::State;
 use crate::ui::{LAVENDER, OVERLAY, SUBTEXT, SURFACE0, SURFACE2, TEXT, colour, fill, hints, panel};
 use anyhow::Result;
+use catalog::Model;
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
@@ -24,6 +26,9 @@ pub struct Setup {
     selected: usize,
     effort_column: bool,
     notice: Option<String>,
+    loading: Option<std::thread::JoinHandle<Result<Vec<Model>>>>,
+    choices: Vec<(String, String)>,
+    cursor: usize,
     editing: Option<(String, bool, String)>,
     /// Sidebar settings just saved with `t` or `u`, for the sidebar to take up.
     pub saved_sidebar: Option<config::Sidebar>,
@@ -71,6 +76,9 @@ impl Setup {
             return false;
         }
         if key.code == KeyCode::Esc && self.editing.take().is_some() {
+            self.loading = None;
+            self.choices.clear();
+            self.error = None;
             return true;
         }
         if key.code == KeyCode::Esc {
@@ -81,16 +89,42 @@ impl Setup {
             return true;
         }
         if let Some((kind, effort, input)) = &mut self.editing {
+            let guided = matches!(kind.as_str(), "claude" | "codex" | "agy");
+            if guided {
+                if self.choices.is_empty() {
+                    return true;
+                }
+                match key.code {
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        self.cursor = (self.cursor + 1).min(self.choices.len() - 1)
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => self.cursor = self.cursor.saturating_sub(1),
+                    KeyCode::Enter => *input = self.choices[self.cursor].0.clone(),
+                    _ => {}
+                }
+                if key.code != KeyCode::Enter {
+                    return true;
+                }
+            }
             match key.code {
                 KeyCode::Enter => {
                     let kind = kind.clone();
                     let effort = *effort;
                     let value = input.trim().to_string();
                     let result = config::read().and_then(|mut cfg| {
+                        let previous = self.config.defaults.get(&kind).cloned().unwrap_or_default();
                         let defaults = cfg.defaults.entry(kind).or_default();
+                        anyhow::ensure!(
+                            !guided || *defaults == previous,
+                            "Defaults changed. Reopen Configure to refresh."
+                        );
+
                         if effort {
                             defaults.effort = value;
                         } else {
+                            if guided && defaults.model != value {
+                                defaults.effort.clear();
+                            }
                             defaults.model = value;
                         }
                         config::write(&cfg)?;
@@ -100,6 +134,7 @@ impl Setup {
                         Ok(cfg) => {
                             self.config = cfg;
                             self.editing = None;
+                            self.choices.clear();
                             self.notice = Some("Saved".into());
                         }
                         Err(e) => self.error = Some(format!("{e:#}")),
@@ -172,6 +207,15 @@ impl Setup {
                                     }
                                 })
                                 .unwrap_or_default();
+                            self.error = None;
+                            self.notice = None;
+                            self.choices.clear();
+                            self.cursor = 0;
+                            let provider = KINDS[self.selected - 11];
+                            if matches!(provider, "claude" | "codex" | "agy") {
+                                self.loading =
+                                    Some(std::thread::spawn(move || catalog::load(provider)));
+                            }
                             self.editing = Some((kind, effort, current));
                             return true;
                         }
@@ -309,22 +353,107 @@ impl Setup {
         true
     }
 
+    fn poll_catalog(&mut self) {
+        if self.loading.as_ref().is_some_and(|job| job.is_finished()) {
+            let result = self
+                .loading
+                .take()
+                .unwrap()
+                .join()
+                .unwrap_or_else(|_| Err(anyhow::anyhow!("Catalog lookup stopped")));
+            if let Some((kind, effort, current)) = &self.editing {
+                match result {
+                    Ok(models) => {
+                        self.choices.push((
+                            String::new(),
+                            if *effort {
+                                "Automatic".into()
+                            } else {
+                                "Agent default".into()
+                            },
+                        ));
+                        if *effort {
+                            let model = self
+                                .config
+                                .defaults
+                                .get(kind)
+                                .map(|d| d.model.as_str())
+                                .unwrap_or("");
+                            if let Some(selected) = models.iter().find(|m| m.id == model) {
+                                self.choices.extend(
+                                    selected.efforts.iter().map(|v| (v.clone(), v.clone())),
+                                );
+                            }
+                        } else {
+                            self.choices
+                                .extend(models.into_iter().map(|m| (m.id, m.name)));
+                        }
+                        self.cursor = self
+                            .choices
+                            .iter()
+                            .position(|(v, _)| v == current)
+                            .unwrap_or(0);
+                    }
+                    Err(e) => self.error = Some(format!("{e:#}")),
+                }
+            }
+        }
+    }
+
     pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
+        self.poll_catalog();
         let width = usize::from(area.width.min(CARD_WIDTH).saturating_sub(4));
         let (mut lines, keys): (Vec<Line>, Vec<(&str, &str)>) =
             if let Some((kind, effort, input)) = &self.editing {
-                (
-                    vec![
-                        heading(
-                            &format!("{kind} {}", if *effort { "effort" } else { "model" }),
-                            width,
-                        ),
-                        muted("Enter a CLI value; empty uses the agent's own default."),
-                        Line::from(format!("› {input}▏")),
-                        Line::from("Accept"),
-                    ],
-                    vec![("⏎", "save"), ("esc", "back")],
-                )
+                if matches!(kind.as_str(), "claude" | "codex" | "agy") {
+                    let model = self
+                        .config
+                        .defaults
+                        .get(kind)
+                        .map(|d| d.model.as_str())
+                        .unwrap_or("");
+                    let title = if *effort && !model.is_empty() {
+                        format!("{model} · effort")
+                    } else {
+                        format!("{kind} · {}", if *effort { "effort" } else { "model" })
+                    };
+                    let mut lines = vec![heading(&crate::ui::truncate(&title, width), width)];
+                    if self.loading.is_some() {
+                        lines.push(muted("Loading available models…"));
+                    }
+                    if *effort && self.choices.len() == 1 {
+                        lines.push(muted(if model.is_empty() {
+                            "Choose a model to see effort levels."
+                        } else {
+                            "No effort levels listed for this model."
+                        }));
+                    }
+                    for (i, (_, label)) in self.choices.iter().enumerate() {
+                        let selected = i == self.cursor;
+                        lines.push(Line::styled(
+                            format!(
+                                "{}{}",
+                                if selected { "› " } else { "  " },
+                                crate::ui::truncate(label, width.saturating_sub(2))
+                            ),
+                            if selected { LAVENDER } else { TEXT },
+                        ));
+                    }
+                    (lines, vec![("↑↓", "move"), ("⏎", "save"), ("esc", "back")])
+                } else {
+                    (
+                        vec![
+                            heading(
+                                &format!("{kind} {}", if *effort { "effort" } else { "model" }),
+                                width,
+                            ),
+                            muted("Enter a CLI value; empty uses the agent's own default."),
+                            Line::from(format!("› {input}▏")),
+                            Line::from("Accept"),
+                        ],
+                        vec![("⏎", "save"), ("esc", "back")],
+                    )
+                }
             } else if let Some(input) = &self.custom {
                 (
                     custom_lines(input, width),
@@ -364,6 +493,8 @@ impl Setup {
         let scroll = if self.command.is_none() && self.custom.is_none() && self.editing.is_none() {
             (self.selected + 1 + usize::from(self.selected >= 7) + usize::from(self.selected >= 11))
                 .saturating_sub(usize::from(inner.height).saturating_sub(2)) as u16
+        } else if !self.choices.is_empty() {
+            (self.cursor + 2).saturating_sub(inner.height as usize) as u16
         } else {
             0
         };
@@ -641,7 +772,7 @@ mod tests {
         setup.key(KeyEvent::from(KeyCode::Enter));
         assert!(!setup.open);
         setup.open = true;
-        setup.selected = 11;
+        setup.selected = 13;
         setup.key(KeyEvent::from(KeyCode::Char(' ')));
         assert!(setup.editing.is_some());
         setup.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
@@ -717,12 +848,12 @@ mod tests {
             text.lines()
                 .any(|row| row.contains("claude") && row.matches("default").count() == 2)
         );
-        setup.selected = 11;
+        setup.selected = 13;
         setup.key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
         setup.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(
             setup.editing.take(),
-            Some(("claude".into(), true, String::new()))
+            Some(("pi".into(), true, String::new()))
         );
         setup.config.auto_name.enabled = false;
         let text = rendered(&mut setup, 38, 28);

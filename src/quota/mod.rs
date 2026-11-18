@@ -4,7 +4,7 @@
 
 mod agy;
 mod claude;
-mod codex;
+pub(crate) mod codex;
 pub mod fetch;
 mod grok;
 mod http;

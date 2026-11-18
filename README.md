@@ -463,7 +463,7 @@ Press `o` in the sidebar or picker to open configuration at the bottom left. Use
 
 - **Sidebar panels:** choose whether new sidebars show tasks, quota and the graph. Tasks and the graph start enabled; quota starts hidden. A change applies to this sidebar immediately and to other sidebars when they next open, except the graph, which every sidebar follows within half a second. Pressing `p` in a sidebar saves the same setting.
 - **Background agent:** choose a CLI preset or custom command for automatic naming, then review and accept its command. Enable automatic naming separately.
-- **Agent defaults:** set each kind's model and effort for the launcher and `spawn` when no explicit agent arguments are supplied. Empty values use the CLI's own defaults.
+- **Agent defaults:** set each kind's model and effort for the launcher and `spawn` when no explicit agent arguments are supplied. For Claude, Codex and Antigravity, open Model to choose from the installed CLI’s catalog. Open Effort to see the levels for that model. Changing the model sets effort to Automatic, which uses the CLI’s own default. Other agents accept typed CLI values.
 
 Settings live in `${XDG_CONFIG_HOME:-$HOME/.config}/tmux-agent-plane/config.json`. The daemon picks up changes without a restart. The separate `config.toml` in [Install step 5](#install) holds instructions for agents using the skill.
 
