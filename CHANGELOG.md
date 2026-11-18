@@ -41,6 +41,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Configure groups preferences together and shows model and effort side by side for each agent. Move between fields with the left and right arrows.
+
 - Opening the sidebar focuses your window first, then sets up the remaining windows. Closing sidebars batches the tmux commands on large servers.
 
 - Sidebar history gives the selected conversation a dedicated details panel. Project-colored titles and a highlighted row replace the left rail and arrow.

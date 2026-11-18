@@ -22,6 +22,7 @@ pub struct Setup {
     /// Presets whose CLI was not on `PATH` when the menu opened.
     missing: Vec<char>,
     selected: usize,
+    effort_column: bool,
     notice: Option<String>,
     editing: Option<(String, bool, String)>,
     /// Sidebar settings just saved with `t` or `u`, for the sidebar to take up.
@@ -29,6 +30,7 @@ pub struct Setup {
 }
 
 /// Keep configuration readable in the bottom-left of wider screens.
+const KINDS: [&str; 6] = ["claude", "codex", "pi", "opencode", "agy", "grok"];
 const CARD_WIDTH: u16 = 60;
 
 impl Setup {
@@ -55,6 +57,7 @@ impl Setup {
         self.notice = None;
         self.editing = None;
         self.selected = 0;
+        self.effort_column = false;
     }
 
     /// True consumes the key, so setup Enter never jumps to an agent behind the screen.
@@ -114,11 +117,17 @@ impl Setup {
         if self.command.is_none() && self.custom.is_none() && key.modifiers.is_empty() {
             match key.code {
                 KeyCode::Down | KeyCode::Char('j') => {
-                    self.selected = (self.selected + 1).min(23);
+                    self.selected = (self.selected + 1).min(17);
                     return true;
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     self.selected = self.selected.saturating_sub(1);
+                    return true;
+                }
+                KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'l')
+                    if (11..=16).contains(&self.selected) =>
+                {
+                    self.effort_column = matches!(key.code, KeyCode::Right | KeyCode::Char('l'));
                     return true;
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
@@ -148,11 +157,9 @@ impl Setup {
                         8 => KeyCode::Char('t'),
                         9 => KeyCode::Char('u'),
                         10 => KeyCode::Char('p'),
-                        11..=22 => {
-                            let i = self.selected - 11;
-                            let kind = ["claude", "codex", "pi", "opencode", "agy", "grok"][i / 2]
-                                .to_string();
-                            let effort = i % 2 == 1;
+                        11..=16 => {
+                            let kind = KINDS[self.selected - 11].to_string();
+                            let effort = self.effort_column;
                             let current = self
                                 .config
                                 .defaults
@@ -331,11 +338,16 @@ impl Setup {
             } else {
                 (
                     self.menu_lines(width),
-                    vec![
-                        ("↑↓ j k", "move"),
-                        ("⏎ space", "choose"),
-                        ("esc ^c", "close"),
-                    ],
+                    if (11..=16).contains(&self.selected) {
+                        vec![
+                            ("↑↓", "agent"),
+                            ("←→", "field"),
+                            ("⏎", "edit"),
+                            ("esc", "close"),
+                        ]
+                    } else {
+                        vec![("↑↓ j k", "move"), ("⏎ space", "choose"), ("esc", "close")]
+                    },
                 )
             };
         if let Some(error) = self.config_error.as_ref().or(self.error.as_ref()) {
@@ -350,7 +362,8 @@ impl Setup {
         frame.render_widget(block, panel_area);
         let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
         let scroll = if self.command.is_none() && self.custom.is_none() && self.editing.is_none() {
-            (self.selected + 2).saturating_sub(usize::from(inner.height).saturating_sub(2)) as u16
+            (self.selected + 1 + usize::from(self.selected >= 7) + usize::from(self.selected >= 11))
+                .saturating_sub(usize::from(inner.height).saturating_sub(2)) as u16
         } else {
             0
         };
@@ -408,21 +421,10 @@ impl Setup {
             self.config.sidebar.family,
             width.saturating_sub(2),
         ));
-        for kind in ["claude", "codex", "pi", "opencode", "agy", "grok"] {
-            let defaults = self.config.defaults.get(kind).cloned().unwrap_or_default();
-            for (label, value) in [("model", defaults.model), ("effort", defaults.effort)] {
-                rows.push(Line::from(format!(
-                    "{kind} {label}: {}",
-                    if value.is_empty() {
-                        "agent default"
-                    } else {
-                        &value
-                    }
-                )));
-            }
-        }
-        rows.push(Line::from("Accept"));
         for (i, row) in rows.into_iter().enumerate() {
+            if i == 7 {
+                lines.push(heading("Preferences", width));
+            }
             let mut spans = vec![Span::styled(
                 if i == self.selected { "› " } else { "  " },
                 LAVENDER,
@@ -430,6 +432,48 @@ impl Setup {
             spans.extend(row.spans);
             lines.push(Line::from(spans));
         }
+        let model_width = width.saturating_sub(14) * 3 / 5;
+        let effort_width = width.saturating_sub(14 + model_width);
+        lines.push(Line::from(vec![
+            Span::styled("Agent     ", Style::default().fg(LAVENDER).bold()),
+            Span::styled(
+                format!("  {:<model_width$}", "Model"),
+                Style::default().fg(LAVENDER).bold(),
+            ),
+            Span::styled("  Effort", Style::default().fg(LAVENDER).bold()),
+        ]));
+        for (i, kind) in KINDS.iter().enumerate() {
+            let defaults = self.config.defaults.get(*kind).cloned().unwrap_or_default();
+            let mut spans = vec![Span::styled(format!("{kind:<10}"), TEXT)];
+            for (effort, value, size) in [
+                (false, defaults.model, model_width),
+                (true, defaults.effort, effort_width),
+            ] {
+                let active = self.selected == 11 + i && self.effort_column == effort;
+                let style = if active {
+                    Style::default().fg(LAVENDER).bg(SURFACE0).bold()
+                } else if value.is_empty() {
+                    Style::default().fg(SUBTEXT)
+                } else {
+                    Style::default().fg(colour(State::Done))
+                };
+                let label =
+                    crate::ui::truncate(if value.is_empty() { "default" } else { &value }, size);
+                spans.push(Span::styled(
+                    format!("{}{label:<size$}", if active { "› " } else { "  " }),
+                    style,
+                ));
+            }
+            lines.push(Line::from(spans));
+        }
+        lines.push(Line::styled(
+            if self.selected == 17 {
+                "› Done"
+            } else {
+                "  Done"
+            },
+            LAVENDER,
+        ));
         lines
     }
 }
@@ -584,16 +628,16 @@ fn custom_lines(input: &str, width: usize) -> Vec<Line<'static>> {
 mod tests {
     use super::*;
     #[test]
-    fn navigation_selects_accept_and_editors_close_with_control_c() {
+    fn navigation_selects_done_and_editors_close_with_control_c() {
         let mut setup = Setup {
             open: true,
             ..Setup::default()
         };
-        for _ in 0..23 {
+        for _ in 0..17 {
             setup.key(KeyEvent::from(KeyCode::Down));
         }
         let text = rendered(&mut setup, 38, 20);
-        assert!(text.contains("› Accept"), "{text}");
+        assert!(text.contains("› Done"), "{text}");
         setup.key(KeyEvent::from(KeyCode::Enter));
         assert!(!setup.open);
         setup.open = true;
@@ -668,7 +712,18 @@ mod tests {
         assert!(text.contains("Background agent · naming on"));
         assert!(text.contains("2 Codex") && text.contains("not installed"));
         assert!(text.contains("Name agents automatically") && text.contains("[✓]"));
-        assert!(text.contains("claude model:"));
+        assert!(text.contains("Model") && text.contains("Effort"));
+        assert!(
+            text.lines()
+                .any(|row| row.contains("claude") && row.matches("default").count() == 2)
+        );
+        setup.selected = 11;
+        setup.key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        setup.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            setup.editing.take(),
+            Some(("claude".into(), true, String::new()))
+        );
         setup.config.auto_name.enabled = false;
         let text = rendered(&mut setup, 38, 28);
         assert!(text.contains("Background agent · naming off"));
