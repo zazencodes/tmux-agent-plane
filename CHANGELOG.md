@@ -5,6 +5,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+## 0.8.0 - 2026-11-17
+
 ### Added
 
 - Configure lists models from Claude Code, Codex and Antigravity and offers the effort levels each model supports. Choosing a different model returns effort to Automatic.
