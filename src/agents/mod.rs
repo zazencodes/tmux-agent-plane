@@ -386,9 +386,6 @@ mod tests {
     }
     #[test]
     fn live_process_snapshot_has_named_child_with_spaced_executable_path() {
-        #[cfg(target_os = "linux")]
-        use std::os::unix::process::CommandExt;
-
         struct Child(std::process::Child);
         impl Drop for Child {
             fn drop(&mut self) {
@@ -400,12 +397,14 @@ mod tests {
         let directory = fixture.0.join("Agent App");
         std::fs::create_dir(&directory).unwrap();
         let executable = directory.join("codex");
-        std::fs::copy("/bin/sleep", &executable).unwrap();
-        let mut command = std::process::Command::new(&executable);
-        // Linux multicall coreutils selects its program from argv[0].
-        #[cfg(target_os = "linux")]
-        command.arg0("sleep");
-        let child = Child(command.arg("30").spawn().unwrap());
+        std::fs::copy("/bin/sh", &executable).unwrap();
+        let child = Child(
+            std::process::Command::new(&executable)
+                .args(["-c", "read line"])
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
         let table = ProcessTable::load().unwrap();
         let process = &table.processes[&(child.0.id() as i32)];
         assert_eq!(process.executable.rsplit('/').next(), Some("codex"));
@@ -413,10 +412,10 @@ mod tests {
         assert_eq!(process.executable, executable.to_str().unwrap());
         #[cfg(target_os = "linux")]
         assert_eq!(process.executable, "codex");
-        #[cfg(target_os = "linux")]
-        assert_eq!(process.argv, "sleep 30");
-        #[cfg(target_os = "macos")]
-        assert_eq!(process.argv, format!("{} 30", executable.display()));
+        assert_eq!(
+            process.argv,
+            format!("{} -c read line", executable.display())
+        );
         assert!(table.is_descendant(process.pid, std::process::id() as i32));
         assert_eq!(
             table
