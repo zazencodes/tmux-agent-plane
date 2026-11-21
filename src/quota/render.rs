@@ -372,105 +372,110 @@ pub fn cards(snapshot: &Snapshot, now: Time, width: usize, in_view: bool) -> Vec
     lines
 }
 
-/// The sidebar's quota panel: each Claude/Codex window, otherwise the scarcest group,
-/// with percent left, a pace marker and time to reset.
+/// The sidebar's quota panel: provider headings with their windows nested below.
 pub fn summary(snapshot: &Snapshot, now: Time, width: usize) -> Vec<Line<'static>> {
-    snapshot
+    let mut lines = Vec::new();
+    for provider in snapshot
         .providers
         .iter()
         .filter(|p| p.status != Status::NotSetUp && visible(p))
-        .flat_map(|provider| {
-            let name = Span::styled(
-                format!("{:<6} ", provider.provider.as_str()),
-                Style::default().fg(TEXT).bold(),
-            );
-            let problem = |style: Style, text: &str| {
-                let mut spans = vec![Span::styled("○ ", style), name.clone()];
-                spans.push(Span::styled(truncate(text, width.saturating_sub(9)), style));
-                Line::from(spans)
-            };
-            match provider.status {
-                Status::NeedsKeychain => {
-                    return vec![problem(Style::default().fg(YELLOW), "needs Keychain · i")];
-                }
-                Status::Failed => {
-                    return vec![problem(
-                        Style::default().fg(RED),
-                        provider.error.as_deref().unwrap_or("failed"),
-                    )];
-                }
-                Status::Ok | Status::Stale | Status::NotSetUp => {}
+    {
+        let name = Span::styled(provider.provider.as_str(), Style::default().fg(TEXT).bold());
+        let problem = |style: Style, text: &str| {
+            Line::from(vec![
+                Span::styled("○ ", style),
+                name.clone(),
+                Span::styled(
+                    truncate(&format!(" {text}"), width.saturating_sub(2 + name.width())),
+                    style,
+                ),
+            ])
+        };
+        match provider.status {
+            Status::NeedsKeychain => {
+                lines.push(problem(Style::default().fg(YELLOW), "needs Keychain · u"));
+                continue;
             }
-            let (windows, dropped) = live(provider, now);
-            let stale = provider.status == Status::Stale || dropped;
-            let headline = groups(&windows)
-                .iter()
-                .map(|(_, members)| pace::headline(members, now, stale))
-                .min_by(|a, b| {
-                    let left = |h: &Headline<'_>| h.remaining.unwrap_or(f64::INFINITY);
-                    left(a).total_cmp(&left(b))
-                });
-            let (remaining, limiting) =
-                headline.map_or((None, None), |h| (h.remaining, h.limiting));
-            let per_window = matches!(
-                provider.provider,
-                super::ProviderId::Claude | super::ProviderId::Codex
-            );
-            let mut rows: Vec<_> = if per_window {
-                windows
-                    .iter()
-                    .copied()
-                    .filter(|w| w.role != super::Role::Model)
-                    .map(|w| (w.remaining(), Some(w)))
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            if rows.is_empty() {
-                rows.push((remaining, limiting));
+            Status::Failed => {
+                lines.push(problem(
+                    Style::default().fg(RED),
+                    provider.error.as_deref().unwrap_or("failed"),
+                ));
+                continue;
             }
-            rows.into_iter()
-                .map(|(remaining, window)| {
-                    let marker = window
-                        .and_then(|w| pace::pace(w, now, stale))
-                        .map(|p| p.time_remaining_percent);
-                    let icon = if stale {
-                        Span::styled("◐ ", Style::default().fg(YELLOW))
-                    } else {
-                        Span::styled("● ", Style::default().fg(GREEN))
-                    };
-                    let mut spans = vec![icon, name.clone()];
-                    if per_window {
-                        let label = window.map_or("", |w| match w.window_seconds {
-                            Some(18_000) => "5h",
-                            Some(604_800) => "week",
-                            _ => &w.label,
-                        });
-                        spans.push(Span::styled(format!("{:<4} ", truncate(label, 4)), SUBTEXT));
-                    }
-                    spans.extend(bar(
-                        remaining,
-                        marker,
-                        width
-                            .saturating_sub(2 + 7 + usize::from(per_window) * 5 + 5 + 1 + COUNTDOWN)
-                            .max(3),
-                    ));
-                    spans.push(match remaining {
-                        Some(r) => Span::styled(
-                            format!(" {:>4}", format!("{r:.0}%")),
-                            Style::default().fg(health(r)),
+            Status::Ok | Status::Stale | Status::NotSetUp => {}
+        }
+        let (windows, dropped) = live(provider, now);
+        let stale = provider.status == Status::Stale || dropped;
+        let icon = if stale {
+            Span::styled("◐ ", Style::default().fg(YELLOW))
+        } else {
+            Span::styled("● ", Style::default().fg(GREEN))
+        };
+        lines.push(Line::from(vec![icon, name]));
+        let windows: Vec<_> = windows
+            .into_iter()
+            .filter(|w| w.role != super::Role::Model)
+            .collect();
+        if windows.is_empty() {
+            lines.push(text_line("  no current windows".into(), OVERLAY, width));
+        }
+        let group_width = windows
+            .iter()
+            .filter_map(|w| w.group.as_ref())
+            .map(|g| g.chars().count())
+            .max()
+            .unwrap_or(0)
+            .min(width.saturating_sub(2 + 1 + 4 + 1 + 3 + 5 + 1 + COUNTDOWN));
+        for (group, windows) in groups(&windows) {
+            let label_width = if group.is_some() { 4 } else { LABEL };
+            for (row, window) in windows.into_iter().enumerate() {
+                let label = match window.window_seconds {
+                    Some(18_000) => "5h",
+                    Some(604_800) => "week",
+                    _ => &window.label,
+                };
+                let mut spans = vec![Span::raw("  ")];
+                if let Some(group) = group {
+                    spans.push(Span::styled(
+                        format!(
+                            "{:<group_width$} ",
+                            if row == 0 {
+                                truncate(group, group_width)
+                            } else {
+                                String::new()
+                            }
                         ),
-                        None => Span::styled(format!(" {:>4}", "?"), OVERLAY),
-                    });
-                    let reset = window
-                        .and_then(|w| w.resets_at)
-                        .map_or(String::new(), |at| until(at, now));
-                    spans.push(Span::styled(format!(" {reset:<COUNTDOWN$}"), OVERLAY));
-                    Line::from(spans)
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect()
+                        SUBTEXT,
+                    ));
+                }
+                spans.push(Span::styled(
+                    format!("{:<label_width$} ", truncate(label, label_width)),
+                    OVERLAY,
+                ));
+                let remaining = window.remaining();
+                let marker = pace::pace(window, now, stale).map(|p| p.time_remaining_percent);
+                spans.extend(bar(
+                    remaining,
+                    marker,
+                    width
+                        .saturating_sub(width_of(&spans) + 5 + 1 + COUNTDOWN)
+                        .max(3),
+                ));
+                spans.push(match remaining {
+                    Some(r) => Span::styled(
+                        format!(" {:>4}", format!("{r:.0}%")),
+                        Style::default().fg(health(r)),
+                    ),
+                    None => Span::styled(format!(" {:>4}", "?"), OVERLAY),
+                });
+                let reset = window.resets_at.map_or(String::new(), |at| until(at, now));
+                spans.push(Span::styled(format!(" {reset:<COUNTDOWN$}"), OVERLAY));
+                lines.push(Line::from(spans));
+            }
+        }
+    }
+    lines
 }
 
 /// The `quota` command's text: the title, then the cards without colour.
@@ -777,30 +782,38 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn summary_shows_both_claude_and_codex_windows_and_the_other_providers_scarcest_group() {
+    fn summary_nests_all_windows_under_one_provider_heading() {
         let mut snapshot = sample();
-        let mut missing = sample().providers.remove(0);
-        missing.provider = crate::quota::ProviderId::Grok;
-        missing.status = Status::NotSetUp;
-        snapshot.providers.push(missing);
-        let lines: Vec<String> = plain(&summary(&snapshot, at(NOW), 34))
-            .iter()
-            .map(|l| l.trim_end().to_string())
-            .collect();
-        assert_eq!(lines.len(), 5, "{lines:#?}");
-        for line in plain(&summary(&snapshot, at(NOW), 34)).iter() {
-            assert_eq!(line.chars().count(), 34, "{line:?}");
+        let mut week = snapshot.providers[2].windows[0].clone();
+        week.label = "week".into();
+        week.window_seconds = Some(604_800);
+        snapshot.providers[2].windows.insert(1, week);
+        let lines = plain(&summary(&snapshot, at(NOW), 36));
+        assert_eq!(lines.len(), 10, "{lines:#?}");
+        assert_eq!(lines[0], "● claude");
+        assert_eq!(lines[3], "◐ codex");
+        assert_eq!(lines[6], "● agy");
+        assert!(lines[7].starts_with("  gemini     5h"));
+        assert!(lines[8].starts_with("             week"));
+        assert!(lines[9].starts_with("  claude/gpt 5h"));
+        for (row, label, percent) in [
+            (1, "5h", "97%"),
+            (2, "week", "72%"),
+            (4, "5h", "60%"),
+            (5, "week", "83%"),
+            (8, "week", "75%"),
+        ] {
+            assert!(
+                lines[row].trim_start().starts_with(label) && lines[row].contains(percent),
+                "{}",
+                lines[row]
+            );
+            assert_eq!(lines[row].chars().count(), 36);
         }
-        assert!(lines[0].starts_with("● claude 5h   ") && lines[0].ends_with(" 97% 4h38m"));
-        assert!(lines[1].starts_with("● claude week ") && lines[1].ends_with(" 72% 4d21h"));
-        assert!(lines[0].contains('┃') && lines[1].contains('┃'));
-        assert!(lines[2].starts_with("◐ codex  5h   ") && lines[2].ends_with(" 60% 2h0m"));
-        assert!(lines[3].starts_with("◐ codex  week ") && lines[3].ends_with(" 83% 3d0h"));
-        assert!(
-            !lines[2].contains('┃') && !lines[3].contains('┃'),
-            "stale pace is unknown"
-        );
-        assert!(lines[4].starts_with("● agy    ") && lines[4].ends_with(" 10% 1h0m"));
+        assert!(lines[1].contains('┃') && lines[2].contains('┃'));
+        assert!(!lines[4].contains('┃') && !lines[5].contains('┃'));
+        assert!(lines[7].contains('┃') && lines[9].contains('┃'));
+        assert!(lines[7].contains("75%") && lines[9].contains("10%"));
         assert!(!lines.iter().any(|line| line.contains("expired")));
     }
 
@@ -816,17 +829,22 @@ pub(crate) mod tests {
         snapshot.providers[1].windows[1].percent_used = None;
         for width in [30, 36, 58] {
             let rows = plain(&summary(&snapshot, at(NOW), width));
-            assert_eq!(rows.len(), 4);
-            assert!(rows.iter().all(|row| row.chars().count() == width));
-            assert!(rows[0].starts_with("◐ claude week ") && !rows[0].contains('┃'));
-            assert!(rows[1].starts_with("● codex  5h   ") && rows[1].contains('┃'));
-            assert!(rows[2].starts_with("● codex  week ") && rows[2].contains('?'));
+            assert_eq!(rows.len(), 8);
+            assert!(rows.iter().all(|row| row.chars().count() <= width));
+            assert_eq!(rows[0], "◐ claude");
+            assert!(rows[1].trim_start().starts_with("week") && !rows[1].contains('┃'));
+            assert!(rows[3].trim_start().starts_with("5h") && rows[3].contains('┃'));
+            assert!(rows[4].trim_start().starts_with("week") && rows[4].contains('?'));
             assert!(!rows.iter().any(|row| row.contains("opus")));
         }
         snapshot.providers[0].status = Status::Failed;
         snapshot.providers[0].error = Some("offline".into());
         let rows = plain(&summary(&snapshot, at(NOW), 36));
-        assert_eq!(rows.len(), 4);
+        assert_eq!(rows.len(), 7);
         assert_eq!(rows[0], "○ claude offline");
+        snapshot.providers[0].status = Status::Ok;
+        snapshot.providers[0].windows.clear();
+        let rows = plain(&summary(&snapshot, at(NOW), 36));
+        assert_eq!(rows[1], "  no current windows");
     }
 }

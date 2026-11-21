@@ -296,15 +296,19 @@ Desktop notifications keep the task or blocked detail and work with the sidebar 
 
 ### Quota
 
-Press `u` to expand quota upward from the bottom while agents remain visible above it. Press `u` again or `Esc` to collapse to the summary. The summary shows both the 5-hour and weekly pacing bars for Claude and Codex, using the same heading and rule as tasks. Configure whether sidebars start with it shown through `o` → Quota panel.
+Press `u` to expand quota upward from the bottom while agents remain visible above it. Press `u` again or `Esc` to collapse to the summary. The summary nests each plan’s pacing windows beneath its name, including Antigravity’s separate budgets, using the same heading and rule as tasks. Configure whether sidebars start with it shown through `o` → Quota panel.
 
 ```
 ── quota ───────────────────────────
-● claude 5h   ━━━━━━━━┃  97% 4h38m
-● claude week ━━━━━━┃──  72% 4d21h
-◐ codex  5h   ━━━━━────  60% 2h0m
-◐ codex  week ━━━━━━━──  83% 3d0h
-● agy    ━╸─┃─────────  10% 1h0m
+● claude
+  5h      ━━━━━━━━━━━━━┃  97% 4h38m
+  week    ━━━━━━━━━━┃───  72% 4d21h
+◐ codex
+  5h      ━━━━━━━━──────  60% 2h0m
+  week    ━━━━━━━━━━━╸──  83% 3d0h
+● agy
+  gemini     5h   ━━━┃──  75% 2h0m
+  claude/gpt 5h   ╸┃────  10% 1h0m
 ```
 
 Expanded details show each plan's windows, pace and reset times. Use `r` to refresh, `j`/`k` or arrows to scroll, and `Enter` to allow Keychain access when Claude asks. Expired logins are omitted.

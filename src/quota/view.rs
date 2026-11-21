@@ -369,7 +369,10 @@ mod tests {
         };
         let now = crate::quota::tests::at(render::tests::NOW);
         let height = view.panel_height_at(now);
-        assert_eq!(height, 7, "five summary rows, spacing and heading");
+        assert_eq!(
+            height, 11,
+            "provider headings and window rows, spacing and heading"
+        );
         let mut terminal = Terminal::new(TestBackend::new(38, height)).unwrap();
         terminal
             .draw(|f| view.draw_panel_at(f, f.area(), now))
@@ -380,11 +383,15 @@ mod tests {
             .collect();
         assert!(rows[0].trim().is_empty());
         assert!(rows[1].starts_with(" ── quota ─"), "{}", rows[1]);
-        assert!(rows[2].starts_with(" ● claude 5h   "), "{}", rows[2]);
-        assert!(rows[3].starts_with(" ● claude week "));
-        assert!(rows[4].starts_with(" ◐ codex  5h   "));
-        assert!(rows[5].starts_with(" ◐ codex  week "));
-        assert!(rows[6].starts_with(" ● agy    "));
+        assert_eq!(rows[2].trim(), "● claude");
+        assert!(rows[3].starts_with("   5h"));
+        assert!(rows[4].starts_with("   week"));
+        assert_eq!(rows[5].trim(), "◐ codex");
+        assert!(rows[6].starts_with("   5h"));
+        assert!(rows[7].starts_with("   week"));
+        assert_eq!(rows[8].trim(), "● agy");
+        assert!(rows[9].starts_with("   gemini     5h"));
+        assert!(rows[10].starts_with("   claude/gpt 5h"));
         assert!(!rows.join("\n").contains("expired"));
         assert!(!rows.join("\n").contains("details"));
         assert!(!rows.join("\n").contains('│'));
