@@ -296,12 +296,14 @@ Desktop notifications keep the task or blocked detail and work with the sidebar 
 
 ### Quota
 
-Press `u` to expand quota upward from the bottom while agents remain visible above it. Press `u` again or `Esc` to collapse to the summary. The summary uses the same heading and rule as tasks. Configure whether sidebars start with it shown through `o` → Quota panel.
+Press `u` to expand quota upward from the bottom while agents remain visible above it. Press `u` again or `Esc` to collapse to the summary. The summary shows both the 5-hour and weekly pacing bars for Claude and Codex, using the same heading and rule as tasks. Configure whether sidebars start with it shown through `o` → Quota panel.
 
 ```
 ── quota ───────────────────────────
-● claude ━━━━━━━━━┃───  72% 4d21h
-◐ codex  ━━━━━━━━━━━──  83% 3d0h
+● claude 5h   ━━━━━━━━┃  97% 4h38m
+● claude week ━━━━━━┃──  72% 4d21h
+◐ codex  5h   ━━━━━────  60% 2h0m
+◐ codex  week ━━━━━━━──  83% 3d0h
 ● agy    ━╸─┃─────────  10% 1h0m
 ```
 

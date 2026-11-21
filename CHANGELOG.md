@@ -5,6 +5,10 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Changed
+
+- The always-on quota panel shows separate 5-hour and weekly pacing bars for Claude and Codex, each with its remaining percentage and reset countdown.
+
 ## 0.8.0 - 2026-11-17
 
 ### Added

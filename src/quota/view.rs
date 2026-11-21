@@ -149,17 +149,21 @@ impl View {
         }
     }
 
-    /// One row of spacing, a heading, then one row per active provider.
+    /// One row of spacing, a heading, then the summary rows.
     pub fn panel_height(&self) -> u16 {
+        self.panel_height_at(Utc::now())
+    }
+
+    fn panel_height_at(&self, now: super::Time) -> u16 {
         let rows = self
             .feed
             .snapshot
             .as_ref()
-            .map_or(1, |s| render::summary(s, Utc::now(), 1).len().max(1));
+            .map_or(1, |s| render::summary(s, now, 1).len().max(1));
         rows as u16 + 2
     }
 
-    /// The pinned panel: one line per provider.
+    /// The pinned quota summary.
     pub fn draw_panel(&self, f: &mut Frame, area: Rect) {
         self.draw_panel_at(f, area, Utc::now());
     }
@@ -363,10 +367,10 @@ mod tests {
             },
             ..View::default()
         };
-        let height = view.panel_height();
-        assert_eq!(height, 5, "three active providers, spacing and heading");
-        let mut terminal = Terminal::new(TestBackend::new(38, height)).unwrap();
         let now = crate::quota::tests::at(render::tests::NOW);
+        let height = view.panel_height_at(now);
+        assert_eq!(height, 7, "five summary rows, spacing and heading");
+        let mut terminal = Terminal::new(TestBackend::new(38, height)).unwrap();
         terminal
             .draw(|f| view.draw_panel_at(f, f.area(), now))
             .unwrap();
@@ -376,7 +380,11 @@ mod tests {
             .collect();
         assert!(rows[0].trim().is_empty());
         assert!(rows[1].starts_with(" ── quota ─"), "{}", rows[1]);
-        assert!(rows[2].starts_with(" ● claude ━"), "{}", rows[2]);
+        assert!(rows[2].starts_with(" ● claude 5h   "), "{}", rows[2]);
+        assert!(rows[3].starts_with(" ● claude week "));
+        assert!(rows[4].starts_with(" ◐ codex  5h   "));
+        assert!(rows[5].starts_with(" ◐ codex  week "));
+        assert!(rows[6].starts_with(" ● agy    "));
         assert!(!rows.join("\n").contains("expired"));
         assert!(!rows.join("\n").contains("details"));
         assert!(!rows.join("\n").contains('│'));
