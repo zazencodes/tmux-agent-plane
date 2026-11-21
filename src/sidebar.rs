@@ -1222,6 +1222,9 @@ impl Sidebar {
     pub(crate) fn show(&mut self, config: &crate::autoname_config::Sidebar) {
         self.tasks.shown = config.tasks;
         self.quota.pinned = config.quota;
+        self.quota
+            .hidden_groups
+            .clone_from(&config.hidden_quota_groups);
         self.navigation.family = config.family;
         self.rebuild();
     }

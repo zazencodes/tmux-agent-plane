@@ -181,61 +181,54 @@ fn remaining_fraction(bucket: &Value) -> Option<f64> {
         })
 }
 
-/// Group: Gemini (Argon apart: its own quota on paid plans), Claude/GPT, or the group's name.
-fn group(name: &str, bucket_id: &str) -> (u8, String, String) {
-    let both = format!("{name} {bucket_id}").to_lowercase();
-    if both.contains("gemini") && both.contains("argon") {
-        (2, "gemini_argon".into(), "gemini argon".into())
-    } else if both.contains("gemini") {
-        (0, "gemini".into(), "gemini".into())
-    } else if both.contains("claude") || both.contains("gpt") || both.contains("3p") {
-        (1, "claude_gpt".into(), "claude/gpt".into())
+/// Preserve the provider's budget boundaries, including new Gemini model groups.
+fn group(name: &str) -> (u8, String, String) {
+    let name = name.to_lowercase();
+    let (rank, label) = if matches!(name.as_str(), "gemini" | "gemini models") {
+        (0, "gemini".to_string())
+    } else if name.contains("claude") || name.contains("gpt") {
+        (1, "claude/gpt".to_string())
     } else {
-        let slug: String = name
-            .to_lowercase()
-            .split(|c: char| !c.is_ascii_alphanumeric())
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>()
-            .join("_");
-        let slug = if slug.is_empty() {
-            "quota".into()
-        } else {
-            slug
-        };
-        (2, slug, name.to_lowercase())
-    }
+        (2, name)
+    };
+    let slug = label
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
+    (rank, slug, label)
 }
 
 /// 5h or weekly from the bucket's window, id or name; anything else is a window we do not know.
 fn kind(bucket: &Value) -> (u8, &'static str, &'static str, Role, Option<u64>) {
-    let names: Vec<String> = ["window", "bucketId", "bucket_id", "displayName", "name"]
-        .iter()
-        .filter_map(|k| bucket.get(*k)?.as_str())
-        .map(str::to_lowercase)
-        .collect();
-    let strip = |name: &str| {
-        let name = [
-            "gemini-",
-            "gemini_",
-            "3p-",
-            "3p_",
-            "third-party-",
-            "third-party_",
-        ]
-        .iter()
-        .find_map(|p| name.strip_prefix(p))
-        .unwrap_or(name);
-        name.strip_suffix(" limit").unwrap_or(name).to_string()
+    let names: Vec<String> = [
+        "window",
+        "bucketId",
+        "bucket_id",
+        "id",
+        "displayName",
+        "name",
+    ]
+    .iter()
+    .filter_map(|k| bucket.get(*k)?.as_str())
+    .map(str::to_lowercase)
+    .collect();
+    let matches = |name: &str, suffixes: &[&str]| {
+        let name = name.strip_suffix(" limit").unwrap_or(name);
+        suffixes.iter().any(|suffix| {
+            name == *suffix
+                || name
+                    .strip_suffix(suffix)
+                    .is_some_and(|prefix| prefix.ends_with(['-', '_']))
+        })
     };
-    if names.iter().any(|n| {
-        matches!(
-            strip(n).as_str(),
-            "5h" | "5-hour" | "five hour" | "five_hour" | "five-hour"
-        )
-    }) {
+    if names
+        .iter()
+        .any(|n| matches(n, &["5h", "5-hour", "five hour", "five_hour", "five-hour"]))
+    {
         return (0, "5h", "5h", Role::Bound, Some(FIVE_HOURS));
     }
-    if names.iter().any(|n| strip(n) == "weekly") {
+    if names.iter().any(|n| matches(n, &["weekly"])) {
         return (1, "weekly", "week", Role::Bound, Some(WEEK));
     }
     (2, "unknown", "quota", Role::Unknown, None)
@@ -245,8 +238,8 @@ fn window(group_name: &str, bucket: &Value) -> Option<(u8, u8, Window)> {
     if bucket.get("disabled").and_then(Value::as_bool) == Some(true) {
         return None;
     }
-    let bucket_id = text(bucket, &["bucketId", "bucket_id", "id"])?;
-    let (group_rank, group_id, group_label) = group(group_name, bucket_id);
+    text(bucket, &["bucketId", "bucket_id", "id"])?;
+    let (group_rank, group_id, group_label) = group(group_name);
     let (kind_rank, kind_id, label, role, seconds) = kind(bucket);
     let resets_at = ["resetTime", "reset_time"]
         .iter()
@@ -313,6 +306,40 @@ mod tests {
         assert_eq!(
             reading.windows[0].resets_at.unwrap().to_rfc3339(),
             "2026-11-08T20:00:00+00:00"
+        );
+    }
+
+    #[test]
+    fn new_gemini_groups_keep_separate_budgets_and_recognize_their_periods() {
+        let input = serde_json::json!({"command":{"name":"usage","data":{"groups":[
+            {"name":"Gemini 4 Neon","buckets":[
+                {"id":"gemini-neon-5h","remaining_fraction":0.7},
+                {"id":"gemini-neon-weekly","remaining_fraction":0.8}]},
+            {"name":"Gemini 4 Carbon","buckets":[
+                {"id":"gemini-carbon-5h","remaining_fraction":0.9},
+                {"id":"gemini-carbon-weekly","remaining_fraction":0.6}]},
+            {"name":"Gemini Models","description":"Models within this group: Gemini 4 Neon, Gemini 4 Hydrogen, Orchestrator (Neon), Gemini 3.8 Flash","buckets":[
+                {"id":"gemini-5h","window":"5h","remaining_fraction":1}]}]}}});
+        let reading = parse(&serde_json::to_vec(&input).unwrap()).unwrap();
+        let windows: Vec<_> = reading
+            .windows
+            .iter()
+            .map(|w| (w.id.as_str(), w.group.as_deref().unwrap(), w.window_seconds))
+            .collect();
+        assert_eq!(
+            windows,
+            [
+                ("gemini_5h", "gemini", Some(FIVE_HOURS)),
+                ("gemini_4_neon_5h", "gemini 4 neon", Some(FIVE_HOURS)),
+                ("gemini_4_carbon_5h", "gemini 4 carbon", Some(FIVE_HOURS)),
+                ("gemini_4_neon_weekly", "gemini 4 neon", Some(WEEK)),
+                ("gemini_4_carbon_weekly", "gemini 4 carbon", Some(WEEK)),
+            ]
+        );
+        assert!(reading.windows.iter().all(|w| w.role == Role::Bound));
+        assert_eq!(
+            kind(&serde_json::json!({"id":"gemini-neon-daily"})).3,
+            Role::Unknown
         );
     }
 

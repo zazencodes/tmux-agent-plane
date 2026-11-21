@@ -311,6 +311,10 @@ Press `u` to expand quota upward from the bottom while agents remain visible abo
   claude/gpt 5h   ╸┃────  10% 1h0m
 ```
 
+To hide particular budgets in your own sidebar, set `sidebar.hidden_quota_groups` in `~/.config/tmux-agent-plane/config.json` and reopen the sidebar. For example, `"hidden_quota_groups": ["agy:claude/gpt"]` hides Antigravity's Claude/GPT budget from both compact and expanded quota. The default is an empty list, showing every budget. CLI quota output retains all groups.
+
+Antigravity's budget groups come from its `/quota` response. Models that share a budget, such as Neon and Hydrogen when reported under Gemini Models, share one tracker. Separately reported groups, including Neon, Carbon and Argon, keep their own windows; model names do not create additional budgets.
+
 Expanded details show each plan's windows, pace and reset times. Use `r` to refresh, `j`/`k` or arrows to scroll, and `Enter` to allow Keychain access when Claude asks. Expired logins are omitted.
 
 Each card shows what is left of the plan's tightest window (the headline), then every window with its time to reset. Percentages are what is left: green from 50%, yellow from 20%, red below. `┃` marks where the bar would be if you used the window evenly up to its reset: fill short of the marker means you are using it faster than the clock. The verdict on the right is `on pace ✓` when every window lasts to its reset, `empty in 7h21m` when, at the rate so far this window, one runs out first, `✗ exhausted now`, or `runway unknown` when a window's cycle is not known. Antigravity shows its Gemini and Claude/GPT groups separately, because each is its own budget.

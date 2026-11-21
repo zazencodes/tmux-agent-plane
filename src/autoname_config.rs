@@ -112,6 +112,9 @@ pub struct Sidebar {
     pub tasks: bool,
     /// The quota panel below the graph and tasks; `u` toggles it in one sidebar.
     pub quota: bool,
+    /// Hidden provider/group pairs, such as `agy:claude/gpt`; an empty list shows every group.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hidden_quota_groups: Vec<String>,
     /// The selected agent's family below the list; `p` in any sidebar saves it for every sidebar.
     pub family: bool,
 }
@@ -121,6 +124,7 @@ impl Default for Sidebar {
         Self {
             tasks: true,
             quota: false,
+            hidden_quota_groups: Vec::new(),
             family: true,
         }
     }
@@ -489,6 +493,17 @@ mod tests {
         assert!(!config.sidebar.tasks && !config.sidebar.quota);
         assert!(parse(br#"{"sidebar":{"usage":true}}"#).is_err());
     }
+    #[test]
+    fn quota_groups_are_visible_by_default_and_hiding_is_personal() {
+        assert!(parse(b"{}").unwrap().sidebar.hidden_quota_groups.is_empty());
+        let config = parse(br#"{"sidebar":{"hidden_quota_groups":["agy:claude/gpt"]}}"#).unwrap();
+        assert_eq!(config.sidebar.hidden_quota_groups, ["agy:claude/gpt"]);
+        assert_eq!(
+            parse(&serde_json::to_vec(&config).unwrap()).unwrap(),
+            config
+        );
+    }
+
     #[test]
     fn removed_settings_fail_loudly() {
         assert!(parse(br#"{"auto_name":{"hide_hint":true}}"#).is_err());

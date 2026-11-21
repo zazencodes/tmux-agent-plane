@@ -5,6 +5,14 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+### Added
+
+- Hide selected quota budgets in your own sidebar with `sidebar.hidden_quota_groups`, such as `["agy:claude/gpt"]`. All budgets remain visible by default.
+
+### Fixed
+
+- Antigravity preserves separately reported Gemini budgets, including Neon and Carbon, and recognizes 5-hour and weekly bucket IDs for new model groups. Models that share a reported budget continue to share one tracker.
+
 ### Changed
 
 - Quota windows sit beneath a single provider heading. Antigravity shows each Gemini and Claude/GPT budget with its own 5-hour and weekly pacing rows.

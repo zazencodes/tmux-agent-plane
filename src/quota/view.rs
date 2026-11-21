@@ -61,9 +61,14 @@ impl Feed {
         self.requested_at = Some(Instant::now());
     }
 
-    fn reload(&mut self) {
+    fn reload(&mut self, hidden_groups: &[String]) {
         match super::read() {
-            Ok(snapshot) => self.snapshot = snapshot,
+            Ok(mut snapshot) => {
+                if let Some(snapshot) = &mut snapshot {
+                    hide_groups(snapshot, hidden_groups);
+                }
+                self.snapshot = snapshot;
+            }
             Err(error) => self.notice = Some(format!("{error:#}")),
         }
     }
@@ -71,7 +76,7 @@ impl Feed {
     /// Picks up a finished request, rereads the snapshot another reader may have refreshed, and
     /// asks again once both this sidebar's last request and the snapshot are five minutes old,
     /// so many sidebars share one read.
-    fn tick(&mut self, now: super::Time) {
+    fn tick(&mut self, now: super::Time, hidden_groups: &[String]) {
         if let Some(request) = &self.request {
             match request.try_recv() {
                 Ok(result) => {
@@ -85,11 +90,23 @@ impl Feed {
                 }
             }
         }
-        self.reload();
+        self.reload(hidden_groups);
         if self.request.is_none() && due(self.requested_at, self.snapshot.as_ref(), now) {
             self.ask(false);
         }
     }
+}
+
+fn hide_groups(snapshot: &mut Snapshot, hidden: &[String]) {
+    snapshot.providers.retain_mut(|provider| {
+        let had_windows = !provider.windows.is_empty();
+        provider.windows.retain(|window| {
+            window.group.as_ref().is_none_or(|group| {
+                !hidden.contains(&format!("{}:{group}", provider.provider.as_str()))
+            })
+        });
+        !had_windows || !provider.windows.is_empty()
+    });
 }
 
 fn due(requested_at: Option<Instant>, snapshot: Option<&Snapshot>, now: super::Time) -> bool {
@@ -103,6 +120,7 @@ pub struct View {
     pub open: bool,
     /// `u`: the panel below the graph and tasks; starts from the configuration.
     pub pinned: bool,
+    pub hidden_groups: Vec<String>,
     feed: Feed,
     scroll: usize,
     /// Lines that fit, from the last draw.
@@ -145,7 +163,7 @@ impl View {
     /// Called on every pass of the sidebar loop while the view or the panel shows.
     pub fn tick(&mut self) {
         if self.open || self.pinned {
-            self.feed.tick(Utc::now());
+            self.feed.tick(Utc::now(), &self.hidden_groups);
         }
     }
 
@@ -268,6 +286,38 @@ mod tests {
                     .collect::<String>()
             })
             .collect()
+    }
+
+    #[test]
+    fn hidden_groups_apply_to_both_quota_views_without_changing_the_source() {
+        let source = render::tests::sample();
+        let mut filtered = source.clone();
+        hide_groups(&mut filtered, &["agy:claude/gpt".into()]);
+        let now = crate::quota::tests::at(render::tests::NOW);
+        let text = |lines: Vec<Line<'_>>| {
+            lines
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        for lines in [
+            render::summary(&filtered, now, 36),
+            render::cards(&filtered, now, 36, true),
+        ] {
+            let text = text(lines);
+            assert!(text.contains("gemini"));
+            assert!(!text.contains("claude/gpt"));
+            assert!(text.contains("claude") && text.contains("codex"));
+        }
+        assert!(text(render::summary(&source, now, 36)).contains("claude/gpt"));
+        hide_groups(&mut filtered, &["agy:gemini".into()]);
+        assert!(
+            !filtered
+                .providers
+                .iter()
+                .any(|p| p.provider == ProviderId::Agy)
+        );
     }
 
     #[test]
