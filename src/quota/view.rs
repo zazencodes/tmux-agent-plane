@@ -306,7 +306,7 @@ mod tests {
             render::cards(&filtered, now, 36, true),
         ] {
             let text = text(lines);
-            assert!(text.contains("gemini"));
+            assert!(text.contains("agy") && text.contains("75%"));
             assert!(!text.contains("claude/gpt"));
             assert!(text.contains("claude") && text.contains("codex"));
         }

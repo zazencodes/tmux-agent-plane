@@ -11,9 +11,13 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Fixed
 
+- Fresh unused quota windows show their marker at 100% before the provider starts a reset clock.
+
 - Antigravity preserves separately reported Gemini budgets, including Neon and Carbon, and recognizes 5-hour and weekly bucket IDs for new model groups. Models that share a reported budget continue to share one tracker.
 
 ### Changed
+
+- Antigravity omits the Gemini subheading when it is the only visible budget, keeping its period rows directly beneath agy.
 
 - Quota uses one equal-width bar per window, with aligned labels, percentages and reset times across providers in compact and expanded views. Expanded quota omits the duplicate headline bars.
 

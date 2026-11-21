@@ -184,7 +184,15 @@ fn window_lines(windows: &[&Window], now: Time, stale: bool, width: usize) -> Ve
         .max(3);
     for window in windows {
         let remaining = window.remaining();
-        let marker = pace::pace(window, now, stale).map(|p| p.time_remaining_percent);
+        let marker = if !stale
+            && window.percent_used == Some(0.0)
+            && window.resets_at.is_none()
+            && window.window_seconds.is_some_and(|seconds| seconds > 0)
+        {
+            Some(100.0)
+        } else {
+            pace::pace(window, now, stale).map(|p| p.time_remaining_percent)
+        };
         let label = match (window.role, window.window_seconds) {
             (super::Role::Model, _) => &window.label,
             (_, Some(18_000)) => "5h",
@@ -262,7 +270,7 @@ pub fn card(provider: &Provider, now: Time, width: usize, in_view: bool) -> Vec<
     let (windows, dropped) = live(provider, now);
     let stale = provider.status == Status::Stale || dropped;
     let groups = groups(&windows);
-    let single = matches!(groups.as_slice(), [(None, _)]);
+    let single = matches!(groups.as_slice(), [(None | Some("gemini"), _)]);
     let icon = if stale {
         Span::styled("◐ ", Style::default().fg(YELLOW))
     } else {
@@ -304,7 +312,9 @@ pub fn card(provider: &Provider, now: Time, width: usize, in_view: bool) -> Vec<
         ));
     }
     for ((group, members), headline) in groups.iter().zip(&headlines) {
-        if let Some(group) = group {
+        if let Some(group) = group
+            && !single
+        {
             let right = if stale {
                 vec![]
             } else {
@@ -395,8 +405,12 @@ pub fn summary(snapshot: &Snapshot, now: Time, width: usize) -> Vec<Line<'static
         if windows.is_empty() {
             lines.push(text_line("  no current windows".into(), OVERLAY, width));
         }
-        for (group, windows) in groups(&windows) {
-            if let Some(group) = group {
+        let groups = groups(&windows);
+        let single = matches!(groups.as_slice(), [(None | Some("gemini"), _)]);
+        for (group, windows) in groups {
+            if let Some(group) = group
+                && !single
+            {
                 lines.push(text_line(format!("  {group}"), SUBTEXT, width));
             }
             lines.extend(window_lines(&windows, now, stale, width));
@@ -651,6 +665,73 @@ pub(crate) mod tests {
         assert!(
             wide.iter()
                 .any(|l| l.contains("claude/gpt") && l.contains("empty in"))
+        );
+    }
+
+    #[test]
+    fn unused_windows_mark_full_capacity_before_the_reset_clock_starts() {
+        let mut window = w("five_hour", "session", 0.0, 18_000, 18_000);
+        window.resets_at = None;
+        let row =
+            |window: &Window, stale| plain(&window_lines(&[window], at(NOW), stale, 36)).remove(0);
+        let full = row(&window, false);
+        assert!(full.starts_with("  5h      ━━━━━━━━━━━━━┃"), "{full}");
+        assert!(
+            full.contains("100%") && full.trim_end().ends_with("100%"),
+            "no reset is invented"
+        );
+        assert!(
+            !row(&window, true).contains('┃'),
+            "stale pace stays unknown"
+        );
+        window.percent_used = Some(1.0);
+        assert!(
+            !row(&window, false).contains('┃'),
+            "used windows need a reset clock"
+        );
+        window.percent_used = None;
+        assert!(!row(&window, false).contains('┃'));
+        window.percent_used = Some(0.0);
+        window.window_seconds = None;
+        assert!(
+            !row(&window, false).contains('┃'),
+            "unknown cycles stay unknown"
+        );
+    }
+
+    #[test]
+    fn a_sole_gemini_budget_does_not_repeat_its_name_below_agy() {
+        let mut snapshot = sample();
+        snapshot.providers.retain(|p| p.provider == ProviderId::Agy);
+        snapshot.providers[0]
+            .windows
+            .retain(|w| w.group.as_deref() == Some("gemini"));
+        let mut week = snapshot.providers[0].windows[0].clone();
+        week.label = "week".into();
+        week.window_seconds = Some(604_800);
+        snapshot.providers[0].windows.push(week);
+        for lines in [
+            summary(&snapshot, at(NOW), 36),
+            cards(&snapshot, at(NOW), 36, true),
+        ] {
+            let lines = plain(&lines);
+            assert_eq!(lines.len(), 3, "{lines:?}");
+            assert!(lines[0].contains("agy"));
+            assert!(lines[1].starts_with("  5h") && lines[2].starts_with("  week"));
+            assert!(!lines.join("\n").contains("gemini"));
+        }
+        for window in &mut snapshot.providers[0].windows {
+            window.group = Some("gemini 4 carbon".into());
+        }
+        assert!(
+            plain(&summary(&snapshot, at(NOW), 36))
+                .join("\n")
+                .contains("gemini 4 carbon")
+        );
+        assert!(
+            plain(&cards(&snapshot, at(NOW), 36, true))
+                .join("\n")
+                .contains("gemini 4 carbon")
         );
     }
 
