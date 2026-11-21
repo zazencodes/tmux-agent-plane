@@ -420,8 +420,8 @@ mod tests {
         let now = crate::quota::tests::at(render::tests::NOW);
         let height = view.panel_height_at(now);
         assert_eq!(
-            height, 11,
-            "provider headings and window rows, spacing and heading"
+            height, 13,
+            "provider and group headings, window rows, spacing and heading"
         );
         let mut terminal = Terminal::new(TestBackend::new(38, height)).unwrap();
         terminal
@@ -440,8 +440,10 @@ mod tests {
         assert!(rows[6].starts_with("   5h"));
         assert!(rows[7].starts_with("   week"));
         assert_eq!(rows[8].trim(), "● agy");
-        assert!(rows[9].starts_with("   gemini     5h"));
-        assert!(rows[10].starts_with("   claude/gpt 5h"));
+        assert_eq!(rows[9].trim(), "gemini");
+        assert!(rows[10].starts_with("   5h"));
+        assert_eq!(rows[11].trim(), "claude/gpt");
+        assert!(rows[12].starts_with("   5h"));
         assert!(!rows.join("\n").contains("expired"));
         assert!(!rows.join("\n").contains("details"));
         assert!(!rows.join("\n").contains('│'));

@@ -15,6 +15,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ### Changed
 
+- Quota uses one equal-width bar per window, with aligned labels, percentages and reset times across providers in compact and expanded views. Expanded quota omits the duplicate headline bars.
+
 - Quota windows sit beneath a single provider heading. Antigravity shows each Gemini and Claude/GPT budget with its own 5-hour and weekly pacing rows.
 
 - The always-on quota panel shows separate 5-hour and weekly pacing bars for Claude and Codex, each with its remaining percentage and reset countdown.

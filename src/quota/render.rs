@@ -1,7 +1,7 @@
 //! Cards for the quota view and the `quota` command, and the JSON report. Percentages are what
 //! is left, like quota-axi's view: green from 50, yellow from 20, red below.
 
-use super::pace::{self, Headline, Runway};
+use super::pace::{self, Runway};
 use super::{Provider, Snapshot, Status, Time, Window, live};
 use crate::ui::{OVERLAY, SUBTEXT, SURFACE2, TEXT, truncate};
 use chrono::Local;
@@ -176,48 +176,23 @@ fn groups<'a>(windows: &[&'a Window]) -> Vec<(Option<&'a str>, Vec<&'a Window>)>
     groups
 }
 
-/// The headline percent and its window, the bar, then one row per window.
-fn group_lines(
-    windows: &[&Window],
-    headline: &Headline<'_>,
-    now: Time,
-    stale: bool,
-    width: usize,
-) -> Vec<Line<'static>> {
+/// Every quota window uses the same label, bar, percent and reset columns.
+fn window_lines(windows: &[&Window], now: Time, stale: bool, width: usize) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let marker = headline
-        .limiting
-        .and_then(|w| pace::pace(w, now, stale))
-        .map(|p| p.time_remaining_percent);
-    lines.push(match (headline.remaining, headline.limiting) {
-        (Some(remaining), Some(limiting)) => Line::from(vec![
-            Span::raw("  "),
-            Span::styled(
-                format!("{:.0}%", remaining),
-                Style::default().fg(health(remaining)).bold(),
-            ),
-            Span::styled(
-                truncate(&format!(" {}", limiting.label), width.saturating_sub(7)),
-                OVERLAY,
-            ),
-        ]),
-        _ => text_line("  effective unknown".into(), OVERLAY, width),
-    });
-    let mut bar_line = vec![Span::raw("  ")];
-    bar_line.extend(bar(
-        headline.remaining,
-        marker,
-        width.saturating_sub(2).max(3),
-    ));
-    lines.push(Line::from(bar_line));
     let row_bar = width
         .saturating_sub(2 + LABEL + 1 + 1 + 4 + 1 + COUNTDOWN)
         .max(3);
     for window in windows {
         let remaining = window.remaining();
         let marker = pace::pace(window, now, stale).map(|p| p.time_remaining_percent);
+        let label = match (window.role, window.window_seconds) {
+            (super::Role::Model, _) => &window.label,
+            (_, Some(18_000)) => "5h",
+            (_, Some(604_800)) => "week",
+            _ => &window.label,
+        };
         let mut row = vec![Span::styled(
-            format!("  {:<LABEL$} ", truncate(&window.label, LABEL)),
+            format!("  {:<LABEL$} ", truncate(label, LABEL)),
             SUBTEXT,
         )];
         row.extend(bar(remaining, marker, row_bar));
@@ -230,7 +205,7 @@ fn group_lines(
         });
         row.push(Span::styled(
             format!(
-                " {}",
+                " {:<COUNTDOWN$}",
                 window.resets_at.map_or(String::new(), |at| until(at, now))
             ),
             OVERLAY,
@@ -344,7 +319,7 @@ pub fn card(provider: &Provider, now: Time, width: usize, in_view: bool) -> Vec<
                 width,
             ));
         }
-        lines.extend(group_lines(members, headline, now, stale, width));
+        lines.extend(window_lines(members, now, stale, width));
     }
     lines
 }
@@ -420,59 +395,11 @@ pub fn summary(snapshot: &Snapshot, now: Time, width: usize) -> Vec<Line<'static
         if windows.is_empty() {
             lines.push(text_line("  no current windows".into(), OVERLAY, width));
         }
-        let group_width = windows
-            .iter()
-            .filter_map(|w| w.group.as_ref())
-            .map(|g| g.chars().count())
-            .max()
-            .unwrap_or(0)
-            .min(width.saturating_sub(2 + 1 + 4 + 1 + 3 + 5 + 1 + COUNTDOWN));
         for (group, windows) in groups(&windows) {
-            let label_width = if group.is_some() { 4 } else { LABEL };
-            for (row, window) in windows.into_iter().enumerate() {
-                let label = match window.window_seconds {
-                    Some(18_000) => "5h",
-                    Some(604_800) => "week",
-                    _ => &window.label,
-                };
-                let mut spans = vec![Span::raw("  ")];
-                if let Some(group) = group {
-                    spans.push(Span::styled(
-                        format!(
-                            "{:<group_width$} ",
-                            if row == 0 {
-                                truncate(group, group_width)
-                            } else {
-                                String::new()
-                            }
-                        ),
-                        SUBTEXT,
-                    ));
-                }
-                spans.push(Span::styled(
-                    format!("{:<label_width$} ", truncate(label, label_width)),
-                    OVERLAY,
-                ));
-                let remaining = window.remaining();
-                let marker = pace::pace(window, now, stale).map(|p| p.time_remaining_percent);
-                spans.extend(bar(
-                    remaining,
-                    marker,
-                    width
-                        .saturating_sub(width_of(&spans) + 5 + 1 + COUNTDOWN)
-                        .max(3),
-                ));
-                spans.push(match remaining {
-                    Some(r) => Span::styled(
-                        format!(" {:>4}", format!("{r:.0}%")),
-                        Style::default().fg(health(r)),
-                    ),
-                    None => Span::styled(format!(" {:>4}", "?"), OVERLAY),
-                });
-                let reset = window.resets_at.map_or(String::new(), |at| until(at, now));
-                spans.push(Span::styled(format!(" {reset:<COUNTDOWN$}"), OVERLAY));
-                lines.push(Line::from(spans));
+            if let Some(group) = group {
+                lines.push(text_line(format!("  {group}"), SUBTEXT, width));
             }
+            lines.extend(window_lines(&windows, now, stale, width));
         }
     }
     lines
@@ -705,10 +632,7 @@ pub(crate) mod tests {
             let all = lines.join("\n");
             assert!(all.contains("97%"), "claude session left");
             assert!(all.contains("4h38m") && all.contains("4d21h"));
-            assert!(
-                all.contains("72% week"),
-                "headline names the limiting window"
-            );
+            assert!(all.contains("week") && all.contains("72%"));
             assert!(all.contains("◐ codex"));
             assert!(all.contains("stale"));
             assert!(all.contains("gemini") && all.contains("claude/gpt"));
@@ -722,11 +646,58 @@ pub(crate) mod tests {
         );
         assert!(
             wide.iter()
-                .any(|l| l.starts_with("  session ━") && l.ends_with(" 97% 4h38m"))
+                .any(|l| l.starts_with("  5h      ━") && l.trim_end().ends_with(" 97% 4h38m"))
         );
         assert!(
             wide.iter()
                 .any(|l| l.contains("claude/gpt") && l.contains("empty in"))
+        );
+    }
+
+    #[test]
+    fn every_bar_has_the_same_width_and_columns_in_both_views() {
+        let mut snapshot = sample();
+        let mut model = snapshot.providers[0].windows[1].clone();
+        model.role = Role::Model;
+        model.label = "fable week".into();
+        snapshot.providers[0].windows.push(model);
+        for width in [30, 36, 58] {
+            for (lines, expected) in [
+                (summary(&snapshot, at(NOW), width), 6),
+                (cards(&snapshot, at(NOW), width, true), 7),
+            ] {
+                let mut bars = 0;
+                for line in lines {
+                    let mut column = 0;
+                    let mut start = None;
+                    let mut length = 0;
+                    for span in line.spans {
+                        let count = span.content.chars().count();
+                        if !span.content.is_empty()
+                            && span.content.chars().all(|c| "━╸─┃".contains(c))
+                        {
+                            start.get_or_insert(column);
+                            length += count;
+                        }
+                        column += count;
+                    }
+                    if let Some(start) = start {
+                        assert_eq!(start, 10, "bar begins after the fixed label column");
+                        assert_eq!(length, width - 22, "bar ends before percent and reset");
+                        assert_eq!(column, width, "percent and reset columns remain padded");
+                        bars += 1;
+                    }
+                }
+                assert_eq!(
+                    bars, expected,
+                    "one bar per window, without duplicate headline bars"
+                );
+            }
+        }
+        assert!(
+            plain(&cards(&snapshot, at(NOW), 36, true))
+                .join("\n")
+                .contains("fable")
         );
     }
 
@@ -789,19 +760,23 @@ pub(crate) mod tests {
         week.window_seconds = Some(604_800);
         snapshot.providers[2].windows.insert(1, week);
         let lines = plain(&summary(&snapshot, at(NOW), 36));
-        assert_eq!(lines.len(), 10, "{lines:#?}");
+        assert_eq!(lines.len(), 12, "{lines:#?}");
         assert_eq!(lines[0], "● claude");
         assert_eq!(lines[3], "◐ codex");
         assert_eq!(lines[6], "● agy");
-        assert!(lines[7].starts_with("  gemini     5h"));
-        assert!(lines[8].starts_with("             week"));
-        assert!(lines[9].starts_with("  claude/gpt 5h"));
+        assert_eq!(lines[7], "  gemini");
+        assert!(lines[8].starts_with("  5h"));
+        assert!(lines[9].starts_with("  week"));
+        assert_eq!(lines[10], "  claude/gpt");
+        assert!(lines[11].starts_with("  5h"));
         for (row, label, percent) in [
             (1, "5h", "97%"),
             (2, "week", "72%"),
             (4, "5h", "60%"),
             (5, "week", "83%"),
-            (8, "week", "75%"),
+            (8, "5h", "75%"),
+            (9, "week", "75%"),
+            (11, "5h", "10%"),
         ] {
             assert!(
                 lines[row].trim_start().starts_with(label) && lines[row].contains(percent),
@@ -812,8 +787,8 @@ pub(crate) mod tests {
         }
         assert!(lines[1].contains('┃') && lines[2].contains('┃'));
         assert!(!lines[4].contains('┃') && !lines[5].contains('┃'));
-        assert!(lines[7].contains('┃') && lines[9].contains('┃'));
-        assert!(lines[7].contains("75%") && lines[9].contains("10%"));
+        assert!(lines[8].contains('┃') && lines[11].contains('┃'));
+        assert!(lines[8].contains("75%") && lines[11].contains("10%"));
         assert!(!lines.iter().any(|line| line.contains("expired")));
     }
 
@@ -829,7 +804,7 @@ pub(crate) mod tests {
         snapshot.providers[1].windows[1].percent_used = None;
         for width in [30, 36, 58] {
             let rows = plain(&summary(&snapshot, at(NOW), width));
-            assert_eq!(rows.len(), 8);
+            assert_eq!(rows.len(), 10);
             assert!(rows.iter().all(|row| row.chars().count() <= width));
             assert_eq!(rows[0], "◐ claude");
             assert!(rows[1].trim_start().starts_with("week") && !rows[1].contains('┃'));
@@ -840,7 +815,7 @@ pub(crate) mod tests {
         snapshot.providers[0].status = Status::Failed;
         snapshot.providers[0].error = Some("offline".into());
         let rows = plain(&summary(&snapshot, at(NOW), 36));
-        assert_eq!(rows.len(), 7);
+        assert_eq!(rows.len(), 9);
         assert_eq!(rows[0], "○ claude offline");
         snapshot.providers[0].status = Status::Ok;
         snapshot.providers[0].windows.clear();

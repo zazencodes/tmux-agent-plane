@@ -307,8 +307,10 @@ Press `u` to expand quota upward from the bottom while agents remain visible abo
   5h      ━━━━━━━━──────  60% 2h0m
   week    ━━━━━━━━━━━╸──  83% 3d0h
 ● agy
-  gemini     5h   ━━━┃──  75% 2h0m
-  claude/gpt 5h   ╸┃────  10% 1h0m
+  gemini
+  5h      ━━━━━━━━━┃────  75% 2h0m
+  claude/gpt
+  5h      ━╸┃───────────  10% 1h0m
 ```
 
 To hide particular budgets in your own sidebar, set `sidebar.hidden_quota_groups` in `~/.config/tmux-agent-plane/config.json` and reopen the sidebar. For example, `"hidden_quota_groups": ["agy:claude/gpt"]` hides Antigravity's Claude/GPT budget from both compact and expanded quota. The default is an empty list, showing every budget. CLI quota output retains all groups.
@@ -317,7 +319,7 @@ Antigravity's budget groups come from its `/quota` response. Models that share a
 
 Expanded details show each plan's windows, pace and reset times. Use `r` to refresh, `j`/`k` or arrows to scroll, and `Enter` to allow Keychain access when Claude asks. Expired logins are omitted.
 
-Each card shows what is left of the plan's tightest window (the headline), then every window with its time to reset. Percentages are what is left: green from 50%, yellow from 20%, red below. `┃` marks where the bar would be if you used the window evenly up to its reset: fill short of the marker means you are using it faster than the clock. The verdict on the right is `on pace ✓` when every window lasts to its reset, `empty in 7h21m` when, at the rate so far this window, one runs out first, `✗ exhausted now`, or `runway unknown` when a window's cycle is not known. Antigravity shows its Gemini and Claude/GPT groups separately, because each is its own budget.
+Each window has one bar, with identical label, bar, percentage and reset columns across every provider and budget. Compact and expanded quota use the same rows; expanded quota adds plan names, model limits and pacing verdicts. Percentages are what is left: green from 50%, yellow from 20%, red below. `┃` marks where the bar would be if you used the window evenly up to its reset: fill short of the marker means you are using it faster than the clock. The verdict on the right is `on pace ✓` when every window lasts to its reset, `empty in 7h21m` when, at the rate so far this window, one runs out first, `✗ exhausted now`, or `runway unknown` when a window's cycle is not known. Antigravity shows its Gemini and Claude/GPT groups separately, because each is its own budget.
 
 Quota refreshes while shown once the reading is five minutes old, sharing a recent reading from other sidebars. In details, `r` reads again; the last reading stays visible with `refreshing…` meanwhile. The daemon does every read, so the sidebar stays idle and `codex` or `agy` never appear as agents. When a read fails for a moment (timeout, network, rate limit, server error), the card keeps the windows that have not reset yet, marked `◐ stale` with the reason; a sign-out drops them. A number is never shown past its reset. A failed card says what to do, such as `run grok to renew it`. Provider failures are logged to `daemon.log` once each and never count as daemon faults.
 
