@@ -116,9 +116,9 @@ try:
     second = until(lambda rows: named(rows, "grok-second"))
     assert second["pane"] != question["pane"] and second["session_id"] != question["session_id"]
     assert second["cwd"] == question["cwd"]
-    # Prove '--help' arrives as a literal interactive task using native ACP history.
+    # The first '--' starts spawn's agent arguments. The second ends Grok's options.
     owned.append("grok-option")
-    call("spawn", "grok", "--in", "window", "--cwd", str(root / "scratch"), "--name", "grok-option", "--", "--help")
+    call("spawn", "grok", "--in", "window", "--cwd", str(root / "scratch"), "--name", "grok-option", "--", "--", "--help")
     option = until(lambda rows: named(rows, "grok-option"))
     def literal_prompt(_rows):
         for path in (home / "sessions").glob(f"*/{option['session_id']}/updates.jsonl"):
