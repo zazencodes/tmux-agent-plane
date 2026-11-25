@@ -5,6 +5,8 @@ before 1.0, a breaking change bumps the minor version.
 
 ## Unreleased
 
+## 0.8.1 - 2026-11-25
+
 ### Added
 
 - Hide selected quota budgets in your own sidebar with `sidebar.hidden_quota_groups`, such as `["agy:claude/gpt"]`. All budgets remain visible by default.
